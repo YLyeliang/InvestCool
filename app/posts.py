@@ -1,5 +1,5 @@
 import os
-from datetime import datetime
+from datetime import datetime, date as date_type
 
 import frontmatter
 import markdown
@@ -16,6 +16,8 @@ def _parse_post(filepath):
     date_raw = post.metadata.get("date", "2025-01-01")
     if isinstance(date_raw, datetime):
         date = date_raw
+    elif isinstance(date_raw, date_type):
+        date = datetime(date_raw.year, date_raw.month, date_raw.day)
     elif isinstance(date_raw, str):
         date = datetime.strptime(date_raw, "%Y-%m-%d")
     else:
