@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}{{ config.SITE_NAME }} — {{ config.SITE_DESCRIPTION }}{% endblock %}
+
+{% block content %}
+<section class="hero">
+    <h1>{{ config.SITE_DESCRIPTION }}</h1>
+    <p class="hero-sub">深度分析、策略解读、趋势洞察</p>
+</section>
+
+<section class="post-list">
+    {% if posts %}
+        {% for post in posts %}
+        <article class="post-card">
+            <div class="post-meta">
+                <time>{{ post.date_str }}</time>
+                {% for tag in post.tags %}
+                <span class="tag">{{ tag }}</span>
+                {% endfor %}
+            </div>
+            <h2><a href="{{ url_for('main.post_detail', slug=post.slug) }}">{{ post.title }}</a></h2>
+            {% if post.summary %}
+            <p class="post-summary">{{ post.summary }}</p>
+            {% endif %}
+        </article>
+        {% endfor %}
+
+        <nav class="pagination">
+            {% if has_prev %}
+            <a href="?page={{ page - 1 }}" class="btn">&larr; 上一页</a>
+            {% endif %}
+            {% if has_next %}
+            <a href="?page={{ page + 1 }}" class="btn">下一页 &rarr;</a>
+            {% endif %}
+        </nav>
+    {% else %}
+        <p class="empty-state">暂无文章，敬请期待。</p>
+    {% endif %}
+</section>
+{% endblock %}

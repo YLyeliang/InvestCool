@@ -1,0 +1,5 @@
+Flask
+Markdown
+Pygments
+python-frontmatter
+gunicorn
