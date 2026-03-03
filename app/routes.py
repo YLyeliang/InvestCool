@@ -1,5 +1,6 @@
 from flask import Blueprint, render_template, abort, request, current_app
 from app.posts import get_all_posts, get_post_by_slug
+from utils.stock_predict import fetch_market_data, analyze_market
 
 main_bp = Blueprint("main", __name__)
 
@@ -15,12 +16,18 @@ def index():
     paginated = posts[start:end]
     has_prev = page > 1
     has_next = end < total
+
+    # 运行盘前危机监控分析
+    market_data = fetch_market_data()
+    market_analysis = analyze_market(market_data)
+
     return render_template(
         "index.html",
         posts=paginated,
         page=page,
         has_prev=has_prev,
         has_next=has_next,
+        market_analysis=market_analysis
     )
 
 

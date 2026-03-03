@@ -14,6 +14,7 @@ import frontmatter
 import markdown
 from jinja2 import Environment, FileSystemLoader
 from datetime import date as date_type
+from utils.stock_predict import fetch_market_data, analyze_market
 
 BASE_DIR = os.path.abspath(os.path.dirname(__file__))
 CONTENT_DIR = os.path.join(BASE_DIR, "content")
@@ -81,6 +82,15 @@ def build():
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR), autoescape=True)
     env.globals["config"] = SITE_CONFIG
 
+    # 运行盘前危机监控分析
+    print("Fetching market analysis...")
+    market_data = fetch_market_data()
+    market_analysis = analyze_market(market_data)
+    if market_analysis:
+        print(f"Market status: {market_analysis['status_text']}")
+    else:
+        print("Warning: Market analysis failed.")
+
     posts = load_all_posts()
     per_page = SITE_CONFIG["POSTS_PER_PAGE"]
     total_pages = max(1, ceil(len(posts) / per_page))
@@ -96,6 +106,7 @@ def build():
             page=page_num,
             has_prev=page_num > 1,
             has_next=end < len(posts),
+            market_analysis=market_analysis
         )
 
         if page_num == 1:

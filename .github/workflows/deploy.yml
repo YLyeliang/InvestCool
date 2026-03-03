@@ -4,6 +4,8 @@ on:
   push:
     branches: [blog_static]
   workflow_dispatch:
+  schedule:
+    - cron: '*/30 13-21 * * 1-5' # 每30分钟运行一次，对应美股盘前及开盘初期 (UTC 13:30-21:00)
 
 permissions:
   contents: read

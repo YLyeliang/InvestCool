@@ -2,3 +2,5 @@ Jinja2
 Markdown
 Pygments
 python-frontmatter
+yfinance
+pandas

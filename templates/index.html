@@ -8,6 +8,35 @@
     <p class="hero-sub">深度分析、策略解读、趋势洞察</p>
 </section>
 
+{% if market_analysis %}
+<section class="market-alert {{ market_analysis.status }}">
+    <div class="alert-header">
+        <span class="alert-title">📊 盘前危机联动监控</span>
+        <span class="update-time">更新时间: {{ market_analysis.update_time }}</span>
+    </div>
+    <div class="alert-body">
+        <div class="metrics">
+            <div class="metric">
+                <span class="label">布伦特原油 (BZ=F)</span>
+                <span class="value">${{ market_analysis.oil_price }} <span class="change {% if market_analysis.oil_change > 0 %}red{% else %}green{% endif %}">{{ market_analysis.oil_change }}%</span></span>
+            </div>
+            <div class="metric">
+                <span class="label">纳指期货 (NQ=F) 贴水</span>
+                <span class="value">{{ market_analysis.nq_price }} <span class="change {% if market_analysis.nq_discount < 0 %}red{% else %}green{% endif %}">{{ market_analysis.nq_discount }}%</span></span>
+            </div>
+        </div>
+        <div class="status-msg">
+            <span class="status-badge {{ market_analysis.status }}">{{ market_analysis.status_text }}</span>
+            <ul class="recommendations">
+                {% for rec in market_analysis.recommendations %}
+                <li>{{ rec }}</li>
+                {% endfor %}
+            </ul>
+        </div>
+    </div>
+</section>
+{% endif %}
+
 <section class="post-list">
     {% if posts %}
         {% for post in posts %}
