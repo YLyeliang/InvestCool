@@ -31,6 +31,7 @@
 import { ref, onMounted, onUnmounted, watch } from 'vue';
 import * as echarts from 'echarts';
 
+const config = useRuntimeConfig();
 const chartRef = ref(null);
 let chartInstance = null;
 const metric = ref(null);
@@ -39,7 +40,7 @@ let refreshInterval = null;
 
 const fetchMetric = async () => {
   try {
-    const response = await fetch('http://localhost:5000/api/market-index');
+    const response = await fetch(`${config.public.apiBase}/market-index`);
     const data = await response.json();
     metric.value = data;
     updateChart(data.value);
@@ -157,9 +158,9 @@ onUnmounted(() => {
 .sentiment-gauge-container {
   background: var(--card-bg, #ffffff);
   border-radius: 12px;
-  padding: 1.5rem;
+  padding: 1rem 1.25rem;
   box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1.25rem;
   border: 1px solid var(--border-color, #e5e7eb);
 }
 
@@ -167,20 +168,20 @@ onUnmounted(() => {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 0.5rem;
 }
 
 .gauge-chart {
-  height: 220px;
+  height: 180px;
   width: 100%;
 }
 
 .gauge-details {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 0.75rem;
-  margin-top: 0.5rem;
-  padding-top: 1rem;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+  padding-top: 0.75rem;
   border-top: 1px dashed #e5e7eb;
 }
 

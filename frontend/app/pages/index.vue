@@ -38,35 +38,35 @@ const feedItems = computed(() => {
 <template>
   <div>
     <!-- Featured Deep Report: War Impact -->
-    <section class="card featured-report" style="border-top: 4px solid #ef4444; padding: 2.5rem;">
-      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1.5rem;">
-        <span style="background: #fee2e2; color: #ef4444; padding: 0.25rem 0.75rem; border-radius: 2rem; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;">深度专题</span>
-        <h2 style="font-size: 1.5rem; font-weight: 800; margin: 0;">炮火下的纳斯达克：历史冲突如何重塑科技市场？</h2>
+    <section class="card featured-report" style="border-top: 4px solid #ef4444; padding: 1.5rem;">
+      <div style="display: flex; align-items: center; gap: 0.75rem; margin-bottom: 1rem;">
+        <span style="background: #fee2e2; color: #ef4444; padding: 0.2rem 0.6rem; border-radius: 2rem; font-size: 0.7rem; font-weight: 700; text-transform: uppercase;">深度专题</span>
+        <h2 style="font-size: 1.25rem; font-weight: 800; margin: 0;">炮火下的纳斯达克：历史冲突如何重塑科技市场？</h2>
       </div>
 
-      <div style="margin-bottom: 2rem; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
+      <div style="margin-bottom: 1.5rem; border-radius: 0.75rem; overflow: hidden; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);">
         <img src="/nasdaq_war_impact.png" alt="战争对纳斯达克的影响分析图" style="width: 100%; display: block;" />
       </div>
 
-      <div class="report-content" style="line-height: 1.8; color: var(--text-primary);">
-        <p>在地缘政治动荡的年代，纳斯达克指数作为全球科技与创新的风向标，其表现往往比传统市场更加敏感。通过对过去 30 年间重大冲突的研究，我们发现了一些规律性的市场密码。</p>
+      <div class="report-content" style="line-height: 1.6; color: var(--text-primary);">
+        <p>在地缘政治动荡的年代，纳斯达克指数作为全球科技与创新的风向标，其表现往往比传统市场更加敏感。</p>
         
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1rem; margin: 2rem 0;">
-          <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 3px solid #3b82f6;">
-            <div style="font-weight: 700; color: #3b82f6; margin-bottom: 0.25rem;">阶段一：战前恐慌</div>
-            <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0;">市场最厌恶不确定性，纳指通常震荡下跌，资金撤向避险资产。</p>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 0.75rem; margin: 1.5rem 0;">
+          <div style="background: #f8fafc; padding: 0.75rem; border-radius: 0.5rem; border-left: 3px solid #3b82f6;">
+            <div style="font-weight: 700; color: #3b82f6; margin-bottom: 0.2rem; font-size: 0.9rem;">阶段一：战前恐慌</div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">市场最厌恶不确定性，纳指通常震荡下跌。</p>
           </div>
-          <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 3px solid #ef4444;">
-            <div style="font-weight: 700; color: #ef4444; margin-bottom: 0.25rem;">阶段二：开战寻底</div>
-            <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0;">冲突爆发瞬间往往伴随最后的恐慌抛售，形成阶段性底部。</p>
+          <div style="background: #f8fafc; padding: 0.75rem; border-radius: 0.5rem; border-left: 3px solid #ef4444;">
+            <div style="font-weight: 700; color: #ef4444; margin-bottom: 0.2rem; font-size: 0.9rem;">阶段二：开战寻底</div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">冲突爆发瞬间往往伴随最后的恐慌抛售。</p>
           </div>
-          <div style="background: #f8fafc; padding: 1rem; border-radius: 0.5rem; border-left: 3px solid #10b981;">
-            <div style="font-weight: 700; color: #10b981; margin-bottom: 0.25rem;">阶段三：回归基本面</div>
-            <p style="font-size: 0.875rem; color: var(--text-secondary); margin: 0;">一旦局势明朗，科技龙头的盈利能力将驱动指数强劲反弹。</p>
+          <div style="background: #f8fafc; padding: 0.75rem; border-radius: 0.5rem; border-left: 3px solid #10b981;">
+            <div style="font-weight: 700; color: #10b981; margin-bottom: 0.2rem; font-size: 0.9rem;">阶段三：回归基本面</div>
+            <p style="font-size: 0.8rem; color: var(--text-secondary); margin: 0;">局势明朗后，科技龙头将驱动强劲反弹。</p>
           </div>
         </div>
 
-        <h3 style="font-size: 1.125rem; font-weight: 700; margin-top: 1.5rem;">核心结论：</h3>
+        <h3 style="font-size: 1rem; font-weight: 700; margin-top: 1rem;">核心结论：</h3>
         <ul style="padding-left: 1.25rem; color: var(--text-secondary); font-size: 0.95rem;">
           <li style="margin-bottom: 0.5rem;"><strong>利率是核心：</strong> 战争若引发长效通胀导致加息（如2022年），对纳指是实质性利空；若仅为情绪波动，则反弹极快。</li>
           <li style="margin-bottom: 0.5rem;"><strong>行业分化：</strong> 网络安全（CrowdStrike等）与国防科技在冲突期间往往具有超额收益。</li>

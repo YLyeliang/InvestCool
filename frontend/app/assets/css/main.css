@@ -1,13 +1,13 @@
 :root {
-  --sidebar-width: 260px;
-  --right-panel-width: 300px;
+  --sidebar-width: 220px;
+  --right-panel-width: 260px;
   --bg-color: #f8fafc;
   --sidebar-bg: #ffffff;
   --text-primary: #1e293b;
   --text-secondary: #64748b;
   --accent-color: #3b82f6;
   --border-color: #e2e8f0;
-  --mobile-header-height: 60px;
+  --mobile-header-height: 54px;
 }
 
 body {
@@ -16,6 +16,7 @@ body {
   background-color: var(--bg-color);
   color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
+  font-size: 14px;
 }
 
 .app-container {
@@ -30,21 +31,21 @@ body {
   height: var(--mobile-header-height);
   background: white;
   border-bottom: 1px solid var(--border-color);
-  padding: 0 1.5rem;
+  padding: 0 1.25rem;
   align-items: center;
   justify-content: space-between;
   position: sticky;
   top: 0;
-  z-index: 1100; /* Higher than sidebar */
+  z-index: 1100;
 }
 
 .menu-toggle {
   background: none;
   border: none;
   color: var(--text-primary);
-  font-size: 1.5rem;
+  font-size: 1.25rem;
   cursor: pointer;
-  padding: 0.5rem;
+  padding: 0.4rem;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -54,7 +55,7 @@ body {
 .left-sidebar {
   background-color: var(--sidebar-bg);
   border-right: 1px solid var(--border-color);
-  padding: 2rem 1.5rem;
+  padding: 1.5rem 1rem;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -65,8 +66,8 @@ body {
 
 /* Main Feed (Center) */
 .main-feed {
-  padding: 2rem;
-  max-width: 900px;
+  padding: 1.5rem;
+  max-width: 800px;
   margin: 0 auto;
   width: 100%;
 }
@@ -75,7 +76,7 @@ body {
 .right-panel {
   background-color: var(--bg-color);
   border-left: 1px solid var(--border-color);
-  padding: 2rem 1.5rem;
+  padding: 1.5rem 1rem;
   position: sticky;
   top: 0;
   height: 100vh;
@@ -84,11 +85,11 @@ body {
 .nav-item {
   display: flex;
   align-items: center;
-  padding: 0.75rem 1rem;
+  padding: 0.6rem 0.8rem;
   color: var(--text-secondary);
   text-decoration: none;
   border-radius: 0.5rem;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.4rem;
   transition: all 0.2s;
   font-weight: 500;
 }
@@ -100,10 +101,10 @@ body {
 
 .card {
   background: white;
-  border-radius: 1rem;
+  border-radius: 0.75rem;
   border: 1px solid var(--border-color);
-  padding: 1.5rem;
-  margin-bottom: 1.5rem;
+  padding: 1.25rem;
+  margin-bottom: 1.25rem;
   transition: transform 0.2s, box-shadow 0.2s;
 }
 
@@ -148,11 +149,11 @@ body {
     left: 0;
     top: 0;
     bottom: 0;
-    width: 280px; /* Slightly wider for mobile tap targets */
+    width: 260px;
     transform: translateX(-100%);
     box-shadow: 10px 0 15px -3px rgba(0, 0, 0, 0.1);
-    background-color: #ffffff; /* Explicit background */
-    padding-top: calc(var(--mobile-header-height) + 1rem); /* Space for header */
+    background-color: #ffffff;
+    padding-top: calc(var(--mobile-header-height) + 1rem);
   }
 
   .left-sidebar.is-active {
@@ -160,7 +161,7 @@ body {
   }
 
   .main-feed {
-    padding: 1.5rem;
+    padding: 1.25rem;
   }
 
   .hide-mobile {

@@ -130,6 +130,43 @@ def get_market_index():
         return jsonify(metric.to_dict())
     return jsonify({"error": "Could not fetch market index"}), 500
 
+watchlist_cache = {
+    "data": None,
+    "last_update": None
+}
+
+@app.route('/api/watch-list', methods=['GET'])
+def get_watch_list():
+    global watchlist_cache
+    now = datetime.utcnow()
+    
+    if watchlist_cache["data"] and watchlist_cache["last_update"] and (now - watchlist_cache["last_update"]) < timedelta(minutes=10):
+        return jsonify(watchlist_cache["data"])
+
+    try:
+        tickers = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META"]
+        data = []
+        for symbol in tickers:
+            t = yf.Ticker(symbol)
+            info = t.fast_info
+            price = info.last_price
+            prev_close = info.previous_close
+            change = price - prev_close
+            pct_change = (change / prev_close) * 100 if prev_close else 0
+            
+            data.append({
+                "symbol": symbol,
+                "price": round(float(price), 2),
+                "change": round(float(change), 2),
+                "percent": round(float(pct_change), 2)
+            })
+        
+        watchlist_cache["data"] = data
+        watchlist_cache["last_update"] = now
+        return jsonify(data)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route('/api/analysis', methods=['GET'])
 def get_all_analysis():
     analyses = Analysis.query.order_by(Analysis.created_at.desc()).all()
@@ -170,12 +207,23 @@ if __name__ == '__main__':
             update_market_index()
             
         if not Analysis.query.first():
-            sample = Analysis(
-                title="2026 Tech Market Outlook",
-                summary="An analysis of AI infrastructure and semi-conductor trends for the coming year.",
-                content="Full analysis content goes here...",
-                category="Market Trends"
-            )
-            db.session.add(sample)
+            db.session.add(Analysis(
+                title="2026 算力基建展望：从芯片到液冷",
+                summary="随着 AI 模型规模的持续指数级增长，算力中心正面临前所未有的能效挑战。本文深入分析液冷技术与定制化 ASIC 芯片的结合前景。",
+                content="全方位解析 2026 年算力基建的核心驱动力...",
+                category="AI Infrastructure"
+            ))
+            db.session.add(Analysis(
+                title="降息周期下的科技股定价逻辑",
+                summary="当利率回归常态化，分红能力与现金流质量将取代纯粹的增长预期，成为纳斯达克 100 核心标的的新审美标准。",
+                content="详细探讨宏观利率对估值模型的影响...",
+                category="Macro Strategy"
+            ))
+            db.session.add(Analysis(
+                title="半导体周期的下半场：库存与替代",
+                summary="在经历了 2025 年的补库高峰后，2026 年的半导体市场将进入结构性分化。汽车电子与边缘计算将成为新的增长点。",
+                content="深度复盘半导体产业链的最新动态...",
+                category="Semiconductors"
+            ))
             db.session.commit()
     app.run(host='0.0.0.0', port=5000, debug=True)

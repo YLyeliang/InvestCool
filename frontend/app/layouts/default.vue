@@ -66,23 +66,23 @@ watch(() => route.path, () => {
 
     <!-- Right Panel: Widgets -->
     <aside class="right-panel">
+      <!-- Social Media QRCodes (Primary) -->
       <div class="card" style="padding: 1.25rem;">
-        <h3 style="font-size: 1rem; margin-bottom: 1rem;">热门分析</h3>
-        <ul style="list-style: none; padding: 0; font-size: 0.875rem;">
-          <li style="margin-bottom: 0.75rem; color: var(--text-secondary); display: flex; align-items: center;">
-            <Icon name="lucide:zap" style="margin-right: 0.5rem; color: #eab308;" /> AI 基础设施爆发增长
-          </li>
-          <li style="margin-bottom: 0.75rem; color: var(--text-secondary); display: flex; align-items: center;">
-            <Icon name="lucide:shield-check" style="margin-right: 0.5rem; color: #10b981;" /> 2026 加密货币监管趋势
-          </li>
-          <li style="margin-bottom: 0.75rem; color: var(--text-secondary); display: flex; align-items: center;">
-            <Icon name="lucide:wind" style="margin-right: 0.5rem; color: #3b82f6;" /> 能源板块战略转型
-          </li>
-          <li style="color: var(--text-secondary); display: flex; align-items: center;">
-            <Icon name="lucide:cpu" style="margin-right: 0.5rem; color: #ef4444;" /> 半导体周期深度解析
-          </li>
-        </ul>
+        <h3 style="font-size: 1rem; margin-bottom: 1rem;">关注我</h3>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; text-align: center;">
+          <div>
+            <img src="/images/qrcodes/qr1.jpg" alt="公众号" style="width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);" />
+            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.5rem;">公众号</div>
+          </div>
+          <div>
+            <img src="/images/qrcodes/qr2.jpg" alt="小红书" style="width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);" />
+            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.5rem;">小红书</div>
+          </div>
+        </div>
       </div>
+
+      <!-- Magnificent Seven Watchlist -->
+      <TickerWatchlist />
 
       <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; border-left: 4px solid var(--accent-color);">
         <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">每日交易锦报</h3>
@@ -92,12 +92,6 @@ watch(() => route.path, () => {
         <div style="margin-top: 1rem; font-size: 0.75rem; font-weight: 600; color: var(--accent-color);">
           —— 投资笔记 2026.03.12
         </div>
-      </div>
-
-      <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%); color: white;">
-        <h3 style="font-size: 1rem; margin-bottom: 0.5rem;">订阅更新</h3>
-        <p style="font-size: 0.875rem; opacity: 0.9; margin-bottom: 1rem;">第一时间获取最新的投资深度分析和技术实战指南。</p>
-        <button style="width: 100%; padding: 0.5rem; border-radius: 0.5rem; border: none; background: white; color: var(--accent-color); font-weight: 600; cursor: pointer;">立即订阅</button>
       </div>
     </aside>
   </div>
