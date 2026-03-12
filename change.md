@@ -23,6 +23,17 @@
     - 侧边栏新增“实用工具”栏目入口。
     - 精选系列中新增“AI 赋能投资”专题。
 
-## 4. 系统部署与构建
-- **重新构建**: 执行了 `npm run build` 生成了最新的生产环境产物。
-- **服务重启**: 重新启动了 Node.js 服务进程，确保所有源代码改动即时生效。
+## 5. 市场情绪仪表盘 (实现完成)
+- **后端模型与逻辑**: 
+    - 在 `backend/app/main.py` 中新增 `MarketMetric` 数据库模型。
+    - 实现了多因子加权算法：35% RSI(14) + 35% VIX 分位 + 15% 价格分位 + 15% 收益率分位。
+    - 新增 `GET /api/market-index` 接口，支持每 10 分钟自动刷新指数。
+- **前端可视化组件**:
+    - 在 `frontend/app/components` 目录下新建 `MarketSentimentGauge.vue`。
+    - 集成 **Apache ECharts**，采用半圆型仪表盘（Speedometer）视觉风格。
+    - 实现了颜色分区动态反馈（极度恐惧至极度贪婪）及底层因子数值显示。
+- **首页集成**:
+    - 在 `frontend/app/pages/index.vue` 中集成了仪表盘组件，作为市场全景图。
+- **依赖管理**:
+    - 后端引入 `pandas` 和 `yfinance` 进行金融数据处理。
+    - 前端引入 `echarts` 处理图形渲染。

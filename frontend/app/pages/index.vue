@@ -75,6 +75,11 @@ const feedItems = computed(() => {
       </div>
     </section>
 
+    <!-- Market Sentiment Index Gauge -->
+    <div style="margin: 3rem 0;">
+      <MarketSentimentGauge />
+    </div>
+
     <header style="margin: 4rem 0 2.5rem 0;">
       <h2 style="font-size: 1.875rem; font-weight: 700;">最新动态</h2>
       <p style="color: var(--text-secondary);">深度的技术洞察与市场趋势分析。</p>
