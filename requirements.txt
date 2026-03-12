@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlmodel
+yfinance
+pandas
+pydantic-settings
+python-jose[cryptography]
+passlib[bcrypt]
+python-multipart
