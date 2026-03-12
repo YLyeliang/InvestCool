@@ -1,7 +1,7 @@
 <template>
   <div class="tutorial-page">
-    <NuxtLink to="/" style="display: flex; align-items: center; color: var(--text-secondary); text-decoration: none; margin-bottom: 2rem;">
-      <Icon name="lucide:arrow-left" style="margin-right: 0.5rem;" /> Back to Feed
+    <NuxtLink to="/tutorials" style="display: flex; align-items: center; color: var(--text-secondary); text-decoration: none; margin-bottom: 2rem;">
+      <Icon name="lucide:arrow-left" style="margin-right: 0.5rem;" /> 返回教程列表
     </NuxtLink>
     
     <article class="prose">

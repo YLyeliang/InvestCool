@@ -32,8 +32,8 @@ const feedItems = computed(() => {
 <template>
   <div>
     <header style="margin-bottom: 2.5rem;">
-      <h2 style="font-size: 1.875rem; font-weight: 700;">Latest Feed</h2>
-      <p style="color: var(--text-secondary);">Insights into tech and markets.</p>
+      <h2 style="font-size: 1.875rem; font-weight: 700;">最新动态</h2>
+      <p style="color: var(--text-secondary);">深度的技术洞察与市场趋势分析。</p>
     </header>
 
     <div v-for="item in feedItems" :key="item.id" class="card">
@@ -46,10 +46,10 @@ const feedItems = computed(() => {
           backgroundColor: item.type === 'tutorial' ? '#dcfce7' : '#dbeafe',
           color: item.type === 'tutorial' ? '#166534' : '#1e40af'
         }">
-          {{ item.category }}
+          {{ item.category === 'Market Trends' ? '市场趋势' : item.category }}
         </span>
         <span style="font-size: 0.75rem; color: var(--text-secondary);">
-          {{ item.type === 'tutorial' ? 'Tutorial' : 'Analysis' }}
+          {{ item.type === 'tutorial' ? '技术教程' : '投资分析' }}
         </span>
       </div>
       
@@ -57,7 +57,7 @@ const feedItems = computed(() => {
       <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 1.5rem;">{{ item.summary }}</p>
       
       <NuxtLink :to="item.type === 'tutorial' ? item.id : `/analysis/${item.id}`" style="color: var(--accent-color); font-weight: 600; text-decoration: none; display: flex; align-items: center;">
-        Read more <Icon name="lucide:arrow-right" style="margin-left: 0.5rem; width: 1rem;" />
+        阅读全文 <Icon name="lucide:arrow-right" style="margin-left: 0.5rem; width: 1rem;" />
       </NuxtLink>
     </div>
   </div>
