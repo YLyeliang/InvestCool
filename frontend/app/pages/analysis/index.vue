@@ -4,24 +4,36 @@ const config = useRuntimeConfig()
 // Fetch Investment Analysis from Backend
 const { data: analyses } = await useFetch(`${config.public.apiBase}/analysis`)
 
-// NASDAQ Index Simulation (Real-time update every minute)
-const nasdaqIndex = ref(18235.45)
-const nasdaqChange = ref(125.30)
-const nasdaqPercent = ref(0.69)
-const lastUpdate = ref(new Date().toLocaleTimeString())
+// NASDAQ 100 Index Data Fetching
+const nasdaqIndex = ref(0)
+const nasdaqChange = ref(0)
+const nasdaqPercent = ref(0)
+const lastUpdate = ref('正在加载...')
+const isFetching = ref(false)
 
-const updateNasdaq = () => {
-  // Simulate minor fluctuations
-  const fluctuation = (Math.random() - 0.5) * 10
-  nasdaqIndex.value += fluctuation
-  nasdaqChange.value += fluctuation
-  nasdaqPercent.value = (nasdaqChange.value / (nasdaqIndex.value - nasdaqChange.value)) * 100
-  lastUpdate.value = new Date().toLocaleTimeString()
+const fetchNasdaqData = async () => {
+  isFetching.value = true
+  try {
+    // Using a timestamp to prevent caching
+    const data = await $fetch(`${config.public.apiBase}/nasdaq?t=${Date.now()}`)
+    if (data) {
+      nasdaqIndex.value = (data as any).index
+      nasdaqChange.value = (data as any).change
+      nasdaqPercent.value = (data as any).percent
+      lastUpdate.value = (data as any).last_update
+    }
+  } catch (e) {
+    console.error('Failed to fetch NASDAQ data', e)
+  } finally {
+    // Smooth transition
+    setTimeout(() => { isFetching.value = false }, 800)
+  }
 }
 
 let timer: any = null
 onMounted(() => {
-  timer = setInterval(updateNasdaq, 60000) // Update every minute
+  fetchNasdaqData()
+  timer = setInterval(fetchNasdaqData, 60000) // Update every minute
 })
 
 onUnmounted(() => {
@@ -43,19 +55,25 @@ onUnmounted(() => {
       </div>
       
       <div style="position: relative; z-index: 1;">
-        <div style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 0.5rem;">NASDAQ Composite Index</div>
+        <div style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 0.5rem;">NASDAQ 100 Index (NDX)</div>
         <div style="display: flex; align-items: baseline; gap: 1.5rem;">
-          <span style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace;">
+          <span style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; transition: opacity 0.3s;" :style="{ opacity: isFetching ? 0.5 : 1 }">
             {{ nasdaqIndex.toFixed(2) }}
           </span>
-          <span :style="{ color: nasdaqChange >= 0 ? '#4ade80' : '#f87171', fontWeight: '700', fontSize: '1.25rem' }">
+          <span :style="{ color: nasdaqChange >= 0 ? '#4ade80' : '#f87171', fontWeight: '700', fontSize: '1.25rem', opacity: isFetching ? 0.5 : 1 }" style="transition: opacity 0.3s;">
             {{ nasdaqChange >= 0 ? '+' : '' }}{{ nasdaqChange.toFixed(2) }} 
             ({{ nasdaqPercent.toFixed(2) }}%)
           </span>
         </div>
-        <div style="margin-top: 1.5rem; font-size: 0.75rem; opacity: 0.5; display: flex; align-items: center;">
-          <Icon name="lucide:clock" style="margin-right: 0.4rem; width: 0.8rem;" />
-          最后更新: {{ lastUpdate }} (每分钟自动刷新)
+        <div style="margin-top: 1.5rem; font-size: 0.75rem; opacity: 0.5; display: flex; align-items: center; justify-content: space-between;">
+          <div style="display: flex; align-items: center;">
+            <Icon name="lucide:clock" style="margin-right: 0.4rem; width: 0.8rem;" />
+            最后更新: {{ lastUpdate }}
+          </div>
+          <div style="display: flex; align-items: center; cursor: pointer; user-select: none;" @click="fetchNasdaqData">
+            <Icon name="lucide:refresh-cw" style="margin-right: 0.4rem; width: 0.8rem;" :class="{ 'spin-anim': isFetching }" />
+            {{ isFetching ? '正在同步行情...' : '点击强制刷新' }}
+          </div>
         </div>
       </div>
     </div>
@@ -77,3 +95,13 @@ onUnmounted(() => {
     </div>
   </div>
 </template>
+
+<style scoped>
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+.spin-anim {
+  animation: spin 1s linear infinite;
+}
+</style>

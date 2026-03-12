@@ -2,6 +2,7 @@ from flask import Flask, jsonify
 from flask_sqlalchemy import SQLAlchemy
 from flask_cors import CORS
 import os
+import yfinance as yf
 
 app = Flask(__name__)
 CORS(app)
@@ -42,6 +43,50 @@ def get_all_analysis():
 def get_analysis(id):
     analysis = Analysis.query.get_or_404(id)
     return jsonify(analysis.to_dict())
+
+@app.route('/api/nasdaq', methods=['GET'])
+def get_nasdaq_data():
+    try:
+        print("Fetching NASDAQ 100 data...")
+        ticker = yf.Ticker("^NDX")
+        # Use 1d period and 1m interval for actual intraday price
+        data = ticker.history(period="1d", interval="1m")
+        
+        if not data.empty:
+            current_price = data['Close'].iloc[-1]
+            # To get daily change, we might still need previous close
+            # Let's get fast_info which is more reliable for current session
+            info = ticker.fast_info
+            
+            price = current_price if current_price else info.last_price
+            prev_close = info.previous_close
+            change = price - prev_close
+            percent_change = (change / prev_close) * 100 if prev_close else 0
+            
+            result = {
+                "index": round(float(price), 2),
+                "change": round(float(change), 2),
+                "percent": round(float(percent_change), 2),
+                "last_update": data.index[-1].strftime("%H:%M:%S")
+            }
+            print(f"Data fetched: {result}")
+            return jsonify(result)
+        else:
+            print("No intraday data, falling back to fast_info")
+            info = ticker.fast_info
+            price = info.last_price
+            prev_close = info.previous_close
+            change = price - prev_close
+            percent_change = (change / prev_close) * 100 if prev_close else 0
+            return jsonify({
+                "index": round(float(price), 2),
+                "change": round(float(change), 2),
+                "percent": round(float(percent_change), 2),
+                "last_update": "Real-time"
+            })
+    except Exception as e:
+        print(f"Error fetching NASDAQ data: {e}")
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/health', methods=['GET'])
 def health_check():

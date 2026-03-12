@@ -1,9 +1,38 @@
+<script setup lang="ts">
+const isMobileMenuOpen = ref(false)
+
+const toggleMobileMenu = () => {
+  isMobileMenuOpen.value = !isMobileMenuOpen.value
+}
+
+// Close menu when route changes
+const route = useRoute()
+watch(() => route.path, () => {
+  isMobileMenuOpen.value = false
+})
+</script>
+
 <template>
-  <div class="app-container">
+  <div class="app-container" :class="{ 'menu-open': isMobileMenuOpen }">
+    <!-- Mobile Header -->
+    <header class="mobile-header">
+      <NuxtLink to="/" class="logo-link">
+        <h1 style="font-size: 1.25rem; font-weight: 800; color: var(--accent-color); margin: 0;">InvestCool</h1>
+      </NuxtLink>
+      <button class="menu-toggle" @click="toggleMobileMenu">
+        <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" />
+      </button>
+    </header>
+
+    <!-- Overlay for mobile -->
+    <div v-if="isMobileMenuOpen" class="menu-overlay" @click="toggleMobileMenu"></div>
+
     <!-- Left Sidebar: Navigation -->
-    <aside class="left-sidebar">
-      <div class="logo">
-        <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--accent-color); margin-bottom: 2rem;">InvestCool</h1>
+    <aside class="left-sidebar" :class="{ 'is-active': isMobileMenuOpen }">
+      <div class="logo hide-mobile">
+        <NuxtLink to="/" class="logo-link">
+          <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--accent-color); margin-bottom: 2rem;">InvestCool <small style="font-size: 0.6rem; vertical-align: middle; opacity: 0.5;">v2.0-API</small></h1>
+        </NuxtLink>
       </div>
       
       <nav>
@@ -55,7 +84,6 @@
         </ul>
       </div>
 
-      <!-- Brainstormed Content: Trading Wisdom -->
       <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; border-left: 4px solid var(--accent-color);">
         <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">每日交易锦报</h3>
         <p style="font-size: 0.875rem; font-style: italic; color: var(--text-secondary); line-height: 1.5;">
@@ -76,7 +104,8 @@
 </template>
 
 <style scoped>
-.logo h1 {
-  cursor: pointer;
+.logo-link {
+  text-decoration: none;
+  display: block;
 }
 </style>

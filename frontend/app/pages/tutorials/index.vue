@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const { data: tutorials } = await useAsyncData('tutorials-list', () => queryContent('/tutorials').find())
+const { data: tutorials } = await useAsyncData('tutorials-list', () => queryCollection('tutorials').all())
 </script>
 
 <template>
