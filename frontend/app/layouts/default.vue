@@ -22,7 +22,7 @@ watch(() => route.path, () => {
       <NuxtLink to="/" class="logo-link">
         <h1 style="font-size: 1.25rem; font-weight: 800; color: var(--accent-color); margin: 0;">InvestCool</h1>
       </NuxtLink>
-      <div style="width: 2.5rem;"></div> <!-- Placeholder to balance the left button for centering logo -->
+      <div style="width: 2.5rem;"></div> <!-- Placeholder to balance the left button -->
     </header>
 
     <!-- Overlay for mobile -->
@@ -58,6 +58,10 @@ watch(() => route.path, () => {
         <NuxtLink to="/series/macro" class="nav-item">全球宏观观察</NuxtLink>
         <NuxtLink to="/series/ai" class="nav-item">AI 赋能投资</NuxtLink>
       </div>
+
+      <div style="margin-top: auto; padding-top: 2rem;">
+        <ThemeToggle />
+      </div>
     </aside>
 
     <!-- Main Content: Feed -->
@@ -85,6 +89,12 @@ watch(() => route.path, () => {
       <!-- Magnificent Seven Watchlist -->
       <TickerWatchlist />
 
+      <!-- Sentiment Trend Chart -->
+      <SentimentTrendChart />
+
+      <!-- Global Macro Assets -->
+      <MacroAssetPanel />
+
       <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; border-left: 4px solid var(--accent-color);">
         <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">每日交易锦报</h3>
         <p style="font-size: 0.875rem; font-style: italic; color: var(--text-secondary); line-height: 1.5;">
@@ -95,6 +105,26 @@ watch(() => route.path, () => {
         </div>
       </div>
     </aside>
+
+    <!-- Mobile Tab Bar Navigation -->
+    <nav class="mobile-tab-bar">
+      <NuxtLink to="/" class="tab-item">
+        <Icon name="lucide:home" class="tab-icon" />
+        <span class="tab-label">首页</span>
+      </NuxtLink>
+      <NuxtLink to="/analysis" class="tab-item">
+        <Icon name="lucide:trending-up" class="tab-icon" />
+        <span class="tab-label">分析</span>
+      </NuxtLink>
+      <NuxtLink to="/tools" class="tab-item">
+        <Icon name="lucide:wrench" class="tab-icon" />
+        <span class="tab-label">工具</span>
+      </NuxtLink>
+      <NuxtLink to="/admin" class="tab-item">
+        <Icon name="lucide:user" class="tab-icon" />
+        <span class="tab-label">管理</span>
+      </NuxtLink>
+    </nav>
   </div>
 </template>
 

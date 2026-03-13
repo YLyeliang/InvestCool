@@ -1,107 +1,215 @@
 <script setup lang="ts">
 const config = useRuntimeConfig()
+const { data: allArticles } = await useFetch(`${config.public.apiBase}/analysis`)
 
-// Fetch Investment Analysis from Backend
-const { data: analyses } = await useFetch(`${config.public.apiBase}/analysis`)
+const selectedCategory = ref('All')
+const categories = ['All', 'Market Trends', 'AI Infrastructure', 'Macro Strategy', 'Semiconductors']
 
-// NASDAQ 100 Index Data Fetching
-const nasdaqIndex = ref(0)
-const nasdaqChange = ref(0)
-const nasdaqPercent = ref(0)
-const lastUpdate = ref('正在加载...')
-const isFetching = ref(false)
+const filteredArticles = computed(() => {
+  if (!allArticles.value) return []
+  if (selectedCategory.value === 'All') return allArticles.value as any[]
+  return (allArticles.value as any[]).filter(a => a.category === selectedCategory.value)
+})
 
-const fetchNasdaqData = async () => {
-  isFetching.value = true
-  try {
-    // Using a timestamp to prevent caching
-    const data = await $fetch(`${config.public.apiBase}/nasdaq?t=${Date.now()}`)
-    if (data) {
-      nasdaqIndex.value = (data as any).index
-      nasdaqChange.value = (data as any).change
-      nasdaqPercent.value = (data as any).percent
-      lastUpdate.value = (data as any).last_update
-    }
-  } catch (e) {
-    console.error('Failed to fetch NASDAQ data', e)
-  } finally {
-    // Smooth transition
-    setTimeout(() => { isFetching.value = false }, 800)
+const getCategoryLabel = (cat: string) => {
+  const map: any = {
+    'Market Trends': '市场趋势',
+    'AI Infrastructure': 'AI 基础设施',
+    'Macro Strategy': '宏观策略',
+    'Semiconductors': '半导体'
   }
+  return map[cat] || cat
 }
 
-let timer: any = null
-onMounted(() => {
-  fetchNasdaqData()
-  timer = setInterval(fetchNasdaqData, 60000) // Update every minute
-})
-
-onUnmounted(() => {
-  if (timer) clearInterval(timer)
-})
+const formatDate = (dateStr: string) => {
+  return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
+}
 </script>
 
 <template>
-  <div>
-    <header style="margin-bottom: 2.5rem;">
-      <h2 style="font-size: 1.875rem; font-weight: 700;">投资分析</h2>
-      <p style="color: var(--text-secondary);">专业的市场研究与指数跟踪。</p>
+  <div class="analysis-container">
+    <header class="page-header">
+      <h2 class="text-3xl font-black">投资分析</h2>
+      <p class="text-secondary">透过噪音，捕捉科技与资本的长期共振。</p>
+      
+      <!-- Category Filter -->
+      <div class="filter-bar">
+        <button 
+          v-for="cat in categories" 
+          :key="cat"
+          class="filter-btn"
+          :class="{ active: selectedCategory === cat }"
+          @click="selectedCategory = cat"
+        >
+          {{ cat === 'All' ? '全部' : getCategoryLabel(cat) }}
+        </button>
+      </div>
     </header>
 
-    <!-- NASDAQ Tracker Widget -->
-    <div class="card" style="background: #0f172a; color: white; border: none; padding: 2rem; position: relative; overflow: hidden;">
-      <div style="position: absolute; right: -20px; top: -20px; opacity: 0.1;">
-        <Icon name="lucide:trending-up" style="width: 150px; height: 150px;" />
-      </div>
-      
-      <div style="position: relative; z-index: 1;">
-        <div style="font-size: 0.875rem; text-transform: uppercase; letter-spacing: 0.1em; opacity: 0.7; margin-bottom: 0.5rem;">NASDAQ 100 Index (NDX)</div>
-        <div style="display: flex; align-items: baseline; gap: 1.5rem;">
-          <span style="font-size: 2.5rem; font-weight: 800; font-family: 'JetBrains Mono', monospace; transition: opacity 0.3s;" :style="{ opacity: isFetching ? 0.5 : 1 }">
-            {{ nasdaqIndex.toFixed(2) }}
-          </span>
-          <span :style="{ color: nasdaqChange >= 0 ? '#4ade80' : '#f87171', fontWeight: '700', fontSize: '1.25rem', opacity: isFetching ? 0.5 : 1 }" style="transition: opacity 0.3s;">
-            {{ nasdaqChange >= 0 ? '+' : '' }}{{ nasdaqChange.toFixed(2) }} 
-            ({{ nasdaqPercent.toFixed(2) }}%)
-          </span>
+    <div class="analysis-grid">
+      <NuxtLink 
+        v-for="article in filteredArticles" 
+        :key="article.id" 
+        :to="`/analysis/${article.id}`"
+        class="analysis-card"
+      >
+        <div class="card-meta">
+          <span class="card-category">{{ getCategoryLabel(article.category) }}</span>
+          <span class="card-date">{{ formatDate(article.created_at) }}</span>
         </div>
-        <div style="margin-top: 1.5rem; font-size: 0.75rem; opacity: 0.5; display: flex; align-items: center; justify-content: space-between;">
-          <div style="display: flex; align-items: center;">
-            <Icon name="lucide:clock" style="margin-right: 0.4rem; width: 0.8rem;" />
-            最后更新: {{ lastUpdate }}
-          </div>
-          <div style="display: flex; align-items: center; cursor: pointer; user-select: none;" @click="fetchNasdaqData">
-            <Icon name="lucide:refresh-cw" style="margin-right: 0.4rem; width: 0.8rem;" :class="{ 'spin-anim': isFetching }" />
-            {{ isFetching ? '正在同步行情...' : '点击强制刷新' }}
-          </div>
+        <h3 class="card-title">{{ article.title }}</h3>
+        <p class="card-summary">{{ article.summary }}</p>
+        <div class="card-footer">
+          <span class="read-more">阅读全文</span>
+          <Icon name="lucide:chevron-right" class="footer-icon" />
         </div>
-      </div>
+      </NuxtLink>
     </div>
 
-    <div style="margin-top: 3rem;">
-      <h3 style="font-size: 1.25rem; margin-bottom: 1.5rem; font-weight: 700;">深度报告</h3>
-      <div v-for="item in analyses" :key="item.id" class="card">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1rem;">
-          <span style="padding: 0.25rem 0.75rem; borderRadius: 1rem; fontSize: 0.75rem; fontWeight: '600'; backgroundColor: '#dbeafe'; color: '#1e40af';">
-            {{ item.category === 'Market Trends' ? '市场趋势' : item.category }}
-          </span>
-        </div>
-        <h3 style="font-size: 1.25rem; margin-bottom: 0.75rem; font-weight: 700;">{{ item.title }}</h3>
-        <p style="color: var(--text-secondary); line-height: 1.6; margin-bottom: 1.5rem;">{{ item.summary }}</p>
-        <NuxtLink :to="`/analysis/${item.id}`" style="color: var(--accent-color); font-weight: 600; text-decoration: none; display: flex; align-items: center;">
-          阅读报告 <Icon name="lucide:arrow-right" style="margin-left: 0.5rem; width: 1rem;" />
-        </NuxtLink>
-      </div>
+    <div v-if="filteredArticles.length === 0" class="empty-state">
+      <Icon name="lucide:search-x" style="font-size: 3rem; opacity: 0.2;" />
+      <p>该分类下暂无文章</p>
     </div>
   </div>
 </template>
 
 <style scoped>
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+.analysis-container {
+  padding-bottom: 4rem;
 }
-.spin-anim {
-  animation: spin 1s linear infinite;
+
+.page-header {
+  margin-bottom: 3rem;
+}
+
+.text-secondary {
+  color: var(--text-secondary);
+  margin-top: 0.5rem;
+}
+
+.filter-bar {
+  display: flex;
+  gap: 0.75rem;
+  margin-top: 2rem;
+  flex-wrap: wrap;
+}
+
+.filter-btn {
+  padding: 0.5rem 1.25rem;
+  border-radius: 2rem;
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
+  color: var(--text-secondary);
+  font-size: 0.875rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.filter-btn:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.filter-btn.active {
+  background: var(--accent-color);
+  color: white;
+  border-color: var(--accent-color);
+}
+
+.analysis-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
+  gap: 1.5rem;
+}
+
+.analysis-card {
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: 1rem;
+  padding: 1.5rem;
+  text-decoration: none;
+  color: inherit;
+  display: flex;
+  flex-direction: column;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.analysis-card:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.1);
+  border-color: var(--accent-color);
+}
+
+.card-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.card-category {
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--accent-color);
+  background: var(--hover-bg);
+  padding: 0.25rem 0.6rem;
+  border-radius: 0.4rem;
+}
+
+.card-date {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+}
+
+.card-title {
+  font-size: 1.25rem;
+  font-weight: 800;
+  line-height: 1.4;
+  margin-bottom: 0.75rem;
+  color: var(--text-primary);
+}
+
+.card-summary {
+  font-size: 0.9rem;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  margin-bottom: 1.5rem;
+  flex-grow: 1;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-weight: 700;
+  font-size: 0.875rem;
+  color: var(--accent-color);
+}
+
+.footer-icon {
+  width: 1rem;
+  transition: transform 0.2s;
+}
+
+.analysis-card:hover .footer-icon {
+  transform: translateX(4px);
+}
+
+.empty-state {
+  text-align: center;
+  padding: 5rem 0;
+  color: var(--text-secondary);
+}
+
+@media (max-width: 640px) {
+  .analysis-grid {
+    grid-template-columns: 1fr;
+  }
 }
 </style>

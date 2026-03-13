@@ -45,6 +45,7 @@ let chartInstance = null;
 const metric = ref(null);
 const pending = ref(true);
 let refreshInterval = null;
+let themeObserver = null;
 
 const fetchMetric = async () => {
   try {
@@ -53,7 +54,6 @@ const fetchMetric = async () => {
       const data = await response.json();
       metric.value = data;
       pending.value = false;
-      // Wait for next tick to ensure v-show has updated
       setTimeout(() => updateChart(data.value), 0);
     }
   } catch (e) {
@@ -62,10 +62,16 @@ const fetchMetric = async () => {
 };
 
 const updateChart = (value) => {
-  if (!chartInstance && chartRef.value) {
+  if (chartInstance) {
+    chartInstance.dispose();
+  }
+  if (chartRef.value) {
     chartInstance = echarts.init(chartRef.value);
   }
   if (!chartInstance) return;
+  
+  const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+  const labelColor = isDark ? '#94a3b8' : '#64748b';
   
   const option = {
     series: [
@@ -82,11 +88,11 @@ const updateChart = (value) => {
           lineStyle: {
             width: 8,
             color: [
-              [0.3, '#10b981'], // 深绿
-              [0.5, '#34d399'], // 浅绿
-              [0.7, '#fbbf24'], // 黄色
-              [0.85, '#f97316'], // 橙色
-              [1, '#ef4444']    // 亮红
+              [0.3, '#10b981'],
+              [0.5, '#34d399'],
+              [0.7, '#fbbf24'],
+              [0.85, '#f97316'],
+              [1, '#ef4444']
             ]
           }
         },
@@ -100,12 +106,12 @@ const updateChart = (value) => {
         axisTick: { show: false },
         splitLine: { show: false },
         axisLabel: {
-          color: '#94a3b8',
+          color: labelColor,
           fontSize: 10,
           distance: -45,
           formatter: function (v) {
-            if (value === 15) return '极度恐惧';
-            if (value === 85) return '极度贪婪';
+            if (v === 15) return '极度恐惧';
+            if (v === 85) return '极度贪婪';
             return '';
           }
         },
@@ -128,18 +134,26 @@ const updateChart = (value) => {
 onMounted(() => {
   fetchMetric();
   refreshInterval = setInterval(fetchMetric, 10 * 60 * 1000);
+  
+  // Watch for theme changes to refresh chart colors
+  themeObserver = new MutationObserver(() => {
+    if (metric.value) updateChart(metric.value.value);
+  });
+  themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  
   window.addEventListener('resize', () => chartInstance?.resize());
 });
 
 onUnmounted(() => {
   if (refreshInterval) clearInterval(refreshInterval);
+  if (themeObserver) themeObserver.disconnect();
   chartInstance?.dispose();
 });
 </script>
 
 <style scoped>
 .sentiment-gauge-container {
-  background: white;
+  background: var(--card-bg);
   border-radius: 12px;
   padding: 1rem;
   box-shadow: 0 1px 3px rgba(0,0,0,0.1);
@@ -153,10 +167,11 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 0.25rem;
+  color: var(--text-primary);
 }
 
 .gauge-chart {
-  height: 140px; /* 调整高度以适配半圆 */
+  height: 140px;
   width: 100%;
 }
 
@@ -169,11 +184,11 @@ onUnmounted(() => {
 
 .gauge-details {
   display: grid;
-  grid-template-columns: repeat(4, 1fr); /* 改为单行四个，更紧凑 */
+  grid-template-columns: repeat(4, 1fr);
   gap: 0.25rem;
   margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px dashed #f1f5f9;
+  border-top: 1px dashed var(--border-color);
 }
 
 .detail-item {
@@ -184,13 +199,13 @@ onUnmounted(() => {
 
 .detail-item .label {
   font-size: 0.65rem;
-  color: #94a3b8;
+  color: var(--text-secondary);
   margin-bottom: 0.1rem;
 }
 
 .detail-item .value {
   font-size: 0.75rem;
   font-weight: 700;
-  color: #475569;
+  color: var(--text-primary);
 }
 </style>
