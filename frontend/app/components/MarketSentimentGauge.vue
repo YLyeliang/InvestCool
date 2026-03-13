@@ -1,34 +1,42 @@
 <template>
   <div class="sentiment-gauge-container">
     <div class="gauge-header">
-      <h3 class="text-lg font-bold">市场情绪指数</h3>
-      <span class="text-xs text-gray-500">每10分钟自动更新</span>
+      <h3 class="text-base font-bold">市场情绪指数</h3>
+      <span class="text-[10px] text-gray-400">10min 自动刷新</span>
     </div>
-    <div ref="chartRef" class="gauge-chart"></div>
-    <div v-if="metric" class="gauge-details">
+    
+    <!-- Skeleton while loading -->
+    <div v-if="pending" class="loading-wrapper">
+      <Skeleton width="140px" height="140px" radius="50%" />
+    </div>
+
+    <!-- Chart Container -->
+    <div ref="chartRef" v-show="!pending" class="gauge-chart"></div>
+
+    <!-- Bottom Details -->
+    <div v-if="metric && !pending" class="gauge-details">
       <div class="detail-item">
-        <span class="label">RSI(14):</span>
+        <span class="label">RSI:</span>
         <span class="value">{{ metric.details.rsi }}</span>
       </div>
       <div class="detail-item">
-        <span class="label">恐慌分:</span>
+        <span class="label">VIX:</span>
         <span class="value">{{ metric.details.vix }}</span>
       </div>
       <div class="detail-item">
-        <span class="label">估值分:</span>
+        <span class="label">估值:</span>
         <span class="value">{{ metric.details.valuation }}</span>
       </div>
       <div class="detail-item">
-        <span class="label">宏观分:</span>
+        <span class="label">宏观:</span>
         <span class="value">{{ metric.details.macro }}</span>
       </div>
     </div>
-    <div v-else-if="pending" class="loading">加载指数中...</div>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted, watch } from 'vue';
+import { ref, onMounted, onUnmounted } from 'vue';
 import * as echarts from 'echarts';
 
 const config = useRuntimeConfig();
@@ -41,38 +49,44 @@ let refreshInterval = null;
 const fetchMetric = async () => {
   try {
     const response = await fetch(`${config.public.apiBase}/market-index`);
-    const data = await response.json();
-    metric.value = data;
-    updateChart(data.value);
-    pending.value = false;
+    if (response.status === 200) {
+      const data = await response.json();
+      metric.value = data;
+      pending.value = false;
+      // Wait for next tick to ensure v-show has updated
+      setTimeout(() => updateChart(data.value), 0);
+    }
   } catch (e) {
     console.error('Failed to fetch market index:', e);
   }
 };
 
 const updateChart = (value) => {
+  if (!chartInstance && chartRef.value) {
+    chartInstance = echarts.init(chartRef.value);
+  }
   if (!chartInstance) return;
   
   const option = {
     series: [
       {
         type: 'gauge',
-        startAngle: 180,
-        endAngle: 0,
-        center: ['50%', '75%'],
-        radius: '100%',
+        startAngle: 190,
+        endAngle: -10,
+        center: ['50%', '65%'],
+        radius: '95%',
         min: 0,
         max: 100,
         splitNumber: 5,
         axisLine: {
           lineStyle: {
-            width: 10,
+            width: 8,
             color: [
-              [0.3, '#10b981'], // 深绿 - 极度恐惧
-              [0.5, '#34d399'], // 浅绿 - 恐惧
-              [0.7, '#fbbf24'], // 黄色 - 中性
-              [0.85, '#f97316'], // 橙色 - 贪婪
-              [1, '#ef4444']    // 亮红 - 极度贪婪
+              [0.3, '#10b981'], // 深绿
+              [0.5, '#34d399'], // 浅绿
+              [0.7, '#fbbf24'], // 黄色
+              [0.85, '#f97316'], // 橙色
+              [1, '#ef4444']    // 亮红
             ]
           }
         },
@@ -80,57 +94,30 @@ const updateChart = (value) => {
           icon: 'path://M12.8,0.7l12,10.1c0.4,0.3,0.4,0.9,0.1,1.2c-0.3,0.4-0.9,0.4-1.2,0.1L12,2.3L0.3,12.1c-0.4,0.3-0.9,0.3-1.2-0.1c-0.3-0.4-0.3-0.9,0.1-1.2L11.2,0.7C11.7,0.3,12.3,0.3,12.8,0.7z',
           length: '12%',
           width: 6,
-          offsetCenter: [0, '-60%'],
-          itemStyle: {
-            color: 'auto'
-          }
+          offsetCenter: [0, '-55%'],
+          itemStyle: { color: 'auto' }
         },
-        axisTick: {
-          length: 12,
-          lineStyle: {
-            color: 'auto',
-            width: 2
-          }
-        },
-        splitLine: {
-          length: 20,
-          lineStyle: {
-            color: 'auto',
-            width: 5
-          }
-        },
+        axisTick: { show: false },
+        splitLine: { show: false },
         axisLabel: {
-          color: '#464646',
-          fontSize: 12,
-          distance: -60,
-          formatter: function (value) {
+          color: '#94a3b8',
+          fontSize: 10,
+          distance: -45,
+          formatter: function (v) {
             if (value === 15) return '极度恐惧';
-            if (value === 40) return '恐惧';
-            if (value === 60) return '中性';
-            if (value === 77) return '贪婪';
-            if (value === 92) return '极度贪婪';
+            if (value === 85) return '极度贪婪';
             return '';
           }
         },
-        title: {
-          offsetCenter: [0, '-20%'],
-          fontSize: 14
-        },
         detail: {
-          fontSize: 24,
-          offsetCenter: [0, '0%'],
+          fontSize: 22,
+          offsetCenter: [0, '15%'],
           valueAnimation: true,
-          formatter: function (value) {
-            return Math.round(value);
-          },
-          color: 'auto'
+          formatter: '{value}',
+          color: 'auto',
+          fontWeight: '800'
         },
-        data: [
-          {
-            value: value,
-            name: '综合评分'
-          }
-        ]
+        data: [{ value: value }]
       }
     ]
   };
@@ -139,12 +126,8 @@ const updateChart = (value) => {
 };
 
 onMounted(() => {
-  chartInstance = echarts.init(chartRef.value);
   fetchMetric();
-  
-  // Set interval to refresh every 10 minutes
   refreshInterval = setInterval(fetchMetric, 10 * 60 * 1000);
-  
   window.addEventListener('resize', () => chartInstance?.resize());
 });
 
@@ -156,55 +139,58 @@ onUnmounted(() => {
 
 <style scoped>
 .sentiment-gauge-container {
-  background: var(--card-bg, #ffffff);
+  background: white;
   border-radius: 12px;
-  padding: 1rem 1.25rem;
-  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
-  margin-bottom: 1.25rem;
-  border: 1px solid var(--border-color, #e5e7eb);
+  padding: 1rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  border: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
 }
 
 .gauge-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 0.5rem;
+  margin-bottom: 0.25rem;
 }
 
 .gauge-chart {
-  height: 180px;
+  height: 140px; /* 调整高度以适配半圆 */
   width: 100%;
+}
+
+.loading-wrapper {
+  height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .gauge-details {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 0.5rem;
-  margin-top: 0.25rem;
+  grid-template-columns: repeat(4, 1fr); /* 改为单行四个，更紧凑 */
+  gap: 0.25rem;
+  margin-top: 0.5rem;
   padding-top: 0.75rem;
-  border-top: 1px dashed #e5e7eb;
+  border-top: 1px dashed #f1f5f9;
 }
 
 .detail-item {
   display: flex;
-  justify-content: space-between;
-  font-size: 0.875rem;
+  flex-direction: column;
+  align-items: center;
 }
 
 .detail-item .label {
-  color: #6b7280;
+  font-size: 0.65rem;
+  color: #94a3b8;
+  margin-bottom: 0.1rem;
 }
 
 .detail-item .value {
-  font-weight: 600;
-  color: #111827;
-}
-
-.loading {
-  height: 220px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #9ca3af;
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: #475569;
 }
 </style>

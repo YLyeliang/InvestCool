@@ -16,7 +16,15 @@
         </div>
       </div>
     </div>
-    <div v-else class="loading text-xs text-gray-400">行情加载中...</div>
+    <div v-else class="ticker-list">
+      <div v-for="i in 7" :key="i" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem;">
+        <div>
+          <Skeleton width="40px" height="0.8rem" style="margin-bottom: 0.25rem" />
+          <Skeleton width="60px" height="0.6rem" />
+        </div>
+        <Skeleton width="50px" height="1.5rem" radius="0.4rem" />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -29,7 +37,9 @@ const fetchWatchlist = async () => {
   try {
     const response = await fetch(`${config.public.apiBase}/watch-list`);
     const data = await response.json();
-    tickers.value = data;
+    if (response.status === 200) {
+      tickers.value = data;
+    }
   } catch (e) {
     console.error('Failed to fetch watchlist:', e);
   }
@@ -111,10 +121,5 @@ onUnmounted(() => {
 .change-info .icon {
   width: 0.85rem;
   height: 0.85rem;
-}
-
-.loading {
-  text-align: center;
-  padding: 1rem 0;
 }
 </style>

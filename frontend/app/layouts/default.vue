@@ -16,12 +16,13 @@ watch(() => route.path, () => {
   <div class="app-container" :class="{ 'menu-open': isMobileMenuOpen }">
     <!-- Mobile Header -->
     <header class="mobile-header">
-      <NuxtLink to="/" class="logo-link">
-        <h1 style="font-size: 1.25rem; font-weight: 800; color: var(--accent-color); margin: 0;">InvestCool</h1>
-      </NuxtLink>
       <button class="menu-toggle" @click="toggleMobileMenu">
         <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" />
       </button>
+      <NuxtLink to="/" class="logo-link">
+        <h1 style="font-size: 1.25rem; font-weight: 800; color: var(--accent-color); margin: 0;">InvestCool</h1>
+      </NuxtLink>
+      <div style="width: 2.5rem;"></div> <!-- Placeholder to balance the left button for centering logo -->
     </header>
 
     <!-- Overlay for mobile -->
