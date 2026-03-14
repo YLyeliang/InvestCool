@@ -10,6 +10,18 @@ const { data: page } = await useAsyncData('tutorial-' + route.path, () => {
   return queryCollection('tutorials').path(relativePath).first()
 })
 
+// SEO Optimization
+useHead({
+  title: page.value ? page.value.title : '教程',
+  meta: [
+    { 
+      name: 'description', 
+      content: page.value ? page.value.description : 'InvestCool 技术开发与投资工具教程。' 
+    },
+    { property: 'og:type', content: 'article' }
+  ]
+})
+
 if (!page.value) {
   // If not found in tutorials collection, try general path or throw 404
   console.error('Page not found in tutorials collection:', relativePath)

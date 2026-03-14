@@ -7,6 +7,19 @@ const config = useRuntimeConfig()
 
 const { data: analysis, error } = await useFetch(`${config.public.apiBase}/analysis/${route.params.id}`)
 
+// SEO Optimization
+useHead({
+  title: analysis.value ? (analysis.value as any).title : '投资分析',
+  meta: [
+    { 
+      name: 'description', 
+      content: analysis.value ? (analysis.value as any).summary : 'InvestCool 深度投资分析报告。' 
+    },
+    { property: 'og:type', content: 'article' },
+    { property: 'og:title', content: analysis.value ? (analysis.value as any).title : '投资分析' }
+  ]
+})
+
 const scrollProgress = ref(0)
 
 const updateScrollProgress = () => {

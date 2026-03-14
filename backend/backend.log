@@ -8,3 +8,664 @@
  * Restarting with stat
  * Debugger is active!
  * Debugger PIN: 364-114-181
+2026-03-13 20:17:03,619 [INFO] Background DataWorker started
+2026-03-13 20:17:03,648 [INFO] Background DataWorker started
+2026-03-13 20:17:16,420 [INFO] Market Index updated: 57.02
+2026-03-13 20:17:16,644 [INFO] Market Index updated: 57.02
+2026-03-13 20:17:21,142 [INFO] Watchlist data refreshed
+2026-03-13 20:17:21,300 [INFO] Watchlist data refreshed
+2026-03-13 20:17:21,557 [INFO] Nasdaq data refreshed
+2026-03-13 20:17:21,736 [INFO] Nasdaq data refreshed
+2026-03-13 20:17:23,377 [INFO] Macro data refreshed
+2026-03-13 20:17:23,692 [INFO] Macro data refreshed
+2026-03-13 20:18:07,489 [INFO] Background DataWorker started
+2026-03-13 20:18:29,022 [ERROR] Update market index error: 'NoneType' object is not subscriptable
+Traceback (most recent call last):
+  File "/root/projects/InvestCool/backend/app/main.py", line 95, in update_market_index
+    ndx_hist = ndx_ticker.history(period="1mo")
+  File "/root/miniconda3/lib/python3.13/site-packages/yfinance/utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+  File "/root/miniconda3/lib/python3.13/site-packages/yfinance/base.py", line 129, in history
+    return self._lazy_load_price_history().history(*args, **kwargs)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^
+  File "/root/miniconda3/lib/python3.13/site-packages/yfinance/utils.py", line 95, in wrapper
+    result = func(*args, **kwargs)
+  File "/root/miniconda3/lib/python3.13/site-packages/yfinance/scrapers/history.py", line 224, in history
+    if data['chart']['result'] is None:
+       ~~~~^^^^^^^^^
+TypeError: 'NoneType' object is not subscriptable
+2026-03-13 20:18:42,328 [INFO] Watchlist data refreshed
+2026-03-13 20:18:42,927 [INFO] Nasdaq data refreshed
+2026-03-13 20:18:45,185 [INFO] Macro data refreshed
+2026-03-13 20:19:40,412 [INFO] Background DataWorker started
+2026-03-13 20:19:40,517 [INFO] Background DataWorker started
+2026-03-13 20:19:52,782 [INFO] Market Index updated: 56.96
+2026-03-13 20:19:53,198 [INFO] Market Index updated: 56.96
+2026-03-13 20:19:57,167 [INFO] Watchlist data refreshed
+2026-03-13 20:19:57,541 [INFO] Nasdaq data refreshed
+2026-03-13 20:19:57,914 [INFO] Watchlist data refreshed
+2026-03-13 20:19:58,315 [INFO] Nasdaq data refreshed
+2026-03-13 20:19:59,357 [INFO] Macro data refreshed
+2026-03-13 20:20:00,147 [INFO] Macro data refreshed
+2026-03-13 20:30:06,586 [INFO] Market Index updated: 56.88
+2026-03-13 20:30:06,597 [INFO] Market Index updated: 56.88
+2026-03-13 20:30:10,769 [INFO] Watchlist data refreshed
+2026-03-13 20:30:11,276 [INFO] Nasdaq data refreshed
+2026-03-13 20:30:11,280 [INFO] Watchlist data refreshed
+2026-03-13 20:30:11,689 [INFO] Nasdaq data refreshed
+2026-03-13 20:30:13,102 [INFO] Macro data refreshed
+2026-03-13 20:30:13,531 [INFO] Macro data refreshed
+2026-03-13 20:40:20,546 [INFO] Market Index updated: 56.87
+2026-03-13 20:40:20,582 [INFO] Market Index updated: 56.87
+2026-03-13 20:40:26,322 [INFO] Watchlist data refreshed
+2026-03-13 20:40:26,911 [INFO] Watchlist data refreshed
+2026-03-13 20:40:27,159 [INFO] Nasdaq data refreshed
+2026-03-13 20:40:27,705 [INFO] Nasdaq data refreshed
+2026-03-13 20:40:27,822 [ERROR] Macro refresh error: 'chart'
+2026-03-13 20:40:28,388 [ERROR] Macro refresh error: 'chart'
+2026-03-13 20:50:35,240 [INFO] Market Index updated: 57.11
+2026-03-13 20:50:35,273 [INFO] Market Index updated: 57.11
+2026-03-13 20:50:39,238 [INFO] Watchlist data refreshed
+2026-03-13 20:50:39,283 [INFO] Watchlist data refreshed
+2026-03-13 20:50:39,589 [INFO] Nasdaq data refreshed
+2026-03-13 20:50:39,702 [INFO] Nasdaq data refreshed
+2026-03-13 20:50:41,394 [INFO] Macro data refreshed
+2026-03-13 20:50:41,522 [INFO] Macro data refreshed
+2026-03-13 21:00:48,324 [INFO] Market Index updated: 57.55
+2026-03-13 21:00:48,655 [INFO] Market Index updated: 57.55
+2026-03-13 21:00:52,534 [INFO] Watchlist data refreshed
+2026-03-13 21:00:52,962 [INFO] Nasdaq data refreshed
+2026-03-13 21:00:53,719 [INFO] Watchlist data refreshed
+2026-03-13 21:00:54,204 [INFO] Nasdaq data refreshed
+2026-03-13 21:00:54,811 [INFO] Macro data refreshed
+2026-03-13 21:00:56,241 [INFO] Macro data refreshed
+2026-03-13 21:11:01,833 [INFO] Market Index updated: 57.25
+2026-03-13 21:11:01,947 [INFO] Market Index updated: 57.25
+2026-03-13 21:11:06,384 [INFO] Watchlist data refreshed
+2026-03-13 21:11:06,414 [INFO] Watchlist data refreshed
+2026-03-13 21:11:06,823 [INFO] Nasdaq data refreshed
+2026-03-13 21:11:06,836 [INFO] Nasdaq data refreshed
+2026-03-13 21:11:08,605 [INFO] Macro data refreshed
+2026-03-13 21:11:08,907 [INFO] Macro data refreshed
+2026-03-13 21:21:15,765 [INFO] Market Index updated: 57.28
+2026-03-13 21:21:16,851 [INFO] Market Index updated: 57.28
+2026-03-13 21:21:21,102 [INFO] Watchlist data refreshed
+2026-03-13 21:21:21,952 [INFO] Nasdaq data refreshed
+2026-03-13 21:21:22,753 [INFO] Watchlist data refreshed
+2026-03-13 21:21:23,281 [INFO] Nasdaq data refreshed
+2026-03-13 21:21:23,955 [INFO] Macro data refreshed
+2026-03-13 21:21:25,636 [INFO] Macro data refreshed
+2026-03-13 21:31:31,336 [INFO] Market Index updated: 59.71
+2026-03-13 21:31:31,940 [INFO] Market Index updated: 59.71
+2026-03-13 21:31:37,574 [INFO] Watchlist data refreshed
+2026-03-13 21:31:37,951 [INFO] Watchlist data refreshed
+2026-03-13 21:31:38,202 [INFO] Nasdaq data refreshed
+2026-03-13 21:31:38,576 [INFO] Nasdaq data refreshed
+2026-03-13 21:31:40,532 [INFO] Macro data refreshed
+2026-03-13 21:31:40,941 [INFO] Macro data refreshed
+2026-03-13 21:41:47,466 [INFO] Market Index updated: 60.00
+2026-03-13 21:41:48,066 [INFO] Market Index updated: 60.00
+2026-03-13 21:41:51,798 [INFO] Watchlist data refreshed
+2026-03-13 21:41:52,155 [INFO] Nasdaq data refreshed
+2026-03-13 21:41:53,205 [INFO] Watchlist data refreshed
+2026-03-13 21:41:53,779 [INFO] Nasdaq data refreshed
+2026-03-13 21:41:53,902 [INFO] Macro data refreshed
+2026-03-13 21:41:55,817 [INFO] Macro data refreshed
+2026-03-13 21:52:03,072 [INFO] Market Index updated: 60.28
+2026-03-13 21:52:03,171 [INFO] Market Index updated: 60.28
+2026-03-13 21:52:08,526 [INFO] Watchlist data refreshed
+2026-03-13 21:52:08,635 [INFO] Watchlist data refreshed
+2026-03-13 21:52:09,202 [INFO] Nasdaq data refreshed
+2026-03-13 21:52:09,236 [INFO] Nasdaq data refreshed
+2026-03-13 21:52:11,423 [INFO] Macro data refreshed
+2026-03-13 21:52:12,991 [INFO] Macro data refreshed
+2026-03-13 22:02:18,473 [INFO] Market Index updated: 60.79
+2026-03-13 22:02:23,946 [INFO] Watchlist data refreshed
+2026-03-13 22:02:24,369 [INFO] Nasdaq data refreshed
+2026-03-13 22:02:25,131 [INFO] Market Index updated: 60.78
+2026-03-13 22:02:26,185 [INFO] Macro data refreshed
+2026-03-13 22:02:51,930 [ERROR] Watchlist refresh error: 'NoneType' object is not subscriptable
+2026-03-13 22:03:01,938 [ERROR] Nasdaq refresh error: 'NoneType' object is not subscriptable
+2026-03-13 22:03:11,152 [INFO] Macro data refreshed
+2026-03-13 22:07:23,998 [INFO] Background DataWorker started
+2026-03-13 22:07:24,061 [INFO] Background DataWorker started
+2026-03-13 22:07:43,828 [INFO] Market Index updated: 60.45
+2026-03-13 22:07:46,598 [INFO] Market Index updated: 60.45
+2026-03-13 22:08:01,959 [INFO] Watchlist data refreshed
+2026-03-13 22:08:02,072 [INFO] Watchlist data refreshed
+2026-03-13 22:08:04,549 [INFO] Nasdaq data refreshed
+2026-03-13 22:08:05,911 [INFO] Nasdaq data refreshed
+2026-03-13 22:08:17,686 [INFO] Macro data refreshed
+2026-03-13 22:08:21,879 [INFO] Macro data refreshed
+2026-03-13 22:18:24,863 [INFO] Market Index updated: 59.65
+2026-03-13 22:18:25,198 [INFO] Market Index updated: 59.65
+2026-03-13 22:18:29,804 [INFO] Watchlist data refreshed
+2026-03-13 22:18:30,312 [INFO] Nasdaq data refreshed
+2026-03-13 22:18:32,460 [INFO] Watchlist data refreshed
+2026-03-13 22:18:33,457 [INFO] Nasdaq data refreshed
+2026-03-13 22:18:33,948 [INFO] Macro data refreshed
+2026-03-13 22:18:35,985 [INFO] Macro data refreshed
+2026-03-13 22:28:42,180 [INFO] Market Index updated: 59.66
+2026-03-13 22:28:42,222 [INFO] Market Index updated: 59.66
+2026-03-13 22:28:47,383 [INFO] Watchlist data refreshed
+2026-03-13 22:28:48,580 [INFO] Watchlist data refreshed
+2026-03-13 22:28:48,617 [INFO] Nasdaq data refreshed
+2026-03-13 22:28:49,162 [INFO] Nasdaq data refreshed
+2026-03-13 22:28:51,120 [INFO] Macro data refreshed
+2026-03-13 22:28:51,284 [INFO] Macro data refreshed
+2026-03-13 22:38:58,470 [INFO] Market Index updated: 59.64
+2026-03-13 22:39:00,476 [INFO] Market Index updated: 59.64
+2026-03-13 22:39:05,862 [INFO] Watchlist data refreshed
+2026-03-13 22:39:06,320 [INFO] Nasdaq data refreshed
+2026-03-13 22:39:07,632 [INFO] Watchlist data refreshed
+2026-03-13 22:39:08,405 [INFO] Nasdaq data refreshed
+2026-03-13 22:39:08,796 [INFO] Macro data refreshed
+2026-03-13 22:39:11,700 [INFO] Macro data refreshed
+2026-03-13 22:49:17,545 [INFO] Market Index updated: 59.27
+2026-03-13 22:49:17,627 [INFO] Market Index updated: 59.27
+2026-03-13 22:49:29,389 [INFO] Watchlist data refreshed
+2026-03-13 22:49:30,327 [INFO] Nasdaq data refreshed
+2026-03-13 22:49:31,474 [INFO] Watchlist data refreshed
+2026-03-13 22:49:32,166 [INFO] Nasdaq data refreshed
+2026-03-13 22:49:34,028 [INFO] Macro data refreshed
+2026-03-13 22:49:37,788 [INFO] Macro data refreshed
+2026-03-13 22:59:43,193 [INFO] Market Index updated: 58.00
+2026-03-13 22:59:44,479 [INFO] Market Index updated: 58.00
+2026-03-13 22:59:48,796 [INFO] Watchlist data refreshed
+2026-03-13 22:59:49,918 [INFO] Watchlist data refreshed
+2026-03-13 22:59:49,926 [INFO] Nasdaq data refreshed
+2026-03-13 22:59:50,503 [INFO] Nasdaq data refreshed
+2026-03-13 22:59:52,135 [INFO] Macro data refreshed
+2026-03-13 22:59:53,440 [INFO] Macro data refreshed
+2026-03-13 23:10:00,760 [INFO] Market Index updated: 57.97
+2026-03-13 23:10:02,824 [INFO] Market Index updated: 57.97
+2026-03-13 23:10:09,601 [INFO] Watchlist data refreshed
+2026-03-13 23:10:10,731 [INFO] Nasdaq data refreshed
+2026-03-13 23:10:15,044 [INFO] Macro data refreshed
+2026-03-13 23:10:16,904 [INFO] Watchlist data refreshed
+2026-03-13 23:10:17,851 [INFO] Nasdaq data refreshed
+2026-03-13 23:10:20,906 [INFO] Macro data refreshed
+2026-03-13 23:14:48,541 [INFO] Background DataWorker started
+2026-03-13 23:14:48,562 [INFO] Background DataWorker started
+2026-03-13 23:15:02,546 [INFO] Market Index updated: 57.89
+2026-03-13 23:15:03,616 [INFO] Market Index updated: 57.90
+2026-03-13 23:15:26,142 [ERROR] 
+1 Failed download:
+2026-03-13 23:15:26,144 [ERROR] ['META']: TypeError("'NoneType' object is not subscriptable")
+2026-03-13 23:15:26,187 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:15:26,204 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:15:32,268 [INFO] Nasdaq data refreshed
+2026-03-13 23:15:32,515 [INFO] Nasdaq data refreshed
+2026-03-13 23:15:43,547 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:15:44,324 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:25:54,864 [INFO] Market Index updated: 57.36
+2026-03-13 23:25:56,042 [INFO] Market Index updated: 57.36
+2026-03-13 23:26:18,714 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:26:19,036 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:26:24,642 [INFO] Nasdaq data refreshed
+2026-03-13 23:26:28,382 [INFO] Nasdaq data refreshed
+2026-03-13 23:26:35,832 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:26:40,242 [ERROR] 
+1 Failed download:
+2026-03-13 23:26:40,247 [ERROR] ['GC=F']: TypeError("'NoneType' object is not subscriptable")
+2026-03-13 23:26:40,283 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:36:43,131 [INFO] Market Index updated: 57.12
+2026-03-13 23:36:43,267 [INFO] Market Index updated: 57.12
+2026-03-13 23:37:04,998 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:37:05,032 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:37:10,904 [INFO] Nasdaq data refreshed
+2026-03-13 23:37:11,406 [INFO] Nasdaq data refreshed
+2026-03-13 23:37:21,731 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:37:22,212 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:47:34,210 [INFO] Market Index updated: 56.87
+2026-03-13 23:47:35,332 [INFO] Market Index updated: 56.87
+2026-03-13 23:47:58,233 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:47:58,281 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:48:04,724 [INFO] Nasdaq data refreshed
+2026-03-13 23:48:04,739 [INFO] Nasdaq data refreshed
+2026-03-13 23:48:16,053 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:48:16,379 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:58:25,306 [INFO] Market Index updated: 56.23
+2026-03-13 23:58:25,402 [INFO] Market Index updated: 56.23
+2026-03-13 23:58:47,360 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:58:47,539 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-13 23:58:53,207 [INFO] Nasdaq data refreshed
+2026-03-13 23:58:53,476 [INFO] Nasdaq data refreshed
+2026-03-13 23:59:04,206 [INFO] Macro data batch refreshed (3 assets)
+2026-03-13 23:59:04,932 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:09:11,165 [INFO] Market Index updated: 56.49
+2026-03-14 00:09:11,322 [INFO] Market Index updated: 56.49
+2026-03-14 00:09:32,842 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:09:33,171 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:09:38,602 [INFO] Nasdaq data refreshed
+2026-03-14 00:09:39,300 [INFO] Nasdaq data refreshed
+2026-03-14 00:09:49,523 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:09:49,727 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:19:56,445 [INFO] Market Index updated: 56.50
+2026-03-14 00:19:56,535 [INFO] Market Index updated: 56.50
+2026-03-14 00:20:18,720 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:20:18,886 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:20:24,638 [INFO] Nasdaq data refreshed
+2026-03-14 00:20:24,908 [INFO] Nasdaq data refreshed
+2026-03-14 00:20:35,544 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:20:35,722 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:30:40,308 [INFO] Market Index updated: 56.69
+2026-03-14 00:30:40,534 [INFO] Market Index updated: 56.69
+2026-03-14 00:31:02,058 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:31:02,410 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:31:08,421 [INFO] Nasdaq data refreshed
+2026-03-14 00:31:08,775 [INFO] Nasdaq data refreshed
+2026-03-14 00:31:18,816 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:31:19,109 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:41:25,247 [INFO] Market Index updated: 56.57
+2026-03-14 00:41:25,458 [INFO] Market Index updated: 56.57
+2026-03-14 00:41:47,710 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:41:47,979 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:41:53,501 [INFO] Nasdaq data refreshed
+2026-03-14 00:41:53,819 [INFO] Nasdaq data refreshed
+2026-03-14 00:42:04,435 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:42:04,705 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:52:11,394 [INFO] Market Index updated: 56.90
+2026-03-14 00:52:11,589 [INFO] Market Index updated: 56.90
+2026-03-14 00:52:33,258 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:52:33,515 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 00:52:39,326 [INFO] Nasdaq data refreshed
+2026-03-14 00:52:40,203 [INFO] Nasdaq data refreshed
+2026-03-14 00:52:50,365 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 00:52:50,409 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 01:02:57,449 [INFO] Market Index updated: 56.12
+2026-03-14 01:02:57,518 [INFO] Market Index updated: 56.11
+2026-03-14 01:03:19,631 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 01:03:19,842 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 01:03:25,444 [INFO] Nasdaq data refreshed
+2026-03-14 01:03:25,509 [INFO] Nasdaq data refreshed
+2026-03-14 01:03:36,454 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 01:03:36,466 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 01:13:44,195 [INFO] Market Index updated: 56.68
+2026-03-14 01:13:46,055 [INFO] Market Index updated: 56.68
+2026-03-14 01:14:06,159 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 01:14:06,386 [INFO] Watchlist batch refreshed (7 tickers)
+2026-03-14 01:14:11,912 [INFO] Nasdaq data refreshed
+2026-03-14 01:14:14,453 [INFO] Nasdaq data refreshed
+2026-03-14 01:14:22,925 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 01:14:23,164 [INFO] Macro data batch refreshed (3 assets)
+2026-03-14 01:19:48,379 [INFO] Worker started
+2026-03-14 01:19:53,054 [INFO] Worker started
+2026-03-14 01:20:01,034 [INFO] Market Index updated: 56.55
+2026-03-14 01:20:23,576 [INFO] Watchlist refreshed
+2026-03-14 01:20:29,476 [INFO] Nasdaq refreshed
+2026-03-14 01:20:40,734 [INFO] Macro refreshed
+2026-03-14 01:20:40,755 [INFO] Cleanup done
+2026-03-14 01:30:48,695 [INFO] Market Index updated: 56.76
+2026-03-14 01:31:12,453 [INFO] Watchlist refreshed
+2026-03-14 01:31:18,872 [INFO] Nasdaq refreshed
+2026-03-14 01:31:30,540 [ERROR] 
+1 Failed download:
+2026-03-14 01:31:30,544 [ERROR] ['DX-Y.NYB']: KeyError('chart')
+2026-03-14 01:31:30,696 [INFO] Macro refreshed
+2026-03-14 01:41:38,706 [INFO] Market Index updated: 56.55
+2026-03-14 01:42:00,717 [INFO] Watchlist refreshed
+2026-03-14 01:42:06,456 [INFO] Nasdaq refreshed
+2026-03-14 01:42:17,479 [INFO] Macro refreshed
+2026-03-14 01:52:24,131 [INFO] Market Index updated: 56.24
+2026-03-14 01:52:46,439 [INFO] Watchlist refreshed
+2026-03-14 01:52:52,232 [INFO] Nasdaq refreshed
+2026-03-14 01:53:08,861 [ERROR] 
+1 Failed download:
+2026-03-14 01:53:08,862 [ERROR] ['DX-Y.NYB']: KeyError('chart')
+2026-03-14 01:53:08,878 [INFO] Macro refreshed
+2026-03-14 02:03:20,104 [INFO] Market Index updated: 56.07
+2026-03-14 02:03:42,467 [INFO] Watchlist refreshed
+2026-03-14 02:03:48,297 [INFO] Nasdaq refreshed
+2026-03-14 02:03:59,853 [ERROR] 
+1 Failed download:
+2026-03-14 02:03:59,854 [ERROR] ['DX-Y.NYB']: KeyError('chart')
+2026-03-14 02:03:59,891 [INFO] Macro refreshed
+2026-03-14 02:14:06,939 [INFO] Market Index updated: 55.92
+2026-03-14 02:14:29,060 [INFO] Watchlist refreshed
+2026-03-14 02:14:34,813 [INFO] Nasdaq refreshed
+2026-03-14 02:15:08,678 [ERROR] 
+1 Failed download:
+2026-03-14 02:15:08,678 [ERROR] ['DX-Y.NYB']: TypeError("'NoneType' object is not subscriptable")
+2026-03-14 02:15:08,694 [INFO] Macro refreshed
+2026-03-14 02:25:15,474 [INFO] Market Index updated: 55.92
+2026-03-14 02:25:42,711 [ERROR] 
+2 Failed downloads:
+2026-03-14 02:25:42,712 [ERROR] ['TSLA', 'MSFT']: TypeError("'NoneType' object is not subscriptable")
+2026-03-14 02:25:42,744 [INFO] Watchlist refreshed
+2026-03-14 02:25:48,478 [INFO] Nasdaq refreshed
+2026-03-14 02:26:00,543 [INFO] Macro refreshed
+2026-03-14 02:36:07,254 [INFO] Market Index updated: 56.33
+2026-03-14 02:36:31,867 [ERROR] 
+2 Failed downloads:
+2026-03-14 02:36:31,868 [ERROR] ['GOOGL', 'TSLA']: TypeError("'NoneType' object is not subscriptable")
+2026-03-14 02:36:31,903 [INFO] Watchlist refreshed
+2026-03-14 02:36:41,914 [ERROR] Nasdaq error: 'NoneType' object is not subscriptable
+2026-03-14 02:36:57,649 [ERROR] 
+1 Failed download:
+2026-03-14 02:36:57,649 [ERROR] ['BTC-USD']: TypeError("'NoneType' object is not subscriptable")
+2026-03-14 02:36:57,667 [INFO] Macro refreshed
+2026-03-14 02:45:40,734 [INFO] Worker started
+2026-03-14 02:45:53,345 [INFO] Market Index updated: 56.55
+2026-03-14 02:45:57,909 [INFO] Watchlist updated
+2026-03-14 02:45:58,304 [INFO] Nasdaq updated
+2026-03-14 02:46:00,058 [INFO] Macro updated
+2026-03-14 02:46:00,066 [INFO] Cleanup done
+2026-03-14 02:56:06,721 [INFO] Market Index updated: 56.79
+2026-03-14 02:56:10,743 [INFO] Watchlist updated
+2026-03-14 02:56:11,124 [INFO] Nasdaq updated
+2026-03-14 02:56:12,952 [INFO] Macro updated
+2026-03-14 03:06:19,694 [INFO] Market Index updated: 56.67
+2026-03-14 03:06:23,695 [INFO] Watchlist updated
+2026-03-14 03:06:24,102 [INFO] Nasdaq updated
+2026-03-14 03:06:25,709 [INFO] Macro updated
+2026-03-14 03:16:32,426 [INFO] Market Index updated: 56.57
+2026-03-14 03:16:36,724 [INFO] Watchlist updated
+2026-03-14 03:16:37,145 [INFO] Nasdaq updated
+2026-03-14 03:16:38,903 [INFO] Macro updated
+2026-03-14 03:26:45,585 [INFO] Market Index updated: 56.04
+2026-03-14 03:26:49,679 [INFO] Watchlist updated
+2026-03-14 03:26:50,052 [INFO] Nasdaq updated
+2026-03-14 03:26:51,643 [INFO] Macro updated
+2026-03-14 03:36:58,438 [INFO] Market Index updated: 55.94
+2026-03-14 03:37:02,450 [INFO] Watchlist updated
+2026-03-14 03:37:02,833 [INFO] Nasdaq updated
+2026-03-14 03:37:04,445 [INFO] Macro updated
+2026-03-14 03:47:11,224 [INFO] Market Index updated: 55.98
+2026-03-14 03:47:15,290 [INFO] Watchlist updated
+2026-03-14 03:47:15,683 [INFO] Nasdaq updated
+2026-03-14 03:47:17,326 [INFO] Macro updated
+2026-03-14 03:57:24,050 [INFO] Market Index updated: 56.07
+2026-03-14 03:57:28,039 [INFO] Watchlist updated
+2026-03-14 03:57:28,450 [INFO] Nasdaq updated
+2026-03-14 03:57:30,097 [INFO] Macro updated
+2026-03-14 04:07:36,949 [INFO] Market Index updated: 56.10
+2026-03-14 04:07:40,992 [INFO] Watchlist updated
+2026-03-14 04:07:41,350 [INFO] Nasdaq updated
+2026-03-14 04:07:43,036 [INFO] Macro updated
+2026-03-14 04:17:49,860 [INFO] Market Index updated: 56.21
+2026-03-14 04:17:53,950 [INFO] Watchlist updated
+2026-03-14 04:17:54,300 [INFO] Nasdaq updated
+2026-03-14 04:17:55,924 [INFO] Macro updated
+2026-03-14 04:28:02,634 [INFO] Market Index updated: 56.24
+2026-03-14 04:28:06,552 [INFO] Watchlist updated
+2026-03-14 04:28:06,903 [INFO] Nasdaq updated
+2026-03-14 04:28:08,957 [INFO] Macro updated
+2026-03-14 04:38:15,640 [INFO] Market Index updated: 56.26
+2026-03-14 04:38:19,698 [INFO] Watchlist updated
+2026-03-14 04:38:20,060 [INFO] Nasdaq updated
+2026-03-14 04:38:21,699 [INFO] Macro updated
+2026-03-14 04:48:28,450 [INFO] Market Index updated: 56.26
+2026-03-14 04:48:32,684 [INFO] Watchlist updated
+2026-03-14 04:48:33,075 [INFO] Nasdaq updated
+2026-03-14 04:48:34,876 [INFO] Macro updated
+2026-03-14 04:58:41,853 [INFO] Market Index updated: 56.26
+2026-03-14 04:58:45,957 [INFO] Watchlist updated
+2026-03-14 04:58:46,337 [INFO] Nasdaq updated
+2026-03-14 04:58:47,956 [INFO] Macro updated
+2026-03-14 05:08:54,835 [INFO] Market Index updated: 56.26
+2026-03-14 05:08:59,166 [INFO] Watchlist updated
+2026-03-14 05:08:59,546 [INFO] Nasdaq updated
+2026-03-14 05:09:01,255 [INFO] Macro updated
+2026-03-14 05:19:07,957 [INFO] Market Index updated: 56.26
+2026-03-14 05:19:12,151 [INFO] Watchlist updated
+2026-03-14 05:19:12,511 [INFO] Nasdaq updated
+2026-03-14 05:19:14,302 [INFO] Macro updated
+2026-03-14 05:29:21,288 [INFO] Market Index updated: 56.26
+2026-03-14 05:29:25,748 [INFO] Watchlist updated
+2026-03-14 05:29:26,173 [INFO] Nasdaq updated
+2026-03-14 05:29:28,007 [INFO] Macro updated
+2026-03-14 05:39:34,846 [INFO] Market Index updated: 56.26
+2026-03-14 05:39:39,172 [INFO] Watchlist updated
+2026-03-14 05:39:39,552 [INFO] Nasdaq updated
+2026-03-14 05:39:41,422 [INFO] Macro updated
+2026-03-14 05:49:48,228 [INFO] Market Index updated: 56.26
+2026-03-14 05:49:52,367 [INFO] Watchlist updated
+2026-03-14 05:49:52,732 [INFO] Nasdaq updated
+2026-03-14 05:49:54,552 [INFO] Macro updated
+2026-03-14 06:00:01,345 [INFO] Market Index updated: 56.26
+2026-03-14 06:00:05,606 [INFO] Watchlist updated
+2026-03-14 06:00:05,970 [INFO] Nasdaq updated
+2026-03-14 06:00:07,791 [INFO] Macro updated
+2026-03-14 06:10:15,938 [INFO] Market Index updated: 56.26
+2026-03-14 06:10:20,222 [INFO] Watchlist updated
+2026-03-14 06:10:20,602 [INFO] Nasdaq updated
+2026-03-14 06:10:22,329 [INFO] Macro updated
+2026-03-14 06:20:29,094 [INFO] Market Index updated: 56.26
+2026-03-14 06:20:33,014 [INFO] Watchlist updated
+2026-03-14 06:20:33,372 [INFO] Nasdaq updated
+2026-03-14 06:20:35,179 [INFO] Macro updated
+2026-03-14 06:30:42,059 [INFO] Market Index updated: 56.26
+2026-03-14 06:30:46,095 [INFO] Watchlist updated
+2026-03-14 06:30:46,502 [INFO] Nasdaq updated
+2026-03-14 06:30:48,325 [INFO] Macro updated
+2026-03-14 06:40:55,111 [INFO] Market Index updated: 56.26
+2026-03-14 06:40:59,096 [INFO] Watchlist updated
+2026-03-14 06:40:59,459 [INFO] Nasdaq updated
+2026-03-14 06:41:01,114 [INFO] Macro updated
+2026-03-14 06:51:07,789 [INFO] Market Index updated: 56.26
+2026-03-14 06:51:11,767 [INFO] Watchlist updated
+2026-03-14 06:51:12,115 [INFO] Nasdaq updated
+2026-03-14 06:51:13,682 [INFO] Macro updated
+2026-03-14 07:01:20,335 [INFO] Market Index updated: 56.26
+2026-03-14 07:01:24,335 [INFO] Watchlist updated
+2026-03-14 07:01:24,692 [INFO] Nasdaq updated
+2026-03-14 07:01:26,211 [INFO] Macro updated
+2026-03-14 07:11:33,047 [INFO] Market Index updated: 56.26
+2026-03-14 07:11:37,177 [INFO] Watchlist updated
+2026-03-14 07:11:37,533 [INFO] Nasdaq updated
+2026-03-14 07:11:39,125 [INFO] Macro updated
+2026-03-14 07:21:45,935 [INFO] Market Index updated: 56.26
+2026-03-14 07:21:49,888 [INFO] Watchlist updated
+2026-03-14 07:21:50,235 [INFO] Nasdaq updated
+2026-03-14 07:21:51,890 [INFO] Macro updated
+2026-03-14 07:31:58,690 [INFO] Market Index updated: 56.26
+2026-03-14 07:32:02,743 [INFO] Watchlist updated
+2026-03-14 07:32:03,102 [INFO] Nasdaq updated
+2026-03-14 07:32:04,901 [INFO] Macro updated
+2026-03-14 07:42:11,605 [INFO] Market Index updated: 56.26
+2026-03-14 07:42:15,631 [INFO] Watchlist updated
+2026-03-14 07:42:16,029 [INFO] Nasdaq updated
+2026-03-14 07:42:17,657 [INFO] Macro updated
+2026-03-14 07:52:24,530 [INFO] Market Index updated: 56.26
+2026-03-14 07:52:28,721 [INFO] Watchlist updated
+2026-03-14 07:52:29,102 [INFO] Nasdaq updated
+2026-03-14 07:52:30,895 [INFO] Macro updated
+2026-03-14 08:02:37,641 [INFO] Market Index updated: 56.26
+2026-03-14 08:02:41,813 [INFO] Watchlist updated
+2026-03-14 08:02:42,162 [INFO] Nasdaq updated
+2026-03-14 08:02:43,719 [INFO] Macro updated
+2026-03-14 08:12:50,494 [INFO] Market Index updated: 56.26
+2026-03-14 08:12:54,539 [INFO] Watchlist updated
+2026-03-14 08:12:54,893 [INFO] Nasdaq updated
+2026-03-14 08:12:56,504 [INFO] Macro updated
+2026-03-14 08:23:03,729 [INFO] Market Index updated: 56.26
+2026-03-14 08:23:09,025 [INFO] Watchlist updated
+2026-03-14 08:23:09,689 [INFO] Nasdaq updated
+2026-03-14 08:23:10,380 [ERROR] Macro item DXY error: 'chart'
+2026-03-14 08:23:11,903 [INFO] Macro updated
+2026-03-14 08:33:18,557 [INFO] Market Index updated: 56.26
+2026-03-14 08:33:22,345 [INFO] Watchlist updated
+2026-03-14 08:33:22,736 [INFO] Nasdaq updated
+2026-03-14 08:33:24,453 [INFO] Macro updated
+2026-03-14 08:43:31,188 [INFO] Market Index updated: 56.26
+2026-03-14 08:43:35,245 [INFO] Watchlist updated
+2026-03-14 08:43:35,609 [INFO] Nasdaq updated
+2026-03-14 08:43:37,215 [INFO] Macro updated
+2026-03-14 08:53:44,003 [INFO] Market Index updated: 56.26
+2026-03-14 08:53:48,319 [INFO] Watchlist updated
+2026-03-14 08:53:48,676 [INFO] Nasdaq updated
+2026-03-14 08:53:50,281 [INFO] Macro updated
+2026-03-14 09:03:56,961 [INFO] Market Index updated: 56.26
+2026-03-14 09:04:01,018 [INFO] Watchlist updated
+2026-03-14 09:04:01,372 [INFO] Nasdaq updated
+2026-03-14 09:04:02,986 [INFO] Macro updated
+2026-03-14 09:14:09,692 [INFO] Market Index updated: 56.26
+2026-03-14 09:14:13,648 [INFO] Watchlist updated
+2026-03-14 09:14:14,007 [INFO] Nasdaq updated
+2026-03-14 09:14:15,730 [INFO] Macro updated
+2026-03-14 09:24:22,550 [INFO] Market Index updated: 56.26
+2026-03-14 09:24:26,486 [INFO] Watchlist updated
+2026-03-14 09:24:26,855 [INFO] Nasdaq updated
+2026-03-14 09:24:28,525 [INFO] Macro updated
+2026-03-14 09:34:35,387 [INFO] Market Index updated: 56.26
+2026-03-14 09:34:39,498 [INFO] Watchlist updated
+2026-03-14 09:34:39,863 [INFO] Nasdaq updated
+2026-03-14 09:34:41,646 [INFO] Macro updated
+2026-03-14 09:44:48,347 [INFO] Market Index updated: 56.26
+2026-03-14 09:44:52,228 [INFO] Watchlist updated
+2026-03-14 09:44:52,593 [INFO] Nasdaq updated
+2026-03-14 09:44:54,175 [INFO] Macro updated
+2026-03-14 09:55:01,114 [INFO] Market Index updated: 56.26
+2026-03-14 09:55:05,233 [INFO] Watchlist updated
+2026-03-14 09:55:05,588 [INFO] Nasdaq updated
+2026-03-14 09:55:07,549 [INFO] Macro updated
+2026-03-14 10:05:14,326 [INFO] Market Index updated: 56.26
+2026-03-14 10:05:18,592 [INFO] Watchlist updated
+2026-03-14 10:05:18,972 [INFO] Nasdaq updated
+2026-03-14 10:05:20,641 [INFO] Macro updated
+2026-03-14 10:13:33,906 [INFO] Worker started
+2026-03-14 10:13:33,914 [INFO] Worker started
+2026-03-14 10:13:46,551 [INFO] Market Index updated: 56.26
+2026-03-14 10:13:47,003 [INFO] Market Index updated: 56.26
+2026-03-14 10:13:51,512 [INFO] Watchlist updated
+2026-03-14 10:13:52,239 [INFO] Nasdaq updated
+2026-03-14 10:13:52,461 [INFO] Watchlist updated
+2026-03-14 10:13:53,026 [INFO] Nasdaq updated
+2026-03-14 10:13:54,320 [INFO] Macro updated
+2026-03-14 10:13:54,367 [INFO] Cleanup done
+2026-03-14 10:13:55,408 [INFO] Macro updated
+2026-03-14 10:13:55,426 [INFO] Cleanup done
+2026-03-14 10:24:01,212 [INFO] Market Index updated: 56.26
+2026-03-14 10:24:01,328 [INFO] Market Index updated: 56.26
+2026-03-14 10:24:05,678 [INFO] Watchlist updated
+2026-03-14 10:24:05,723 [INFO] Watchlist updated
+2026-03-14 10:24:06,094 [INFO] Nasdaq updated
+2026-03-14 10:24:06,123 [INFO] Nasdaq updated
+2026-03-14 10:24:07,748 [INFO] Macro updated
+2026-03-14 10:24:07,864 [INFO] Macro updated
+2026-03-14 10:34:14,488 [INFO] Market Index updated: 56.26
+2026-03-14 10:34:15,027 [INFO] Market Index updated: 56.26
+2026-03-14 10:34:18,800 [INFO] Watchlist updated
+2026-03-14 10:34:19,439 [INFO] Nasdaq updated
+2026-03-14 10:34:19,788 [INFO] Watchlist updated
+2026-03-14 10:34:20,254 [INFO] Nasdaq updated
+2026-03-14 10:34:21,208 [INFO] Macro updated
+2026-03-14 10:34:22,039 [INFO] Macro updated
+2026-03-14 10:38:44,872 [INFO] SQLite WAL mode enabled
+2026-03-14 10:38:44,906 [INFO] SQLite WAL mode enabled
+2026-03-14 10:38:44,919 [INFO] Worker started
+2026-03-14 10:38:45,069 [INFO] Worker started
+2026-03-14 10:38:56,033 [INFO] Market Index updated: 56.26
+2026-03-14 10:38:56,120 [INFO] Market Index updated: 56.26
+2026-03-14 10:39:00,458 [INFO] Watchlist updated
+2026-03-14 10:39:00,973 [INFO] Watchlist updated
+2026-03-14 10:39:00,993 [INFO] Nasdaq updated
+2026-03-14 10:39:01,430 [INFO] Nasdaq updated
+2026-03-14 10:39:03,167 [INFO] Macro updated
+2026-03-14 10:39:03,176 [INFO] Cleanup done
+2026-03-14 10:39:03,582 [INFO] Macro updated
+2026-03-14 10:39:03,595 [INFO] Cleanup done
+2026-03-14 10:49:10,259 [INFO] Market Index updated: 56.26
+2026-03-14 10:49:10,289 [INFO] Market Index updated: 56.26
+2026-03-14 10:49:14,712 [INFO] Watchlist updated
+2026-03-14 10:49:14,780 [INFO] Watchlist updated
+2026-03-14 10:49:15,103 [INFO] Nasdaq updated
+2026-03-14 10:49:15,167 [INFO] Nasdaq updated
+2026-03-14 10:49:16,968 [INFO] Macro updated
+2026-03-14 10:49:16,978 [INFO] Macro updated
+2026-03-14 10:59:23,845 [INFO] Market Index updated: 56.26
+2026-03-14 10:59:24,039 [INFO] Market Index updated: 56.26
+2026-03-14 10:59:28,296 [INFO] Watchlist updated
+2026-03-14 10:59:28,447 [INFO] Watchlist updated
+2026-03-14 10:59:28,758 [INFO] Nasdaq updated
+2026-03-14 10:59:28,902 [INFO] Nasdaq updated
+2026-03-14 10:59:30,497 [INFO] Macro updated
+2026-03-14 10:59:30,749 [INFO] Macro updated
+2026-03-14 11:09:37,493 [INFO] Market Index updated: 56.26
+2026-03-14 11:09:37,578 [INFO] Market Index updated: 56.26
+2026-03-14 11:09:42,058 [INFO] Watchlist updated
+2026-03-14 11:09:42,375 [INFO] Watchlist updated
+2026-03-14 11:09:42,425 [INFO] Nasdaq updated
+2026-03-14 11:09:42,770 [INFO] Nasdaq updated
+2026-03-14 11:09:44,525 [INFO] Macro updated
+2026-03-14 11:09:44,679 [INFO] Macro updated
+2026-03-14 11:19:51,428 [INFO] Market Index updated: 56.26
+2026-03-14 11:19:51,635 [INFO] Market Index updated: 56.26
+2026-03-14 11:19:55,939 [INFO] Watchlist updated
+2026-03-14 11:19:56,315 [INFO] Nasdaq updated
+2026-03-14 11:19:56,697 [INFO] Watchlist updated
+2026-03-14 11:19:57,318 [INFO] Nasdaq updated
+2026-03-14 11:19:58,616 [INFO] Macro updated
+2026-03-14 11:19:59,115 [INFO] Macro updated
+2026-03-14 11:30:05,459 [INFO] Market Index updated: 56.26
+2026-03-14 11:30:05,662 [INFO] Market Index updated: 56.26
+2026-03-14 11:30:09,709 [INFO] Watchlist updated
+2026-03-14 11:30:09,877 [INFO] Watchlist updated
+2026-03-14 11:30:10,118 [INFO] Nasdaq updated
+2026-03-14 11:30:10,276 [INFO] Nasdaq updated
+2026-03-14 11:30:11,845 [INFO] Macro updated
+2026-03-14 11:30:12,150 [INFO] Macro updated
+2026-03-14 11:40:20,574 [INFO] Market Index updated: 56.26
+2026-03-14 11:40:21,129 [INFO] Market Index updated: 56.26
+2026-03-14 11:40:25,331 [INFO] Watchlist updated
+2026-03-14 11:40:25,782 [INFO] Nasdaq updated
+2026-03-14 11:40:25,814 [INFO] Watchlist updated
+2026-03-14 11:40:26,201 [INFO] Nasdaq updated
+2026-03-14 11:40:27,476 [INFO] Macro updated
+2026-03-14 11:40:28,076 [INFO] Macro updated
+2026-03-14 11:47:54,324 [INFO] SQLite WAL mode enabled
+2026-03-14 11:47:54,393 [INFO] Worker started
+2026-03-14 11:48:08,479 [INFO] Market Index updated: 56.26
+2026-03-14 11:48:15,049 [INFO] Watchlist updated
+2026-03-14 11:48:15,858 [INFO] Nasdaq updated
+2026-03-14 11:48:18,260 [INFO] Macro updated
+2026-03-14 11:48:18,281 [INFO] Cleanup done
+2026-03-14 11:58:26,511 [INFO] Market Index updated: 56.26
+2026-03-14 11:58:30,509 [INFO] Watchlist updated
+2026-03-14 11:58:31,207 [INFO] Nasdaq updated
+2026-03-14 11:58:32,938 [INFO] Macro updated
+2026-03-14 12:08:41,561 [INFO] Market Index updated: 56.26
+2026-03-14 12:08:46,104 [INFO] Watchlist updated
+2026-03-14 12:08:46,510 [INFO] Nasdaq updated
+2026-03-14 12:08:48,260 [INFO] Macro updated
+2026-03-14 12:18:55,251 [INFO] Market Index updated: 56.26
+2026-03-14 12:18:59,361 [INFO] Watchlist updated
+2026-03-14 12:18:59,753 [INFO] Nasdaq updated
+2026-03-14 12:19:01,368 [INFO] Macro updated
+2026-03-14 12:29:10,507 [INFO] Market Index updated: 56.26
+2026-03-14 12:29:14,773 [INFO] Watchlist updated
+2026-03-14 12:29:15,176 [INFO] Nasdaq updated
+2026-03-14 12:29:17,658 [INFO] Macro updated
+2026-03-14 12:39:26,082 [INFO] Market Index updated: 56.26
+2026-03-14 12:39:30,578 [INFO] Watchlist updated
+2026-03-14 12:39:30,983 [INFO] Nasdaq updated
+2026-03-14 12:39:32,593 [INFO] Macro updated
+2026-03-14 12:49:40,575 [INFO] Market Index updated: 56.26
+2026-03-14 12:49:47,000 [INFO] Watchlist updated
+2026-03-14 12:49:47,668 [INFO] Nasdaq updated
+2026-03-14 12:49:50,744 [INFO] Macro updated
+2026-03-14 12:59:57,757 [INFO] Market Index updated: 56.26
+2026-03-14 13:00:01,985 [INFO] Watchlist updated
+2026-03-14 13:00:02,349 [INFO] Nasdaq updated
+2026-03-14 13:00:04,208 [INFO] Macro updated
+2026-03-14 13:10:10,987 [INFO] Market Index updated: 56.26
+2026-03-14 13:10:15,137 [INFO] Watchlist updated
+2026-03-14 13:10:15,543 [INFO] Nasdaq updated
+2026-03-14 13:10:17,166 [INFO] Macro updated
+2026-03-14 13:20:23,867 [INFO] Market Index updated: 56.26
+2026-03-14 13:20:28,004 [INFO] Watchlist updated
+2026-03-14 13:20:28,378 [INFO] Nasdaq updated
+2026-03-14 13:20:29,918 [INFO] Macro updated
+2026-03-14 13:30:36,862 [INFO] Market Index updated: 56.26
+2026-03-14 13:30:40,809 [INFO] Watchlist updated
+2026-03-14 13:30:41,206 [INFO] Nasdaq updated
+2026-03-14 13:30:42,742 [INFO] Macro updated
+2026-03-14 13:40:49,614 [INFO] Market Index updated: 56.26
+2026-03-14 13:40:53,832 [INFO] Watchlist updated
+2026-03-14 13:40:54,215 [INFO] Nasdaq updated
+2026-03-14 13:40:56,277 [INFO] Macro updated
+2026-03-14 13:51:04,207 [INFO] Market Index updated: 56.26
+2026-03-14 13:51:08,389 [INFO] Watchlist updated
+2026-03-14 13:51:08,836 [INFO] Nasdaq updated
+2026-03-14 13:51:10,504 [INFO] Macro updated

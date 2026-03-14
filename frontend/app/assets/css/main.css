@@ -70,7 +70,14 @@ body {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
   transition: background-color 0.3s, border-color 0.3s;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE and Edge */
+}
+
+.right-panel::-webkit-scrollbar {
+  display: none; /* Chrome, Safari and Opera */
 }
 
 .nav-item {
@@ -108,7 +115,9 @@ body {
 .mobile-header {
   display: none;
   height: var(--mobile-header-height);
-  background: var(--card-bg);
+  background: rgba(var(--card-bg-rgb), 0.8);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border-color);
   padding: 0 1rem;
   align-items: center;
@@ -125,12 +134,15 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  height: 60px;
-  background: var(--card-bg);
+  height: 64px;
+  background: rgba(var(--card-bg-rgb), 0.9);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-top: 1px solid var(--border-color);
   z-index: 1100;
   grid-template-columns: repeat(4, 1fr);
-  box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
+  box-shadow: 0 -4px 12px rgba(0,0,0,0.05);
+  padding-bottom: env(safe-area-inset-bottom);
 }
 
 .tab-item {
@@ -141,6 +153,40 @@ body {
   color: var(--text-secondary);
   text-decoration: none;
   gap: 4px;
+  transition: transform 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+.tab-item:active {
+  transform: scale(0.9);
+}
+
+/* Overlay for mobile */
+.menu-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+  z-index: 1050;
+}
+
+/* Root variables extension for RGBA */
+:root {
+  --sidebar-width: 220px;
+  --right-panel-width: 260px;
+  --mobile-header-height: 54px;
+  --card-bg-rgb: 255, 255, 255;
+  
+  /* ... (light theme) */
+}
+
+[data-theme='dark'] {
+  --card-bg-rgb: 30, 41, 59;
+  /* ... (dark theme) */
+}
+
+* {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .tab-item.router-link-active {
@@ -167,6 +213,7 @@ body {
     top: 0;
     bottom: 0;
     width: 260px;
+    z-index: 1200; /* Higher than menu-overlay (1050) */
     transform: translateX(-100%);
     box-shadow: 10px 0 15px -3px rgba(0, 0, 0, 0.1);
     background-color: var(--sidebar-bg);

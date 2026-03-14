@@ -90,10 +90,7 @@ watch(() => route.path, () => {
       <TickerWatchlist />
 
       <!-- Sentiment Trend Chart -->
-      <SentimentTrendChart />
-
-      <!-- Global Macro Assets -->
-      <MacroAssetPanel />
+      <LazySentimentTrendChart />
 
       <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; border-left: 4px solid var(--accent-color);">
         <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">每日交易锦报</h3>
