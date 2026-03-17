@@ -4,7 +4,7 @@
       <!-- NASDAQ 100 -->
       <div class="market-item highlight">
         <div class="item-label">
-          <span class="name">NASDAQ 100</span>
+          <span class="name">纳斯达克 100</span>
           <span class="symbol">NDX</span>
         </div>
         <div v-if="nasdaq" class="item-value">
@@ -19,10 +19,11 @@
       <!-- Macro Assets -->
       <div v-for="asset in macroAssets" :key="asset.name" class="market-item">
         <div class="item-label">
-          <span class="name">{{ asset.name }}</span>
+          <span class="name">{{ getAssetNameCN(asset.name) }}</span>
+          <span class="symbol">{{ asset.name }}</span>
         </div>
         <div class="item-value">
-          <span class="price">${{ formatPrice(asset.price) }}</span>
+          <span class="price">{{ asset.name === 'GOLD' || asset.name === 'OIL' ? '$' : '' }}{{ formatPrice(asset.price) }}</span>
           <span class="change" :class="asset.percent >= 0 ? 'up' : 'down'">
             {{ asset.percent >= 0 ? '+' : '' }}{{ asset.percent.toFixed(2) }}%
           </span>
@@ -48,6 +49,15 @@ const nasdaq = ref(null);
 const macroAssets = ref([]);
 let refreshInterval = null;
 
+const getAssetNameCN = (name) => {
+  const map = {
+    'DXY': '美元指数',
+    'GOLD': '纽约金',
+    'OIL': '布伦特油'
+  }
+  return map[name] || name
+}
+
 const fetchData = async () => {
   if (document.visibilityState !== 'visible') return;
   
@@ -69,7 +79,7 @@ const formatPrice = (val) => val >= 1000 ? val.toLocaleString() : val;
 
 onMounted(() => {
   fetchData();
-  refreshInterval = setInterval(fetchData, 60 * 1000); // 1 min
+  refreshInterval = setInterval(fetchData, 30 * 1000); // 30 seconds for faster reactivity
   document.addEventListener('visibilitychange', fetchData);
 });
 

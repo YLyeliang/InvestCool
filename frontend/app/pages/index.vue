@@ -2,10 +2,10 @@
 const config = useRuntimeConfig()
 
 // Fetch Investment Analysis from Flask
-const { data: analysis } = await useFetch(`${config.public.apiBase}/analysis`)
+const { data: analysis } = await useFetch(`${config.public.apiBase}/analysis?type=analysis`)
 
-// Fetch Tutorials from Nuxt Content (Nuxt 4 / Content v3 style)
-const { data: tutorials } = await useAsyncData('tutorials', () => queryCollection('tutorials').all())
+// Fetch Tutorials from Flask
+const { data: tutorialsData } = await useFetch(`${config.public.apiBase}/analysis?type=tutorial`)
 
 useHead({
   title: '首页',
@@ -18,27 +18,37 @@ useHead({
 const feedItems = computed(() => {
   const items = []
   
-  if (analysis.value) {
+  if (analysis.value && Array.isArray(analysis.value)) {
     const analysisItems = (analysis.value as any[]).map(item => ({
-      ...item,
-      type: 'analysis'
+      title: item.title || '无标题',
+      summary: item.summary || '暂无摘要',
+      path: `/analysis/${item.id}`,
+      type: 'analysis',
+      category: item.category || '未分类',
+      created_at: item.created_at || new Date().toISOString(),
+      unique_key: `analysis-${item.id}`
     }))
     items.push(...analysisItems)
   }
   
-  if (tutorials.value) {
-    const tutorialItems = (tutorials.value as any[]).map(item => ({
-      id: item._path,
-      title: item.title,
-      summary: item.description,
-      category: item.category || 'Tutorial',
+  if (tutorialsData.value && Array.isArray(tutorialsData.value)) {
+    const tutorialItems = (tutorialsData.value as any[]).map((item) => ({
+      path: `/tutorials/${item.id}`,
+      title: item.title || '无标题',
+      summary: item.summary || '暂无描述',
+      category: item.category || '开源项目',
       type: 'tutorial',
-      created_at: item.date
+      created_at: item.created_at || new Date().toISOString(),
+      unique_key: `tutorial-${item.id}`
     }))
     items.push(...tutorialItems)
   }
   
-  return items.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+  return items.sort((a, b) => {
+    const dateA = new Date(a.created_at).getTime()
+    const dateB = new Date(b.created_at).getTime()
+    return dateB - dateA
+  })
 })
 </script>
 
@@ -69,7 +79,7 @@ const feedItems = computed(() => {
           </div>
           <div class="phase-item phase-recovery">
             <div class="phase-label">阶段三：回归基本面</div>
-            <p>局势明朗后，科技龙头将驱动强劲反弹。</p>
+            <p>局局势明朗后，科技龙头将驱动强劲反弹。</p>
           </div>
         </div>
 
@@ -92,11 +102,6 @@ const feedItems = computed(() => {
       <SentimentDuel />
     </div>
 
-    <!-- Market AI Quote Card -->
-    <div class="section-spacer">
-      <MarketQuoteCard />
-    </div>
-
     <!-- Market Sentiment Index Gauge -->
     <div class="section-spacer-large">
       <LazyMarketSentimentGauge />
@@ -108,22 +113,28 @@ const feedItems = computed(() => {
     </header>
 
     <!-- Feed Items -->
-    <div v-for="item in feedItems" :key="item.id" class="card feed-item">
-      <div class="item-meta">
-        <span class="badge-category" :class="item.type">
-          {{ item.category === 'Market Trends' ? '市场趋势' : item.category }}
-        </span>
-        <span class="item-type-label">
-          {{ item.type === 'tutorial' ? '技术教程' : '投资分析' }}
-        </span>
+    <div v-for="item in feedItems" :key="item.unique_key" class="card feed-item" :class="{ 'has-cover': item.cover }">
+      <div v-if="item.cover" class="feed-item-cover">
+        <img :src="item.cover" :alt="item.title" />
       </div>
       
-      <h3 class="item-title">{{ item.title }}</h3>
-      <p class="item-summary">{{ item.summary }}</p>
-      
-      <NuxtLink :to="item.type === 'tutorial' ? item.id : `/analysis/${item.id}`" class="read-more-link">
-        阅读全文 <Icon name="lucide:arrow-right" class="arrow-icon" />
-      </NuxtLink>
+      <div class="feed-item-content">
+        <div class="item-meta">
+          <span class="badge-category" :class="item.type">
+            {{ item.category }}
+          </span>
+          <span class="item-type-label">
+            {{ item.type === 'tutorial' ? '技术教程' : '投资分析' }}
+          </span>
+        </div>
+        
+        <h3 class="item-title">{{ item.title }}</h3>
+        <p class="item-summary">{{ item.summary }}</p>
+        
+        <NuxtLink :to="item.path" class="read-more-link">
+          阅读全文 <Icon name="lucide:arrow-right" class="arrow-icon" />
+        </NuxtLink>
+      </div>
     </div>
   </div>
 </template>
@@ -257,13 +268,56 @@ const feedItems = computed(() => {
 
 .feed-item {
   margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  overflow: hidden;
+}
+
+@media (min-width: 768px) {
+  .feed-item.has-cover {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
+.feed-item-cover {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  flex-shrink: 0;
+  border: 1px solid var(--border-color);
+}
+
+@media (min-width: 768px) {
+  .feed-item-cover {
+    width: 240px;
+    height: 135px;
+  }
+}
+
+.feed-item-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 0.3s ease;
+}
+
+.feed-item:hover .feed-item-cover img {
+  transform: scale(1.05);
+}
+
+.feed-item-content {
+  flex-grow: 1;
+  min-width: 0;
 }
 
 .item-meta {
   display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 1rem;
+  align-items: center;
+  gap: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 
 .badge-category {

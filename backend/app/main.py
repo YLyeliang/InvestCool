@@ -56,12 +56,18 @@ class Analysis(db.Model):
     summary = db.Column(db.Text, nullable=False)
     content = db.Column(db.Text, nullable=False)
     category = db.Column(db.String(50), nullable=False)
+    cover = db.Column(db.String(500)) 
+    content_type = db.Column(db.String(20), default='analysis')
+    is_deleted = db.Column(db.Boolean, default=False)
+    deleted_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, server_default=db.func.now())
 
     def to_dict(self):
         return {
             "id": self.id, "title": self.title, "summary": self.summary,
             "content": self.content, "category": self.category,
+            "cover": self.cover, "is_deleted": self.is_deleted,
+            "content_type": self.content_type,
             "created_at": self.created_at.isoformat()
         }
 
@@ -98,6 +104,10 @@ def require_admin(f):
         return f(*args, **kwargs)
     return decorated_function
 
+import traceback
+
+# ... (rest of imports unchanged)
+
 # Calculation Logic
 def calculate_rsi(series, period=14):
     delta = series.diff()
@@ -106,32 +116,68 @@ def calculate_rsi(series, period=14):
     rs = gain / loss
     return 100 - (100 / (1 + rs))
 
+# Helper for safe numerical conversion
+def safe_float(val, default=0.0):
+    try:
+        if val is None or pd.isna(val): return default
+        return float(val)
+    except: return default
+
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     try:
         ndx_ticker = yf.Ticker("^NDX")
         ndx_hist = ndx_ticker.history(period="1mo")
-        if ndx_hist is None or ndx_hist.empty: return
+        if ndx_hist is None or ndx_hist.empty or 'Close' not in ndx_hist.columns:
+            logger.warning("Nasdaq history unavailable for index calculation")
+            return
         
         rsi_val = calculate_rsi(ndx_hist['Close']).iloc[-1]
         if pd.isna(rsi_val): rsi_val = 50
         
-        vix_info = yf.Ticker("^VIX").fast_info
-        vix_score = ((vix_info.year_high - vix_info.last_price) / (vix_info.year_high - vix_info.year_low + 0.1)) * 100
+        # VIX Score
+        try:
+            vix_info = yf.Ticker("^VIX").fast_info
+            vh, vl, lp = safe_float(vix_info.year_high), safe_float(vix_info.year_low), safe_float(vix_info.last_price)
+            vix_score = ((vh - lp) / (vh - vl + 0.1)) * 100 if vh > vl else 50
+        except Exception as e:
+            logger.error(f"VIX calculation error: {e}")
+            vix_score = 50
+
+        # Price Score
+        try:
+            ndx_info = ndx_ticker.fast_info
+            nh, nl, nlp = safe_float(ndx_info.year_high), safe_float(ndx_info.year_low), safe_float(ndx_info.last_price)
+            price_score = ((nlp - nl) / (nh - nl + 0.1)) * 100 if nh > nl else 50
+        except Exception as e:
+            logger.error(f"Price score calculation error: {e}")
+            price_score = 50
         
-        ndx_info = ndx_ticker.fast_info
-        price_score = ((ndx_info.last_price - ndx_info.year_low) / (ndx_info.year_high - ndx_info.year_low + 0.1)) * 100
-        
-        tnx_info = yf.Ticker("^TNX").fast_info
-        yield_score = ((tnx_info.year_high - tnx_info.last_price) / (tnx_info.year_high - tnx_info.last_price + 1)) * 100 
+        # Yield Score
+        try:
+            tnx_info = yf.Ticker("^TNX").fast_info
+            th, tlp = safe_float(tnx_info.year_high), safe_float(tnx_info.last_price)
+            yield_score = ((th - tlp) / (th - tlp + 1)) * 100 if th >= tlp else 50
+        except Exception as e:
+            logger.error(f"Yield score calculation error: {e}")
+            yield_score = 50
         
         final_index = (0.35 * rsi_val) + (0.35 * vix_score) + (0.15 * price_score) + (0.15 * yield_score)
         
         with app.app_context():
-            new_metric = MarketMetric(index_value=float(final_index), rsi=float(rsi_val), vix_score=float(vix_score), price_score=float(price_score), yield_score=float(yield_score))
-            db.session.add(new_metric); db.session.commit()
+            new_metric = MarketMetric(
+                index_value=float(final_index), 
+                rsi=float(rsi_val), 
+                vix_score=float(vix_score), 
+                price_score=float(price_score), 
+                yield_score=float(yield_score)
+            )
+            db.session.add(new_metric)
+            db.session.commit()
         logger.info(f"Market Index updated: {final_index:.2f}")
-    except Exception as e: logger.error(f"Index error: {e}")
+    except Exception as e: 
+        logger.error(f"Index update failed: {e}")
+        logger.error(traceback.format_exc())
 
 def refresh_watchlist_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -143,14 +189,25 @@ def refresh_watchlist_data():
         try:
             t = yf.Ticker(symbol)
             info = t.fast_info
-            price = float(info.last_price)
-            change = price - float(info.previous_close)
-            pct = (change / float(info.previous_close)) * 100 if info.previous_close else 0
-            new_data.append({"symbol": symbol, "price": round(price, 2), "change": round(change, 2), "percent": round(pct, 2)})
+            if info is None: raise ValueError("fast_info is None")
+            
+            price = safe_float(info.last_price)
+            prev_close = safe_float(info.previous_close)
+            
+            if price == 0: raise ValueError("Price is 0")
+            
+            change = price - prev_close
+            pct = (change / prev_close) * 100 if prev_close else 0
+            new_data.append({
+                "symbol": symbol, 
+                "price": round(price, 2), 
+                "change": round(change, 2), 
+                "percent": round(pct, 2)
+            })
         except Exception as e:
             logger.error(f"Watchlist item {symbol} error: {e}")
             # Fallback to existing data if available
-            existing = next((x for x in watchlist_cache["data"] if x['symbol'] == symbol), None)
+            existing = next((x for x in watchlist_cache.get("data", []) if x.get('symbol') == symbol), None)
             if existing: new_data.append(existing)
 
     if new_data:
@@ -163,38 +220,53 @@ def refresh_nasdaq_data():
     global nasdaq_cache
     try:
         info = yf.Ticker("^NDX").fast_info
+        if info is None: raise ValueError("fast_info is None")
+        
+        lp = safe_float(info.last_price)
+        pc = safe_float(info.previous_close)
+        
+        if lp == 0: raise ValueError("Price is 0")
+        
         nasdaq_cache["data"] = {
-            "index": round(float(info.last_price), 2), 
-            "change": round(float(info.last_price - info.previous_close), 2), 
-            "percent": round(float((info.last_price - info.previous_close) / info.previous_close * 100), 2) if info.previous_close else 0,
+            "index": round(lp, 2), 
+            "change": round(lp - pc, 2), 
+            "percent": round((lp - pc) / pc * 100, 2) if pc else 0,
             "last_update": datetime.now().strftime("%H:%M:%S")
         }
         nasdaq_cache["last_update"] = datetime.utcnow()
         logger.info("Nasdaq updated")
-    except Exception as e: logger.error(f"Nasdaq error: {e}")
+    except Exception as e: 
+        logger.error(f"Nasdaq refresh failed: {e}")
 
 def refresh_macro_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global macro_cache
-    assets_map = {"DXY": "DX-Y.NYB", "GOLD": "GC=F", "BTC": "BTC-USD"}
+    assets_map = {"DXY": "DX-Y.NYB", "GOLD": "GC=F", "OIL": "BZ=F"}
     new_data = []
     
     for name, symbol in assets_map.items():
         try:
             t = yf.Ticker(symbol)
             info = t.fast_info
-            price = float(info.last_price)
-            pct = ((price - float(info.previous_close)) / float(info.previous_close)) * 100 if info.previous_close else 0
-            new_data.append({"name": name, "price": round(price, 2), "percent": round(pct, 2)})
+            if info is None: raise ValueError("fast_info is None")
+            
+            lp = safe_float(info.last_price)
+            pc = safe_float(info.previous_close)
+            
+            if lp == 0: raise ValueError("Price is 0")
+            
+            pct = ((lp - pc) / pc) * 100 if pc else 0
+            new_data.append({"name": name, "price": round(lp, 2), "percent": round(pct, 2)})
         except Exception as e:
             logger.error(f"Macro item {name} error: {e}")
-            existing = next((x for x in macro_cache["data"] if x['name'] == name), None)
+            existing = next((x for x in macro_cache.get("data", []) if x.get('name') == name), None)
             if existing: new_data.append(existing)
 
     if new_data:
         macro_cache["data"] = new_data
         macro_cache["last_update"] = datetime.utcnow()
         logger.info("Macro updated")
+
 
 def cleanup_old_data():
     try:
@@ -209,13 +281,20 @@ def cleanup_old_data():
 def background_worker():
     last_cleanup = 0
     while True:
-        update_market_index()
-        refresh_watchlist_data()
-        refresh_nasdaq_data()
-        refresh_macro_data()
-        if time.time() - last_cleanup > 86400:
-            cleanup_old_data(); last_cleanup = time.time()
-        time.sleep(600)
+        try:
+            update_market_index()
+            refresh_watchlist_data()
+            refresh_nasdaq_data()
+            refresh_macro_data()
+            
+            # Daily cleanup
+            if time.time() - last_cleanup > 86400:
+                cleanup_old_data()
+                last_cleanup = time.time()
+        except Exception as e:
+            logger.error(f"Worker loop error: {e}")
+            
+        time.sleep(60) # Update every 60 seconds for near real-time tracking
 
 # Routes
 @app.route('/api/market-index', methods=['GET'])
@@ -242,14 +321,14 @@ def get_watch():
 
 @app.route('/api/sitemap-urls', methods=['GET'])
 def get_sitemap_urls():
-    # Return dynamic analysis routes for SEO sitemap
+    # Return dynamic analysis routes
     analyses = Analysis.query.all()
     urls = []
     for a in analyses:
-        urls.append({
-            "loc": f"/analysis/{a.id}",
-            "lastmod": a.created_at.isoformat()
-        })
+        urls.append({"loc": f"/analysis/{a.id}", "lastmod": a.created_at.isoformat()})
+    
+    # Daily logs are handled by Nuxt Content sitemap integration automatically 
+    # since they are files in the content/ directory.
     return jsonify(urls)
 
 @app.route('/api/poll/status', methods=['GET'])
@@ -326,8 +405,157 @@ def get_market_quote():
 
 @app.route('/api/analysis', methods=['GET'])
 def get_all_analysis():
-    analyses = Analysis.query.order_by(Analysis.created_at.desc()).all()
+    # Public view: Only show non-deleted items
+    c_type = request.args.get('type', 'analysis')
+    query = Analysis.query.filter_by(is_deleted=False)
+    if c_type != 'all':
+        query = query.filter_by(content_type=c_type)
+    analyses = query.order_by(Analysis.created_at.desc()).all()
     return jsonify([a.to_dict() for a in analyses])
+
+@app.route('/api/admin/all-content', methods=['GET'])
+@require_admin
+def get_admin_content():
+    # Admin sees everything including trash
+    items = Analysis.query.order_by(Analysis.created_at.desc()).all()
+    return jsonify([a.to_dict() for a in items])
+
+@app.route('/api/analysis/<int:id>', methods=['GET'])
+def get_analysis_by_id(id):
+    a = Analysis.query.get_or_404(id)
+    if a.is_deleted: abort(404)
+    return jsonify(a.to_dict())
+
+@app.route('/api/analysis', methods=['POST'])
+@require_admin
+def create_analysis():
+    data = request.json
+    try:
+        new_analysis = Analysis(
+            title=data.get('title'),
+            summary=data.get('summary'),
+            content=data.get('content'),
+            category=data.get('category'),
+            cover=data.get('cover'),
+            content_type=data.get('content_type', 'analysis')
+        )
+        db.session.add(new_analysis)
+        db.session.commit()
+        return jsonify(new_analysis.to_dict()), 201
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/api/analysis/<int:id>', methods=['PUT'])
+@require_admin
+def update_analysis(id):
+    a = Analysis.query.get_or_404(id)
+    data = request.json
+    try:
+        a.title = data.get('title', a.title)
+        a.summary = data.get('summary', a.summary)
+        a.content = data.get('content', a.content)
+        a.category = data.get('category', a.category)
+        a.cover = data.get('cover', a.cover)
+        a.content_type = data.get('content_type', a.content_type)
+        db.session.commit()
+        return jsonify(a.to_dict())
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/api/analysis/<int:id>', methods=['DELETE'])
+@require_admin
+def delete_analysis(id):
+    a = Analysis.query.get_or_404(id)
+    try:
+        # Move to trash instead of real delete
+        a.is_deleted = True
+        a.deleted_at = datetime.utcnow()
+        db.session.commit()
+        return jsonify({"success": True, "message": "Moved to trash"})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/api/admin/restore/<int:id>', methods=['POST'])
+@require_admin
+def restore_analysis(id):
+    a = Analysis.query.get_or_404(id)
+    try:
+        a.is_deleted = False
+        a.deleted_at = None
+        db.session.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+@app.route('/api/admin/hard-delete/<int:id>', methods=['DELETE'])
+@require_admin
+def hard_delete_analysis(id):
+    a = Analysis.query.get_or_404(id)
+    try:
+        db.session.delete(a)
+        db.session.commit()
+        return jsonify({"success": True})
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 400
+
+import hashlib
+import werkzeug
+from werkzeug.utils import secure_filename
+
+# Configuration for uploads
+UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '../../frontend/public/uploads')
+ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg', 'gif', 'webp'}
+app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB Limit
+
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+
+@app.route('/api/uploads/<path:filename>')
+def serve_upload(filename):
+    from flask import send_from_directory
+    return send_from_directory(UPLOAD_FOLDER, filename)
+
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+@app.route('/api/upload', methods=['POST'])
+@require_admin
+def upload_file():
+    if 'file' not in request.files:
+        return jsonify({"error": "No file part"}), 400
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "No selected file"}), 400
+    
+    if file and allowed_file(file.filename):
+        # Generate a unique filename using hash to avoid duplicates and collisions
+        ext = file.filename.rsplit('.', 1)[1].lower()
+        file_content = file.read()
+        file_hash = hashlib.md5(file_content).hexdigest()
+        filename = f"{file_hash}.{ext}"
+        
+        filepath = os.path.join(UPLOAD_FOLDER, filename)
+        if not os.path.exists(filepath):
+            with open(filepath, 'wb') as f:
+                f.write(file_content)
+        
+        # Return the public URL path via API proxy
+        return jsonify({
+            "url": f"/api/uploads/{filename}",
+            "filename": filename
+        })
+    
+    return jsonify({"error": "File type not allowed"}), 400
+
+@app.route('/api/auth/verify', methods=['GET'])
+@require_admin
+def verify_token():
+    return jsonify({"status": "valid"})
 
 @app.route('/api/health', methods=['GET'])
 def health():

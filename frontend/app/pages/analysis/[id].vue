@@ -5,41 +5,47 @@ import { marked } from 'marked'
 const route = useRoute()
 const config = useRuntimeConfig()
 
-const { data: analysis, error } = await useFetch(`${config.public.apiBase}/analysis/${route.params.id}`)
+// Use a unique key for each article to prevent hydration issues
+const { data: analysis, error, pending } = await useFetch(`${config.public.apiBase}/analysis/${route.params.id}`, {
+  key: `analysis-detail-${route.params.id}`,
+  lazy: true,
+  server: true
+})
 
-// SEO Optimization
+// Safe data access wrapper
+const article = computed(() => analysis.value as any)
+
+// SEO Optimization with fallbacks
 useHead({
-  title: analysis.value ? (analysis.value as any).title : '投资分析',
+  title: article.value?.title || '正在加载分析...',
   meta: [
     { 
       name: 'description', 
-      content: analysis.value ? (analysis.value as any).summary : 'InvestCool 深度投资分析报告。' 
+      content: article.value?.summary || 'InvestCool 深度投资分析报告。' 
     },
-    { property: 'og:type', content: 'article' },
-    { property: 'og:title', content: analysis.value ? (analysis.value as any).title : '投资分析' }
+    { property: 'og:type', content: 'article' }
   ]
 })
 
 const scrollProgress = ref(0)
 
 const updateScrollProgress = () => {
-  const winScroll = document.documentElement.scrollTop
+  const winScroll = window.scrollY
   const height = document.documentElement.scrollHeight - document.documentElement.clientHeight
   scrollProgress.value = (winScroll / height) * 100
 }
 
 const parsedContent = computed(() => {
-  if (analysis.value && (analysis.value as any).content) {
-    return marked((analysis.value as any).content)
+  if (article.value?.content) {
+    return marked(article.value.content)
   }
   return ''
 })
 
 const readingTime = computed(() => {
-  if (analysis.value && (analysis.value as any).content) {
-    const words = (analysis.value as any).content.length
-    const time = Math.ceil(words / 400) // 假设中文每分钟阅读 400 字
-    return time
+  if (article.value?.content) {
+    const words = article.value.content.length
+    return Math.ceil(words / 400)
   }
   return 0
 })
@@ -51,7 +57,7 @@ const getCategoryLabel = (cat: string) => {
     'Macro Strategy': '宏观策略',
     'Semiconductors': '半导体'
   }
-  return map[cat] || cat
+  return map[cat] || cat || '技术洞察'
 }
 
 onMounted(() => {
@@ -64,87 +70,143 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <div class="analysis-detail-wrapper">
-    <!-- Progress Bar -->
-    <div class="scroll-progress-container">
-      <div class="scroll-progress-bar" :style="{ width: scrollProgress + '%' }"></div>
+  <div class="analysis-detail-page">
+    <!-- Top Progress Bar (Nuxt UI style) -->
+    <div class="progress-bar-wrapper">
+      <div class="progress-bar" :style="{ width: scrollProgress + '%' }"></div>
     </div>
 
-    <NuxtLink to="/analysis" class="back-link">
-      <Icon name="lucide:arrow-left" style="margin-right: 0.5rem;" /> 返回列表
-    </NuxtLink>
-
-    <div v-if="error" class="error-card">
-      <Icon name="lucide:alert-circle" />
-      <span>加载分析失败，请稍后重试。</span>
-    </div>
-
-    <article v-else-if="analysis" class="analysis-article">
-      <header class="article-header">
-        <div class="header-top">
-          <span class="category-badge">{{ getCategoryLabel((analysis as any).category) }}</span>
-          <span class="reading-meta">
-            <Icon name="lucide:clock" style="margin-right: 0.25rem; width: 0.8rem;" />
-            预计阅读 {{ readingTime }} 分钟
-          </span>
-        </div>
-        <h1 class="article-title">{{ (analysis as any).title }}</h1>
-        <div class="article-summary-box">
-          <div class="summary-label">核心摘要</div>
-          <p>{{ (analysis as any).summary }}</p>
-        </div>
+    <div class="container-narrow">
+      <header class="nav-header">
+        <NuxtLink to="/analysis" class="back-link">
+          <Icon name="lucide:arrow-left" class="icon" />
+          <span>返回投资分析</span>
+        </NuxtLink>
       </header>
 
-      <!-- Markdown Content -->
-      <div class="dynamic-markdown-pro" v-html="parsedContent"></div>
+      <!-- Loading State (Skeleton) -->
+      <div v-if="pending" class="loading-state">
+        <Skeleton width="120px" height="24px" radius="12px" class="mb-4" />
+        <Skeleton width="100%" height="48px" class="mb-8" />
+        <div class="summary-skeleton">
+          <Skeleton width="100%" height="100px" radius="1rem" />
+        </div>
+        <div class="content-skeleton mt-12">
+          <Skeleton v-for="i in 6" :key="i" width="100%" height="20px" class="mb-4" />
+        </div>
+      </div>
 
-      <footer class="article-footer">
-        <div class="share-section">
-          <span>分享观点：</span>
-          <div class="share-btns">
-            <button class="share-btn"><Icon name="lucide:link" /></button>
-            <button class="share-btn"><Icon name="lucide:twitter" /></button>
+      <!-- Error State -->
+      <div v-else-if="error || !article" class="error-wrapper">
+        <div class="error-card-modern">
+          <div class="error-icon-box">
+            <Icon name="lucide:file-warning" class="icon" />
+          </div>
+          <h3>文章加载失败</h3>
+          <p>很抱歉，我们无法获取该篇报告的内容。这可能是由于网络波动或文章已被移动。</p>
+          <div class="error-actions">
+            <NuxtLink to="/analysis" class="btn-primary">返回列表</NuxtLink>
+            <button @click="() => refreshNuxtData(`analysis-detail-${route.params.id}`)" class="btn-secondary">
+              重试加载
+            </button>
           </div>
         </div>
-        <div class="disclaimer">
-          免责声明：本文内容仅供参考，不构成任何投资建议。投资者据此操作，风险自担。
-        </div>
-      </footer>
-    </article>
+      </div>
+
+      <!-- Content State -->
+      <article v-else class="article-modern">
+        <header class="article-header">
+          <div class="article-meta-row">
+            <span class="category-tag-pill">{{ getCategoryLabel(article.category) }}</span>
+            <div class="meta-info">
+              <Icon name="lucide:calendar" class="icon" />
+              <span>{{ new Date(article.created_at).toLocaleDateString('zh-CN') }}</span>
+              <span class="divider">•</span>
+              <Icon name="lucide:clock" class="icon" />
+              <span>预计阅读 {{ readingTime }} 分钟</span>
+            </div>
+          </div>
+          
+          <h1 class="article-title">{{ article.title }}</h1>
+
+          <div v-if="article.cover" class="article-cover-wrapper">
+            <img :src="article.cover" :alt="article.title" class="article-cover-img" />
+          </div>
+          
+          <div class="summary-callout">
+            <div class="callout-label">
+              <Icon name="lucide:sparkles" class="icon" />
+              核心摘要
+            </div>
+            <p>{{ article.summary }}</p>
+          </div>
+        </header>
+
+        <div class="article-body prose-modern" v-html="parsedContent"></div>
+
+        <footer class="article-footer-modern">
+          <div class="footer-top">
+            <div class="share-group">
+              <span class="share-label">分享观点</span>
+              <div class="share-icons">
+                <button class="icon-btn"><Icon name="lucide:twitter" /></button>
+                <button class="icon-btn"><Icon name="lucide:linkedin" /></button>
+                <button class="icon-btn"><Icon name="lucide:link" /></button>
+              </div>
+            </div>
+          </div>
+          
+          <div class="disclaimer-modern">
+            <Icon name="lucide:info" class="icon" />
+            <p>免责声明：本文内容基于公开数据及 AI 辅助分析，仅供技术交流参考，不构成任何投资建议。市场有风险，投资需谨慎。</p>
+          </div>
+        </footer>
+      </article>
+    </div>
   </div>
 </template>
 
 <style scoped>
-.analysis-detail-wrapper {
-  max-width: 800px;
-  margin: 0 auto;
-  padding-bottom: 6rem;
+.analysis-detail-page {
+  padding-bottom: 8rem;
+  background-color: var(--bg-color);
 }
 
-.scroll-progress-container {
+.progress-bar-wrapper {
   position: fixed;
   top: 0;
   left: 0;
   width: 100%;
-  height: 3px;
+  height: 2px;
   background: transparent;
-  z-index: 2000;
+  z-index: 1000;
 }
 
-.scroll-progress-bar {
+.progress-bar {
   height: 100%;
   background: var(--accent-color);
   transition: width 0.1s ease-out;
+  box-shadow: 0 0 10px var(--accent-color);
+}
+
+.container-narrow {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 0 1.5rem;
+}
+
+.nav-header {
+  padding: 2rem 0;
 }
 
 .back-link {
-  display: flex;
+  display: inline-flex;
   align-items: center;
+  gap: 0.5rem;
   color: var(--text-secondary);
   text-decoration: none;
-  margin-bottom: 3rem;
+  font-size: 0.875rem;
   font-weight: 600;
-  font-size: 0.9rem;
   transition: color 0.2s;
 }
 
@@ -152,189 +214,466 @@ onUnmounted(() => {
   color: var(--accent-color);
 }
 
-.article-header {
-  margin-bottom: 3rem;
+.back-link .icon {
+  font-size: 1rem;
 }
 
-.header-top {
+/* Loading/Skeleton Styles */
+.mb-4 { margin-bottom: 1rem; }
+.mb-8 { margin-bottom: 2rem; }
+.mt-12 { margin-top: 3rem; }
+
+/* Article Styles */
+.article-header {
+  margin-bottom: 4rem;
+}
+
+.article-meta-row {
   display: flex;
+  flex-wrap: wrap;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2rem;
+  gap: 1rem;
 }
 
-.category-badge {
-  background: var(--hover-bg);
+.category-tag-pill {
+  background: rgba(59, 130, 246, 0.1);
   color: var(--accent-color);
-  padding: 0.3rem 0.8rem;
+  padding: 0.25rem 0.75rem;
   border-radius: 2rem;
   font-size: 0.75rem;
-  font-weight: 800;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
 }
 
-.reading-meta {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
+.meta-info {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.meta-info .icon {
+  width: 0.9rem;
+}
+
+.meta-info .divider {
+  margin: 0 0.25rem;
+  opacity: 0.3;
 }
 
 .article-title {
   font-size: 2.5rem;
   font-weight: 900;
-  line-height: 1.2;
-  margin-bottom: 2rem;
+  line-height: 1.15;
   color: var(--text-primary);
+  margin-bottom: 2.5rem;
+  letter-spacing: -0.02em;
 }
 
-.article-summary-box {
+.article-cover-wrapper {
+  margin-bottom: 3rem;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.1);
+  border: 1px solid var(--border-color);
+}
+
+.article-cover-img {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.summary-callout {
   background: var(--hover-bg);
+  border: 1px solid var(--border-color);
   padding: 1.5rem;
   border-radius: 1rem;
-  border-left: 4px solid var(--accent-color);
+  position: relative;
 }
 
-.summary-label {
+.callout-label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
   font-size: 0.75rem;
   font-weight: 800;
-  text-transform: uppercase;
   color: var(--accent-color);
-  margin-bottom: 0.5rem;
+  text-transform: uppercase;
+  margin-bottom: 0.75rem;
 }
 
-.article-summary-box p {
+.summary-callout p {
   margin: 0;
-  color: var(--text-primary);
   font-size: 1.1rem;
   line-height: 1.6;
+  color: var(--text-primary);
   font-weight: 500;
 }
 
-.article-footer {
-  margin-top: 5rem;
-  padding-top: 2rem;
-  border-top: 1px solid var(--border-color);
+/* Error Modern UI */
+.error-wrapper {
+  padding: 4rem 0;
 }
 
-.share-section {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  margin-bottom: 2rem;
-}
-
-.share-section span {
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.share-btns {
-  display: flex;
-  gap: 0.5rem;
-}
-
-.share-btn {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 50%;
-  border: 1px solid var(--border-color);
+.error-card-modern {
   background: var(--card-bg);
-  cursor: pointer;
+  border: 1px solid var(--border-color);
+  border-radius: 1.5rem;
+  padding: 3rem;
+  text-align: center;
+  box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05);
+}
+
+.error-icon-box {
+  width: 4rem;
+  height: 4rem;
+  background: #fef2f2;
+  color: #ef4444;
+  border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
+  margin: 0 auto 1.5rem;
+}
+
+.error-icon-box .icon {
+  font-size: 2rem;
+}
+
+.error-card-modern h3 {
+  font-size: 1.5rem;
+  font-weight: 800;
+  margin-bottom: 1rem;
+  color: var(--text-primary);
+}
+
+.error-card-modern p {
+  color: var(--text-secondary);
+  margin-bottom: 2rem;
+  line-height: 1.6;
+}
+
+.error-actions {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.btn-primary {
+  background: var(--accent-color);
+  color: white;
+  padding: 0.6rem 1.5rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  text-decoration: none;
+  transition: opacity 0.2s;
+}
+
+.btn-secondary {
+  background: var(--hover-bg);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 0.6rem 1.5rem;
+  border-radius: 0.75rem;
+  font-weight: 700;
+  cursor: pointer;
   transition: all 0.2s;
 }
 
-.share-btn:hover {
-  background: var(--hover-bg);
-  color: var(--accent-color);
-  border-color: var(--accent-color);
+.btn-secondary:hover {
+  background: var(--border-color);
 }
 
-.disclaimer {
-  font-size: 0.8rem;
-  color: var(--text-secondary);
-  background: var(--bg-color);
-  padding: 1rem;
-  border-radius: 0.5rem;
-  line-height: 1.5;
+/* Footer Modern */
+.article-footer-modern {
+  margin-top: 6rem;
+  padding-top: 3rem;
+  border-top: 1px solid var(--border-color);
 }
 
-.error-card {
-  padding: 2rem;
-  background: rgba(239, 68, 68, 0.1);
-  color: #ef4444;
-  border-radius: 1rem;
+.footer-top {
+  margin-bottom: 3rem;
+}
+
+.share-group {
   display: flex;
   align-items: center;
+  gap: 1.5rem;
+}
+
+.share-label {
+  font-weight: 800;
+  font-size: 0.875rem;
+  color: var(--text-primary);
+  text-transform: uppercase;
+}
+
+.share-icons {
+  display: flex;
   gap: 0.75rem;
+}
+
+.icon-btn {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 50%;
+  background: var(--card-bg);
+  border: 1px solid var(--border-color);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.icon-btn:hover {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  transform: translateY(-2px);
+}
+
+.disclaimer-modern {
+  background: var(--hover-bg);
+  padding: 1.5rem;
+  border-radius: 1rem;
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+}
+
+.disclaimer-modern .icon {
+  font-size: 1.25rem;
+  color: var(--text-secondary);
+  margin-top: 0.2rem;
+  flex-shrink: 0;
+}
+
+.disclaimer-modern p {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+@media (max-width: 640px) {
+  .article-title {
+    font-size: 2rem;
+  }
+  .article-meta-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
 }
 </style>
 
 <style>
-/* Global Markdown overrides for premium feel */
-.dynamic-markdown-pro {
-  line-height: 1.8;
-  font-size: 1.125rem;
+/* Modern Prose Overrides */
+.prose-modern {
   color: var(--text-primary);
+  line-height: 1.85;
+  font-size: 1.15rem;
 }
 
-.dynamic-markdown-pro h2 {
+.prose-modern h2 {
   font-size: 1.75rem;
   font-weight: 800;
-  margin: 3.5rem 0 1.5rem 0;
-  color: var(--text-primary);
+  margin: 4rem 0 1.5rem;
+  letter-spacing: -0.01em;
 }
 
-.dynamic-markdown-pro p {
-  margin-bottom: 1.5rem;
+.prose-modern p {
+  margin-bottom: 1.75rem;
 }
 
-.dynamic-markdown-pro blockquote {
-  font-size: 1.25rem;
-  border-left: none;
-  padding: 2rem;
-  margin: 2.5rem 0;
-  background: var(--hover-bg);
-  border-radius: 1rem;
-  position: relative;
-  font-style: normal;
-  color: var(--text-primary);
-  font-weight: 500;
+.prose-modern ul {
+  padding-left: 1.25rem;
+  margin-bottom: 2rem;
 }
 
-.dynamic-markdown-pro blockquote::before {
-  content: '"';
-  position: absolute;
-  top: 0.5rem;
-  left: 1rem;
-  font-size: 4rem;
-  color: var(--accent-color);
-  opacity: 0.2;
-  font-family: serif;
-}
-
-.dynamic-markdown-pro ul {
-  list-style: none;
-  padding-left: 0;
-}
-
-.dynamic-markdown-pro li {
-  position: relative;
-  padding-left: 1.5rem;
+.prose-modern li {
   margin-bottom: 0.75rem;
 }
 
-.dynamic-markdown-pro li::before {
-  content: "";
+.prose-modern strong {
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.prose-modern {
+  --text-main: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  line-height: 1.85;
+  font-size: 1.125rem;
+  letter-spacing: -0.011em;
+}
+
+.prose-modern :deep(h1), 
+.prose-modern :deep(h2), 
+.prose-modern :deep(h3) {
+  color: var(--text-main);
+  font-weight: 900;
+  letter-spacing: -0.04em;
+  line-height: 1.1;
+}
+
+.prose-modern :deep(h2) {
+  font-size: 2.25rem;
+  margin: 4.5rem 0 1.5rem;
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.prose-modern :deep(h3) {
+  font-size: 1.65rem;
+  margin: 3rem 0 1.25rem;
+}
+
+.prose-modern :deep(p) {
+  margin-bottom: 2rem;
+  color: var(--text-main);
+  opacity: 0.92;
+}
+
+.prose-modern :deep(blockquote) {
+  margin: 3.5rem 0;
+  padding: 2rem 2.5rem;
+  background: var(--hover-bg);
+  border-left: 4px solid var(--accent-color);
+  border-radius: 0 1.5rem 1.5rem 0;
+  font-style: italic;
+  font-size: 1.35rem;
+  line-height: 1.6;
+  color: var(--text-main);
+  position: relative;
+}
+
+.prose-modern :deep(blockquote::before) {
+  content: '“';
   position: absolute;
-  left: 0;
-  top: 0.7rem;
-  width: 0.5rem;
-  height: 0.5rem;
+  top: 0.5rem;
+  left: 0.5rem;
+  font-size: 4rem;
+  opacity: 0.1;
+  font-family: serif;
+}
+
+.prose-modern :deep(code) {
+  background: var(--hover-bg);
+  padding: 0.2rem 0.45rem;
+  border-radius: 0.4rem;
+  font-size: 0.9em;
+  font-family: 'JetBrains Mono', monospace;
+  color: var(--accent-color);
+  border: 1px solid var(--border-color);
+}
+
+.prose-modern :deep(pre) {
+  margin: 3rem 0;
+  background: #0f172a;
+  padding: 2rem;
+  border-radius: 1.5rem;
+  overflow-x: auto;
+  box-shadow: inset 0 2px 10px rgba(0,0,0,0.2);
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+.dark .prose-modern :deep(pre) {
+  background: #020617;
+}
+
+.prose-modern :deep(pre code) {
+  background: transparent;
+  padding: 0;
+  border: none;
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  line-height: 1.7;
+}
+
+.prose-modern :deep(img) {
+  width: 100%;
+  height: auto;
+  border-radius: 2rem;
+  margin: 4.5rem auto;
+  display: block;
+  box-shadow: 0 30px 100px -20px rgba(0,0,0,0.25);
+  border: 1px solid var(--border-color);
+}
+
+.prose-modern :deep(ul), .prose-modern :deep(ol) {
+  margin-bottom: 2.5rem;
+  padding-left: 1.5rem;
+}
+
+.prose-modern :deep(li) {
+  margin-bottom: 0.75rem;
+  position: relative;
+}
+
+.prose-modern :deep(a) {
+  color: var(--accent-color);
+  text-decoration: none;
+  font-weight: 700;
+  box-shadow: inset 0 -2px 0 var(--accent-color);
+  transition: all 0.2s ease;
+}
+
+.prose-modern :deep(a:hover) {
   background: var(--accent-color);
-  border-radius: 50%;
-  opacity: 0.5;
+  color: white;
+  border-radius: 0.2rem;
+}
+
+/* --- Table Enhancements --- */
+.prose-modern :deep(table) {
+  width: 100%;
+  margin: 3rem 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 1.25rem;
+  overflow: hidden;
+  font-size: 0.95rem;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+}
+
+.prose-modern :deep(thead) {
+  background: var(--hover-bg);
+}
+
+.prose-modern :deep(th) {
+  padding: 1.25rem 1.5rem;
+  text-align: left;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.prose-modern :deep(td) {
+  padding: 1.25rem 1.5rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-main);
+  transition: background 0.2s ease;
+}
+
+.prose-modern :deep(tr:last-child td) {
+  border-bottom: none;
+}
+
+.prose-modern :deep(tbody tr:nth-child(even)) {
+  background: rgba(var(--accent-color-rgb), 0.02);
+}
+
+.prose-modern :deep(tbody tr:hover td) {
+  background: var(--hover-bg);
 }
 </style>

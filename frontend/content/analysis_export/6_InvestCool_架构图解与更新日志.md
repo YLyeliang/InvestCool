@@ -2,7 +2,11 @@
 title: 'InvestCool 架构图解与更新日志'
 description: '实时记录 InvestCool 的系统架构演进与全站功能更新。'
 category: '开源项目'
-cover: '/nasdaq_war_impact.png'
+cover: '/uploads/e9799cebf5267c30f070c3945af55117.png'
+content_type: 'tutorial'
+created_at: '2026-03-14 21:55:24.062973'
+is_deleted: False
+db_id: 6
 ---
 
 # InvestCool 架构图解与更新日志
@@ -21,23 +25,6 @@ InvestCool 采用了现代化的 **前后端分离 (Decoupled)** 架构：
 ---
 
 ## 🛠️ 全站更新日志
-
-### 📅 2026-03-16 (Invest Studio Harmony 2.0 & Backend Stability)
-
-#### 1. Invest Studio "Harmony 2.0" 视觉平衡重构 (UI Refinement)
-- **瑞士网格系统 (Grid Alignment)**: 彻底重构布局逻辑，通过标准化的横向内边距与 50/50 比例分配，解决文字与容器边缘“贴合不严”的视觉违和感。
-- **极简排版精度 (Precision Typography)**:
-    - **Prose-Invest 引擎**: 升级 Markdown 渲染样式，优化行高至 1.8，段落间距更加和谐，确保长文阅读的呼吸感。
-    - **层级清晰化**: 标题采用 900 超重黑体，并规范了数值与单位的对齐方式（Base-line alignment）。
-- **去噪设计 (Visual De-cluttering)**: 移除干扰性的渐变背景与超大背景图标，采用细腻的 Slate 描边与单色阴影，让创作者完全聚焦于内容。
-- **编辑器沉浸增强**: 增加了输入区与预览区的视觉中轴线，并为元数据区域增加了侧边呼吸条指示。
-
-#### 2. 后端数据抓取鲁棒性加固 (Backend Resilience)
-- **NoneType 全局防御**: 针对雅虎财经数据回传异常，实现全链路安全校验，彻底解决“不可索引”导致的后台崩溃。
-- **智能数值转换**: 引入 `safe_float` 转换层，确保在金融数据缺失时系统能平滑降级至默认值。
-
-#### 3. 生产环境构建优化 (Build Performance)
-- **内存受限适配**: 成功解决了 2GB 内存服务器在 Nuxt 4 构建时的 OOM 问题，通过精确控制 `max-old-space-size` 提升构建稳定性。
 
 ### 📅 2026-03-12 (Luxury Content Experience)
 

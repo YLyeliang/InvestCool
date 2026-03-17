@@ -1,9 +1,9 @@
 <script setup lang="ts">
 const config = useRuntimeConfig()
-const { data: allArticles } = await useFetch(`${config.public.apiBase}/analysis`)
+const { data: allArticles } = await useFetch(`${config.public.apiBase}/analysis?type=analysis`)
 
 const selectedCategory = ref('All')
-const categories = ['All', 'Market Trends', 'AI Infrastructure', 'Macro Strategy', 'Semiconductors']
+const categories = ['All', '深度分析', '市场趋势', 'AI 基础设施', '宏观策略', '半导体']
 
 const filteredArticles = computed(() => {
   if (!allArticles.value) return []
@@ -16,7 +16,12 @@ const getCategoryLabel = (cat: string) => {
     'Market Trends': '市场趋势',
     'AI Infrastructure': 'AI 基础设施',
     'Macro Strategy': '宏观策略',
-    'Semiconductors': '半导体'
+    'Semiconductors': '半导体',
+    '深度分析': '深度分析',
+    '市场趋势': '市场趋势',
+    'AI 基础设施': 'AI 基础设施',
+    '宏观策略': '宏观策略',
+    '半导体': '半导体'
   }
   return map[cat] || cat
 }
@@ -53,15 +58,21 @@ const formatDate = (dateStr: string) => {
         :to="`/analysis/${article.id}`"
         class="analysis-card"
       >
-        <div class="card-meta">
-          <span class="card-category">{{ getCategoryLabel(article.category) }}</span>
-          <span class="card-date">{{ formatDate(article.created_at) }}</span>
+        <div v-if="article.cover" class="card-cover-wrapper">
+          <img :src="article.cover" :alt="article.title" class="card-cover-img" />
         </div>
-        <h3 class="card-title">{{ article.title }}</h3>
-        <p class="card-summary">{{ article.summary }}</p>
-        <div class="card-footer">
-          <span class="read-more">阅读全文</span>
-          <Icon name="lucide:chevron-right" class="footer-icon" />
+        
+        <div class="card-content">
+          <div class="card-meta">
+            <span class="card-category">{{ getCategoryLabel(article.category) }}</span>
+            <span class="card-date">{{ formatDate(article.created_at) }}</span>
+          </div>
+          <h3 class="card-title">{{ article.title }}</h3>
+          <p class="card-summary">{{ article.summary }}</p>
+          <div class="card-footer">
+            <span class="read-more">阅读全文</span>
+            <Icon name="lucide:chevron-right" class="footer-icon" />
+          </div>
         </div>
       </NuxtLink>
     </div>
@@ -126,13 +137,38 @@ const formatDate = (dateStr: string) => {
 .analysis-card {
   background: var(--card-bg);
   border: 1px solid var(--border-color);
-  border-radius: 1rem;
-  padding: 1.5rem;
+  border-radius: 1.5rem;
   text-decoration: none;
   color: inherit;
   display: flex;
   flex-direction: column;
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.card-cover-wrapper {
+  aspect-ratio: 16 / 9;
+  width: 100%;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.card-cover-img {
+  width: 100%;
+  height: 100%;
+  object-cover: cover;
+  transition: transform 0.5s ease;
+}
+
+.analysis-card:hover .card-cover-img {
+  transform: scale(1.05);
+}
+
+.card-content {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  flex-grow: 1;
 }
 
 .analysis-card:hover {

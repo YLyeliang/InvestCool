@@ -1,59 +1,207 @@
 <script setup lang="ts">
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { marked } from 'marked'
+
 const route = useRoute()
+const config = useRuntimeConfig()
 
-// Nuxt Content v3 with collections expects the path relative to the collection source
-// If route is /tutorials/architecture, the file is at tutorials/architecture.md
-// The path in the collection will be /architecture
-const relativePath = route.path.replace('/tutorials', '') || '/'
-
-const { data: page } = await useAsyncData('tutorial-' + route.path, () => {
-  return queryCollection('tutorials').path(relativePath).first()
+// In our new dynamic setup, tutorials are accessed via ID like /tutorials/5
+// The slug will be the ID
+const id = computed(() => {
+  const parts = route.params.slug as string[]
+  return parts[0]
 })
+
+const { data: tutorial, error, pending } = await useFetch(`${config.public.apiBase}/analysis/${id.value}`, {
+  key: `tutorial-detail-${id.value}`,
+  lazy: true,
+  server: true
+})
+
+const page = computed(() => tutorial.value as any)
 
 // SEO Optimization
 useHead({
-  title: page.value ? page.value.title : '教程',
+  title: page.value ? page.value.title : '正在加载教程...',
   meta: [
     { 
       name: 'description', 
-      content: page.value ? page.value.description : 'InvestCool 技术开发与投资工具教程。' 
+      content: page.value ? page.value.summary : 'InvestCool 技术开发与投资工具教程。' 
     },
     { property: 'og:type', content: 'article' }
   ]
 })
 
-if (!page.value) {
-  // If not found in tutorials collection, try general path or throw 404
-  console.error('Page not found in tutorials collection:', relativePath)
+const scrollProgress = ref(0)
+const updateScrollProgress = () => {
+  const winScroll = window.scrollY
+  const height = document.documentElement.scrollHeight - document.documentElement.clientHeight
+  scrollProgress.value = (winScroll / height) * 100
 }
+
+const parsedContent = computed(() => {
+  if (page.value?.content) {
+    return marked(page.value.content)
+  }
+  return ''
+})
+
+onMounted(() => {
+  window.addEventListener('scroll', updateScrollProgress)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('scroll', updateScrollProgress)
+})
 </script>
 
 <template>
-  <div class="tutorial-page">
-    <NuxtLink to="/tutorials" style="display: flex; align-items: center; color: var(--text-secondary); text-decoration: none; margin-bottom: 2rem; font-weight: 600;">
-      <Icon name="lucide:arrow-left" style="margin-right: 0.5rem;" /> 返回教程列表
-    </NuxtLink>
-    
-    <article class="prose" v-if="page">
-      <h1 style="font-size: 2.25rem; font-weight: 800; margin-bottom: 1.5rem;">{{ page.title }}</h1>
-      <ContentRenderer :value="page" />
-    </article>
+  <div class="tutorial-detail-page">
+    <!-- Top Progress Bar -->
+    <div class="progress-bar-wrapper">
+      <div class="progress-bar" :style="{ width: scrollProgress + '%' }"></div>
+    </div>
 
-    <div v-else style="padding: 4rem 0; text-align: center;">
-      <h2 style="font-size: 1.5rem; font-weight: 700; margin-bottom: 1rem;">内容加载中或未找到</h2>
-      <p style="color: var(--text-secondary);">请检查路径是否正确，或者返回列表重新选择。</p>
-      <NuxtLink to="/tutorials" style="display: inline-block; margin-top: 2rem; color: var(--accent-color); font-weight: 600;">返回教程首页</NuxtLink>
+    <div class="container-narrow">
+      <header class="nav-header">
+        <NuxtLink to="/tutorials" class="back-link">
+          <Icon name="lucide:arrow-left" class="icon" />
+          <span>返回教程列表</span>
+        </NuxtLink>
+      </header>
+
+      <!-- Loading State -->
+      <div v-if="pending" class="loading-state">
+        <Skeleton width="100%" height="48px" class="mb-8" />
+        <Skeleton width="100%" height="200px" radius="1rem" class="mb-12" />
+        <Skeleton v-for="i in 8" :key="i" width="100%" height="20px" class="mb-4" />
+      </div>
+
+      <!-- Error State -->
+      <div v-else-if="error || !page" class="error-card">
+        <Icon name="lucide:file-x" class="error-icon" />
+        <h3>教程未找到</h3>
+        <p>抱歉，该教程可能已被移动或删除。</p>
+        <NuxtLink to="/tutorials" class="btn-primary mt-4">查看所有教程</NuxtLink>
+      </div>
+
+      <!-- Content State -->
+      <article v-else class="tutorial-article">
+        <header class="article-header">
+          <div class="category-tag">{{ page.category }}</div>
+          <h1 class="article-title">{{ page.title }}</h1>
+          <div class="article-meta">
+            <Icon name="lucide:calendar" class="meta-icon" />
+            <span>发布于 {{ new Date(page.created_at).toLocaleDateString('zh-CN') }}</span>
+          </div>
+        </header>
+
+        <div v-if="page.cover" class="article-cover">
+          <img :src="page.cover" :alt="page.title" />
+        </div>
+
+        <div class="article-body prose-modern" v-html="parsedContent"></div>
+
+        <footer class="article-footer">
+          <div class="disclaimer">
+            本文为 InvestCool 原创技术教程，转载请注明出处。
+          </div>
+        </footer>
+      </article>
     </div>
   </div>
 </template>
 
+<style scoped>
+.tutorial-detail-page {
+  padding-bottom: 6rem;
+}
+
+.progress-bar-wrapper {
+  position: fixed;
+  top: 0; left: 0; width: 100%; height: 3px;
+  background: transparent; z-index: 1000;
+}
+
+.progress-bar {
+  height: 100%; background: var(--accent-color);
+  transition: width 0.1s ease-out;
+}
+
+.container-narrow {
+  max-width: 800px; margin: 0 auto; padding: 0 1.5rem;
+}
+
+.nav-header { padding: 2rem 0; }
+
+.back-link {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  color: var(--text-secondary); text-decoration: none;
+  font-weight: 600; font-size: 0.9rem;
+}
+
+.article-header { margin-bottom: 3rem; }
+
+.category-tag {
+  color: var(--accent-color); font-weight: 800; font-size: 0.75rem;
+  text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 1rem;
+}
+
+.article-title {
+  font-size: 2.5rem; font-weight: 900; line-height: 1.2;
+  color: var(--text-primary); margin-bottom: 1.5rem;
+}
+
+.article-meta {
+  display: flex; align-items: center; gap: 0.5rem;
+  color: var(--text-secondary); font-size: 0.85rem;
+}
+
+.article-cover {
+  width: 100%; height: 350px; border-radius: 1.5rem;
+  overflow: hidden; margin-bottom: 4rem;
+  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.1);
+}
+
+.article-cover img { width: 100%; height: 100%; object-fit: cover; }
+
+.article-footer {
+  margin-top: 5rem; padding-top: 2rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.disclaimer {
+  font-size: 0.85rem; color: var(--text-secondary);
+  background: var(--hover-bg); padding: 1.5rem; border-radius: 1rem;
+}
+
+.error-card {
+  text-align: center; padding: 5rem 2rem; background: var(--card-bg);
+  border-radius: 1.5rem; border: 1px solid var(--border-color);
+}
+
+.error-icon { font-size: 3rem; color: #ef4444; margin-bottom: 1.5rem; }
+
+.btn-primary {
+  display: inline-block; background: var(--accent-color); color: white;
+  padding: 0.75rem 2rem; border-radius: 0.75rem;
+  text-decoration: none; font-weight: 700;
+}
+
+.mb-4 { margin-bottom: 1rem; }
+.mb-8 { margin-bottom: 2rem; }
+.mb-12 { margin-bottom: 3rem; }
+</style>
+
 <style>
-.prose { max-width: 100%; line-height: 1.7; }
-.prose h2 { font-size: 1.5rem; font-weight: 700; margin-top: 2.5rem; margin-bottom: 1rem; border-bottom: 1px solid var(--border-color); padding-bottom: 0.5rem; }
-.prose h3 { font-size: 1.25rem; font-weight: 700; margin-top: 2rem; margin-bottom: 0.75rem; }
-.prose p { margin-bottom: 1.25rem; color: var(--text-primary); }
-.prose ul, .prose ol { margin-bottom: 1.25rem; padding-left: 1.5rem; }
-.prose li { margin-bottom: 0.5rem; }
-.prose strong { color: var(--text-primary); font-weight: 700; }
-.prose hr { border: none; border-top: 1px solid var(--border-color); margin: 3rem 0; }
+.prose-modern { line-height: 1.8; font-size: 1.125rem; color: var(--text-primary); }
+.prose-modern h2 { font-size: 1.75rem; font-weight: 800; margin: 3.5rem 0 1.5rem; }
+.prose-modern p { margin-bottom: 1.5rem; }
+.prose-modern ul, .prose-modern ol { padding-left: 1.5rem; margin-bottom: 2rem; }
+.prose-modern li { margin-bottom: 0.75rem; }
+.prose-modern img { max-width: 100%; border-radius: 1rem; margin: 2rem 0; }
+.prose-modern blockquote {
+  border-left: 4px solid var(--accent-color); padding: 1rem 2rem;
+  background: var(--hover-bg); margin: 2.5rem 0; font-style: italic;
+}
 </style>

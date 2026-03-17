@@ -13,97 +13,126 @@ watch(() => route.path, () => {
 </script>
 
 <template>
-  <div class="app-container" :class="{ 'menu-open': isMobileMenuOpen }">
-    <!-- Mobile Header -->
-    <header class="mobile-header">
-      <button class="menu-toggle" @click="toggleMobileMenu">
-        <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" />
-      </button>
-      <NuxtLink to="/" class="logo-link">
-        <h1 style="font-size: 1.25rem; font-weight: 800; color: var(--accent-color); margin: 0;">InvestCool</h1>
-      </NuxtLink>
-      <div style="width: 2.5rem;"></div> <!-- Placeholder to balance the left button -->
+  <div class="app-layout" :class="{ 'menu-open': isMobileMenuOpen }">
+    <!-- Global Top Header -->
+    <header class="site-header">
+      <div class="header-content">
+        <!-- Logo (Left aligned) -->
+        <div class="header-left">
+          <button class="menu-toggle mobile-only" @click="toggleMobileMenu">
+            <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" />
+          </button>
+          <NuxtLink to="/" class="logo-link">
+            <h1 class="logo-text">InvestCool <small class="v-tag">v2.0</small></h1>
+          </NuxtLink>
+        </div>
+
+        <!-- Navigation Links (Centered) -->
+        <nav class="header-center">
+          <div class="nav-links">
+            <NuxtLink to="/" class="top-nav-item">Home</NuxtLink>
+            <NuxtLink to="/community/wechat" class="top-nav-item">加入社区</NuxtLink>
+            <NuxtLink to="/daily" class="top-nav-item">每日信息</NuxtLink>
+          </div>
+        </nav>
+
+        <!-- Right Side -->
+        <div class="header-right hide-mobile">
+          <NuxtLink to="/admin" class="admin-icon-link">
+            <Icon name="lucide:user-cog" />
+          </NuxtLink>
+        </div>
+      </div>
     </header>
 
-    <!-- Overlay for mobile -->
-    <div v-if="isMobileMenuOpen" class="menu-overlay" @click="toggleMobileMenu"></div>
-
-    <!-- Left Sidebar: Navigation -->
-    <aside class="left-sidebar" :class="{ 'is-active': isMobileMenuOpen }">
-      <div class="logo hide-mobile">
-        <NuxtLink to="/" class="logo-link">
-          <h1 style="font-size: 1.5rem; font-weight: 800; color: var(--accent-color); margin-bottom: 2rem;">InvestCool <small style="font-size: 0.6rem; vertical-align: middle; opacity: 0.5;">v2.0-API</small></h1>
-        </NuxtLink>
-      </div>
-      
-      <nav>
-        <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 1rem; letter-spacing: 0.05em;">菜单</div>
-        <NuxtLink to="/" class="nav-item">
-          <Icon name="lucide:home" style="margin-right: 0.75rem" /> 首页
-        </NuxtLink>
-        <NuxtLink to="/analysis" class="nav-item">
-          <Icon name="lucide:trending-up" style="margin-right: 0.75rem" /> 投资分析
-        </NuxtLink>
-        <NuxtLink to="/tutorials" class="nav-item">
-          <Icon name="lucide:book-open" style="margin-right: 0.75rem" /> 技术教程
-        </NuxtLink>
-        <NuxtLink to="/tools" class="nav-item">
-          <Icon name="lucide:wrench" style="margin-right: 0.75rem" /> 实用工具
-        </NuxtLink>
-      </nav>
-
-      <div style="margin-top: 3rem;">
-        <div style="font-size: 0.75rem; text-transform: uppercase; color: var(--text-secondary); margin-bottom: 1rem; letter-spacing: 0.05em;">精选系列</div>
-        <NuxtLink to="/series/python" class="nav-item">Python 高级进阶</NuxtLink>
-        <NuxtLink to="/series/macro" class="nav-item">全球宏观观察</NuxtLink>
-        <NuxtLink to="/series/ai" class="nav-item">AI 赋能投资</NuxtLink>
-      </div>
-
-      <div style="margin-top: auto; padding-top: 2rem;">
-        <ThemeToggle />
-      </div>
-    </aside>
-
-    <!-- Main Content: Feed -->
-    <main class="main-feed">
-      <slot />
-    </main>
-
-    <!-- Right Panel: Widgets -->
-    <aside class="right-panel">
-      <!-- Social Media QRCodes (Primary) -->
-      <div class="card" style="padding: 1.25rem;">
-        <h3 style="font-size: 1rem; margin-bottom: 1rem;">关注我</h3>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; text-align: center;">
-          <div>
-            <img src="/images/qrcodes/qr1.jpg" alt="公众号" style="width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);" />
-            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.5rem;">公众号</div>
+    <!-- Main Page Body -->
+    <div class="page-body">
+      <!-- Left Sidebar: Reorganized Sections -->
+      <aside class="left-sidebar" :class="{ 'is-active': isMobileMenuOpen }">
+        <div v-if="isMobileMenuOpen" class="menu-overlay" @click="toggleMobileMenu"></div>
+        
+        <nav class="sidebar-nav">
+          <!-- Section 1: Investment -->
+          <div class="nav-section">
+            <div class="nav-section-label">投资</div>
+            <NuxtLink to="/" class="nav-item">
+              <Icon name="lucide:layout-dashboard" class="nav-icon" /> 市场概览
+            </NuxtLink>
+            <NuxtLink to="/analysis" class="nav-item">
+              <Icon name="lucide:trending-up" class="nav-icon" /> 深度分析
+            </NuxtLink>
+            <NuxtLink to="/tools" class="nav-item">
+              <Icon name="lucide:wrench" class="nav-icon" /> 策略工具
+            </NuxtLink>
           </div>
-          <div>
-            <img src="/images/qrcodes/qr2.jpg" alt="小红书" style="width: 100%; border-radius: 0.5rem; border: 1px solid var(--border-color);" />
-            <div style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 0.5rem;">小红书</div>
+
+          <!-- Section 2: Tutorials -->
+          <div class="nav-section">
+            <div class="nav-section-label">教程</div>
+            <NuxtLink to="/ai" class="nav-item">
+              <Icon name="lucide:brain-circuit" class="nav-icon" /> AI 赋能
+            </NuxtLink>
+            <NuxtLink to="/tutorials" class="nav-item">
+              <Icon name="lucide:github" class="nav-icon" /> 开源项目
+            </NuxtLink>
+          </div>
+
+          <!-- Section 3: Community -->
+          <div class="nav-section">
+            <div class="nav-section-label">社区</div>
+            <NuxtLink to="/daily" class="nav-item">
+              <Icon name="lucide:calendar-days" class="nav-icon" /> 每日信息
+            </NuxtLink>
+            <NuxtLink to="/community/wechat" class="nav-item">
+              <Icon name="lucide:users" class="nav-icon" /> 微信群组
+            </NuxtLink>
+          </div>
+
+          <!-- Section 4: Links -->
+          <div class="nav-section">
+            <div class="nav-section-label">Links</div>
+            <a href="https://github.com" target="_blank" class="nav-item">
+              <Icon name="lucide:github" class="nav-icon" /> GitHub
+            </a>
+            <a href="https://tradingview.com" target="_blank" class="nav-item">
+              <Icon name="lucide:line-chart" class="nav-icon" /> TradingView
+            </a>
+          </div>
+        </nav>
+
+        <div class="sidebar-footer">
+          <ThemeToggle />
+        </div>
+      </aside>
+
+      <!-- Center Content Area -->
+      <main class="main-feed">
+        <slot />
+      </main>
+
+      <!-- Right Panel -->
+      <aside class="right-panel">
+        <div class="card social-card">
+          <h3 class="widget-title">关注我</h3>
+          <div class="qr-grid">
+            <div class="qr-item">
+              <img src="/images/qrcodes/qr1.jpg" alt="公众号" class="qr-img" />
+              <span>公众号</span>
+            </div>
+            <div class="qr-item">
+              <img src="/images/qrcodes/qr2.jpg" alt="小红书" class="qr-img" />
+              <span>小红书</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <!-- Magnificent Seven Watchlist -->
-      <TickerWatchlist />
+        <TickerWatchlist />
 
-      <!-- Sentiment Trend Chart -->
-      <LazySentimentTrendChart />
+        <MarketQuoteCard />
+      </aside>
+    </div>
 
-      <div class="card" style="padding: 1.25rem; margin-top: 1.5rem; border-left: 4px solid var(--accent-color);">
-        <h3 style="font-size: 1rem; margin-bottom: 0.75rem;">每日交易锦报</h3>
-        <p style="font-size: 0.875rem; font-style: italic; color: var(--text-secondary); line-height: 1.5;">
-          "在市场贪婪时保持谨慎，在市场恐惧时寻找机会。纪律比天赋更重要。"
-        </p>
-        <div style="margin-top: 1rem; font-size: 0.75rem; font-weight: 600; color: var(--accent-color);">
-          —— 投资笔记 2026.03.12
-        </div>
-      </div>
-    </aside>
-
-    <!-- Mobile Tab Bar Navigation -->
+    <!-- Mobile Navigation (Bottom) -->
     <nav class="mobile-tab-bar">
       <NuxtLink to="/" class="tab-item">
         <Icon name="lucide:home" class="tab-icon" />
@@ -126,8 +155,12 @@ watch(() => route.path, () => {
 </template>
 
 <style scoped>
-.logo-link {
-  text-decoration: none;
-  display: block;
-}
+.logo-link { text-decoration: none; display: block; }
+.logo-text { font-size: 1.25rem; font-weight: 900; color: var(--accent-color); margin: 0; letter-spacing: -0.02em; }
+.v-tag { font-size: 0.6rem; font-weight: 600; vertical-align: middle; opacity: 0.5; background: var(--hover-bg); padding: 0.1rem 0.3rem; border-radius: 0.2rem; margin-left: 0.2rem; }
+.admin-icon-link { color: var(--text-secondary); font-size: 1.25rem; transition: color 0.2s; }
+.admin-icon-link:hover { color: var(--accent-color); }
+
+.nav-section { margin-bottom: 2rem; }
+.nav-section:last-child { margin-bottom: 0; }
 </style>
