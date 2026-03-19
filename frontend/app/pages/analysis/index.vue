@@ -3,7 +3,7 @@ const config = useRuntimeConfig()
 const { data: allArticles } = await useFetch(`${config.public.apiBase}/analysis?type=analysis`)
 
 const selectedCategory = ref('All')
-const categories = ['All', '深度分析', '市场趋势', 'AI 基础设施', '宏观策略', '半导体']
+const categories = ['All', '深度分析', '市场趋势', 'AI 基础设施', '宏观策略', '半导体', '投资入门']
 
 const filteredArticles = computed(() => {
   if (!allArticles.value) return []
@@ -21,7 +21,8 @@ const getCategoryLabel = (cat: string) => {
     '市场趋势': '市场趋势',
     'AI 基础设施': 'AI 基础设施',
     '宏观策略': '宏观策略',
-    '半导体': '半导体'
+    '半导体': '半导体',
+    '投资入门': '投资入门'
   }
   return map[cat] || cat
 }

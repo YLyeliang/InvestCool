@@ -606,6 +606,27 @@ onUnmounted(() => {
   border: 1px solid var(--border-color);
 }
 
+.prose-modern :deep(.video-container) {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 4.5rem 0;
+  border-radius: 2rem;
+  overflow: hidden;
+  box-shadow: 0 30px 100px -20px rgba(0,0,0,0.3);
+  background: #000;
+  border: 1px solid var(--border-color);
+}
+
+.prose-modern :deep(.video-container iframe),
+.prose-modern :deep(.video-container video) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
+
 .prose-modern :deep(ul), .prose-modern :deep(ol) {
   margin-bottom: 2.5rem;
   padding-left: 1.5rem;
@@ -630,17 +651,16 @@ onUnmounted(() => {
   border-radius: 0.2rem;
 }
 
-/* --- Table Enhancements --- */
+/* --- Table Enhancements (High Contrast Grid) --- */
 .prose-modern :deep(table) {
   width: 100%;
-  margin: 3rem 0;
-  border-collapse: separate;
-  border-spacing: 0;
+  margin: 3.5rem 0;
+  border-collapse: collapse; /* 改为合并边框以获得清晰线条 */
   border: 1px solid var(--border-color);
-  border-radius: 1.25rem;
+  border-radius: 1rem;
   overflow: hidden;
   font-size: 0.95rem;
-  box-shadow: 0 4px 20px rgba(0,0,0,0.03);
+  box-shadow: 0 4px 30px rgba(0,0,0,0.05);
 }
 
 .prose-modern :deep(thead) {
@@ -648,32 +668,30 @@ onUnmounted(() => {
 }
 
 .prose-modern :deep(th) {
-  padding: 1.25rem 1.5rem;
+  padding: 1rem 1.25rem;
   text-align: left;
   font-weight: 900;
   text-transform: uppercase;
   letter-spacing: 0.05em;
   font-size: 0.75rem;
   color: var(--text-secondary);
-  border-bottom: 1px solid var(--border-color);
+  border: 1px solid var(--border-color); /* 清晰的网格线 */
+  background: rgba(var(--accent-color-rgb), 0.03);
 }
 
 .prose-modern :deep(td) {
-  padding: 1.25rem 1.5rem;
-  border-bottom: 1px solid var(--border-color);
+  padding: 1rem 1.25rem;
+  border: 1px solid var(--border-color); /* 清晰的网格线 */
   color: var(--text-main);
-  transition: background 0.2s ease;
-}
-
-.prose-modern :deep(tr:last-child td) {
-  border-bottom: none;
+  transition: all 0.2s ease;
 }
 
 .prose-modern :deep(tbody tr:nth-child(even)) {
-  background: rgba(var(--accent-color-rgb), 0.02);
+  background: rgba(var(--accent-color-rgb), 0.015);
 }
 
 .prose-modern :deep(tbody tr:hover td) {
   background: var(--hover-bg);
+  color: var(--accent-color);
 }
 </style>

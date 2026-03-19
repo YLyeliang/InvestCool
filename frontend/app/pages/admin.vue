@@ -192,6 +192,25 @@ const insertImage = async (e: any) => {
   }
 };
 
+const insertVideo = () => {
+  const url = prompt('请输入视频链接 (支持 YouTube, Bilibili 或 MP4 直链):');
+  if (!url) return;
+
+  let embedHtml = '';
+  if (url.includes('youtube.com') || url.includes('youtu.be')) {
+    const id = url.includes('v=') ? url.split('v=')[1].split('&')[0] : url.split('/').pop();
+    embedHtml = `\n<div class="video-container"><iframe src="https://www.youtube.com/embed/${id}" frameborder="0" allowfullscreen></iframe></div>\n`;
+  } else if (url.includes('bilibili.com')) {
+    const bvid = url.split('video/')[1]?.split('/')[0] || '';
+    embedHtml = `\n<div class="video-container"><iframe src="//player.bilibili.com/player.html?bvid=${bvid}&page=1&high_quality=1&danmaku=0" scrolling="no" border="0" frameborder="no" framespacing="0" allowfullscreen="true"></iframe></div>\n`;
+  } else {
+    embedHtml = `\n<div class="video-container"><video controls><source src="${url}" type="video/mp4">您的浏览器不支持播放该视频</video></div>\n`;
+  }
+  
+  insertFormat(embedHtml);
+  toast.add({ title: '视频组件已嵌入', color: 'success' });
+};
+
 const insertFormat = (prefix: string, suffix: string = '') => {
   const textarea = document.querySelector('.main-editor-area') as HTMLTextAreaElement;
   if (!textarea) return;
@@ -359,8 +378,18 @@ onMounted(() => {
                   
                   <div class="flex flex-wrap items-center gap-8 border-t border-slate-50 dark:border-slate-900/50 pt-10">
                     <div class="space-y-3">
-                      <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest">Classification</div>
-                      <USelect v-model="form.category" :options="['深度分析','开源项目','市场趋势']" size="sm" @change="form.content_type=form.category==='开源项目'?'tutorial':'analysis'" class="font-bold min-w-[140px]" />
+                      <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest px-1">Classification</div>
+                      <div class="flex p-1 bg-slate-50 dark:bg-slate-900 rounded-xl border border-slate-100 dark:border-slate-800">
+                        <button 
+                          v-for="t in ['深度分析','开源项目','市场趋势','投资入门']" 
+                          :key="t" 
+                          @click="form.category=t;form.content_type=t==='开源项目'?'tutorial':'analysis'" 
+                          class="px-4 py-1.5 text-[10px] font-black uppercase rounded-lg transition-all flex-1 whitespace-nowrap"
+                          :class="form.category === t ? 'bg-black text-white dark:bg-white dark:text-black shadow-lg scale-105' : 'text-slate-400 hover:text-slate-600'"
+                        >
+                          {{ t }}
+                        </button>
+                      </div>
                     </div>
                     
                     <div class="space-y-3">
@@ -398,8 +427,10 @@ onMounted(() => {
                   <div class="w-px h-4 bg-slate-100 dark:bg-slate-900 mx-2"></div>
                   <UButton size="sm" variant="ghost" color="neutral" icon="i-lucide-heading-2" @click="insertFormat('\n## ')" />
                   <div class="w-px h-4 bg-slate-100 dark:bg-slate-900 mx-2"></div>
-                  <UButton size="sm" variant="ghost" color="primary" icon="i-lucide-image-plus" label="插入配图" class="font-black text-[10px] uppercase" @click="() => $refs.imageInput.click()" />
+                  <UButton size="sm" variant="ghost" color="primary" icon="i-lucide-image-plus" label="正文插图" class="font-black text-[10px] uppercase" @click="() => $refs.imageInput.click()" />
+                  <UButton size="sm" variant="ghost" color="primary" icon="i-lucide-video" label="嵌入视频" class="font-black text-[10px] uppercase" @click="insertVideo" />
                   <input ref="imageInput" type="file" class="hidden" accept="image/*" @change="insertImage" />
+
                   <div class="flex-1"></div>
                   <UButton variant="soft" :color="showPreview ? 'black' : 'neutral'" size="xs" class="font-black text-[9px] uppercase tracking-[0.2em] rounded-lg px-4" @click="showPreview = !showPreview">{{ showPreview ? 'Close Preview' : 'Dual Pane' }}</UButton>
                 </div>
@@ -443,4 +474,56 @@ textarea:focus, input:focus { outline: none !important; box-shadow: none !import
 .prose :deep(p) { font-size: 1.1rem; margin-bottom: 1.75rem; color: #475569; }
 .dark .prose :deep(p) { color: #94a3b8; }
 .prose :deep(img) { border-radius: 1.5rem; box-shadow: 0 30px 60px rgba(0,0,0,0.12); margin: 3.5rem auto; display: block; }
+
+/* --- Table Enhancements (High Contrast Grid) --- */
+.prose :deep(table) {
+  width: 100%;
+  margin: 2.5rem 0;
+  border-collapse: collapse;
+  border: 1px solid #e2e8f0;
+  border-radius: 0.75rem;
+  overflow: hidden;
+  font-size: 0.9rem;
+}
+.dark .prose :deep(table) { border-color: #1e293b; }
+.prose :deep(th) {
+  background: #f8fafc;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-weight: 900;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.7rem;
+  color: #64748b;
+  border: 1px solid #e2e8f0;
+}
+.dark .prose :deep(th) { background: #0c0c0e; border-color: #1e293b; color: #94a3b8; }
+.prose :deep(td) {
+  padding: 0.75rem 1rem;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+}
+.dark .prose :deep(td) { border-color: #1e293b; color: #cbd5e1; }
+.prose :deep(tbody tr:nth-child(even)) { background: rgba(0,0,0,0.01); }
+.dark .prose :deep(tbody tr:nth-child(even)) { background: rgba(255,255,255,0.01); }
+
+.prose :deep(.video-container) {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  margin: 3.5rem 0;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 30px 60px rgba(0,0,0,0.15);
+  background: #000;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+.prose :deep(.video-container iframe),
+.prose :deep(.video-container video) {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+}
 </style>
