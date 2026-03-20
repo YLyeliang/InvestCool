@@ -212,6 +212,35 @@ body {
 .mobile-only { display: none; }
 .mobile-tab-bar { display: none; }
 
+.menu-toggle {
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 0.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.5rem;
+  transition: background 0.2s;
+  width: 40px;
+  height: 40px;
+  z-index: 2100;
+}
+
+.menu-toggle :deep(svg), 
+.menu-toggle .icon,
+.menu-toggle i {
+  width: 24px !important;
+  height: 24px !important;
+  display: block;
+  color: inherit;
+}
+
+.menu-toggle:hover {
+  background: var(--hover-bg);
+}
+
 /* For mid-range screens (Tablet/Laptops) */
 @media (max-width: 1440px) {
   .page-body {
@@ -246,21 +275,20 @@ body {
     top: 0;
     bottom: 0;
     width: 280px;
-    z-index: 1200;
-    transform: translateX(-100%);
-    box-shadow: 10px 0 15px -3px rgba(0, 0, 0, 0.1);
-    transition: transform 0.3s ease;
-    padding-top: calc(var(--mobile-header-height) + 1.5rem);
+    z-index: 2000; /* Higher than header and overlay */
+    background-color: var(--sidebar-bg);
+    box-shadow: 15px 0 30px -5px rgba(0, 0, 0, 0.3);
+    padding-top: 2rem;
+    display: flex !important; /* Force display when Vue Transition manages it */
   }
-  
-  .left-sidebar.is-active { transform: translateX(0); }
   
   .menu-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(0, 0, 0, 0.4);
+    background: rgba(0, 0, 0, 0.6);
     backdrop-filter: blur(4px);
-    z-index: 1150;
+    -webkit-backdrop-filter: blur(4px);
+    z-index: 1900;
   }
   
   .main-feed { padding: 1.25rem; padding-bottom: 80px; }

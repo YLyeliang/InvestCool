@@ -48,6 +48,7 @@ with app.app_context():
 watchlist_cache = {"data": [], "last_update": None}
 nasdaq_cache = {"data": None, "last_update": None}
 macro_cache = {"data": [], "last_update": None}
+ai_latest_cache = {"data": None, "last_update": None}
 
 # Models
 class Analysis(db.Model):
@@ -94,6 +95,22 @@ class PollVote(db.Model):
     ip_hash = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+class AIRecommendation(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    status = db.Column(db.String(20), nullable=False) # '看多', '看空', '中性', '观察'
+    summary = db.Column(db.Text, nullable=False)
+    index_position = db.Column(db.Float)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "status": self.status,
+            "summary": self.summary,
+            "index_position": round(self.index_position, 2) if self.index_position else None,
+            "created_at": self.created_at.isoformat()
+        }
+
 # Auth Decorator
 def require_admin(f):
     @wraps(f)
@@ -105,8 +122,6 @@ def require_admin(f):
     return decorated_function
 
 import traceback
-
-# ... (rest of imports unchanged)
 
 # Calculation Logic
 def calculate_rsi(series, period=14):
@@ -278,8 +293,80 @@ def cleanup_old_data():
             logger.info("Cleanup done")
     except Exception as e: logger.error(f"Cleanup error: {e}")
 
+import subprocess
+
+def run_ai_analysis():
+    # Ensure data is available
+    global nasdaq_cache
+    if not nasdaq_cache.get("data"):
+        refresh_nasdaq_data()
+        
+    ndx_data = nasdaq_cache.get("data")
+    if not ndx_data:
+        logger.warning("No Nasdaq data available for AI analysis after refresh attempt")
+        return
+
+    index_pos = ndx_data['index']
+    
+    # Construct Prompt
+    prompt = f"你是一个资深科技股分析师。结合最近48小时纳斯达克100指数动态及权重股NVDA,AAPL,MSFT新闻，当前点位{index_pos}。给出投资策略。1.状态[看多/看空/中性/观察]之一。2.不超过3句话。3.仅按此格式：STATUS: [状态]\nSUMMARY: [内容]"
+    
+    try:
+        # Call gemini command with longer timeout
+        result = subprocess.run(['gemini', prompt], capture_output=True, text=True, timeout=150)
+        
+        if result.returncode != 0:
+            logger.error(f"gemini-cli error: {result.stderr}")
+            # Fallback heuristic logic
+            run_fallback_analysis(index_pos)
+            return
+
+        output = result.stdout.strip()
+        status = "观察"
+        summary = ""
+        for line in output.split('\n'):
+            if "STATUS:" in line: status = line.split("STATUS:")[1].strip()
+            elif "SUMMARY:" in line: summary = line.split("SUMMARY:")[1].strip()
+        
+        if not summary: summary = output
+
+        with app.app_context():
+            new_rec = AIRecommendation(status=status[:20], summary=summary, index_position=float(index_pos))
+            db.session.add(new_rec)
+            db.session.commit()
+            global ai_latest_cache
+            ai_latest_cache["data"] = new_rec.to_dict()
+            ai_latest_cache["last_update"] = datetime.utcnow()
+            logger.info(f"AI Recommendation updated and cached: {status}")
+            
+    except Exception as e:
+        logger.error(f"AI analysis job failed: {e}")
+        run_fallback_analysis(index_pos)
+
+def run_fallback_analysis(index_pos):
+    # Heuristic strategy based on market sentiment
+    metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
+    if not metric: return
+    
+    val = metric.index_value
+    if val > 75: 
+        status, summary = "观察", "市场进入极度贪婪区，RSI 指数偏高。建议在当前点位保持警惕，等待回踩机会。"
+    elif val < 25:
+        status, summary = "看多", "情绪跌入超卖区间，恐慌指数高企。当前点位具备中长期配置价值，建议分批买入。"
+    else:
+        status, summary = "中性", "市场处于均衡博弈阶段，波动率趋稳。建议持仓观望，关注权重股财报指引。"
+
+    with app.app_context():
+        new_rec = AIRecommendation(status=status, summary=f"[系统保底] {summary}", index_position=float(index_pos))
+        db.session.add(new_rec)
+        db.session.commit()
+        global ai_latest_cache
+        ai_latest_cache["data"] = new_rec.to_dict()
+        logger.info(f"Fallback recommendation generated: {status}")
+
 def background_worker():
     last_cleanup = 0
+    last_ai_analysis = 0
     while True:
         try:
             update_market_index()
@@ -287,6 +374,11 @@ def background_worker():
             refresh_nasdaq_data()
             refresh_macro_data()
             
+            # AI Analysis every 2 hours (7200 seconds)
+            if time.time() - last_ai_analysis > 7200:
+                run_ai_analysis()
+                last_ai_analysis = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -294,9 +386,37 @@ def background_worker():
         except Exception as e:
             logger.error(f"Worker loop error: {e}")
             
-        time.sleep(60) # Update every 60 seconds for near real-time tracking
+        time.sleep(60) 
 
 # Routes
+@app.route('/api/ai/latest', methods=['GET'])
+def get_ai_latest():
+    global ai_latest_cache
+    # Serve from memory cache for maximum concurrency
+    if ai_latest_cache["data"]:
+        return jsonify(ai_latest_cache["data"])
+    
+    # Lazy init cache from DB if memory is empty
+    rec = AIRecommendation.query.order_by(AIRecommendation.created_at.desc()).first()
+    if rec:
+        ai_latest_cache["data"] = rec.to_dict()
+        ai_latest_cache["last_update"] = datetime.utcnow()
+        return jsonify(ai_latest_cache["data"])
+        
+    return jsonify({"error": "No recommendations yet"}), 202
+
+@app.route('/api/ai/history', methods=['GET'])
+def get_ai_history():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    recs = AIRecommendation.query.order_by(AIRecommendation.created_at.desc()).paginate(page=page, per_page=per_page)
+    return jsonify({
+        "items": [r.to_dict() for r in recs.items],
+        "total": recs.total,
+        "pages": recs.pages,
+        "current_page": recs.page
+    })
+
 @app.route('/api/market-index', methods=['GET'])
 def get_market_index():
     m = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
@@ -566,6 +686,12 @@ def start_worker():
         if "DataWorker" not in [t.name for t in threading.enumerate()]:
             threading.Thread(target=background_worker, daemon=True, name="DataWorker").start()
             logger.info("Worker started")
+            
+            # Phase 15 Add-on: Initial AI Analysis check
+            with app.app_context():
+                if AIRecommendation.query.count() == 0:
+                    logger.info("First run detected, triggering initial AI analysis...")
+                    threading.Thread(target=run_ai_analysis, daemon=True).start()
 
 with app.app_context():
     db.create_all()

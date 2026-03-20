@@ -1,9 +1,26 @@
 <script setup lang="ts">
 const isMobileMenuOpen = ref(false)
+const isMobile = ref(false)
 
 const toggleMobileMenu = () => {
   isMobileMenuOpen.value = !isMobileMenuOpen.value
 }
+
+// Window resize listener
+const checkMobile = () => {
+  if (typeof window !== 'undefined') {
+    isMobile.value = window.innerWidth <= 768
+  }
+}
+
+onMounted(() => {
+  checkMobile()
+  window.addEventListener('resize', checkMobile)
+})
+
+onUnmounted(() => {
+  window.removeEventListener('resize', checkMobile)
+})
 
 // Close menu when route changes
 const route = useRoute()
@@ -20,7 +37,7 @@ watch(() => route.path, () => {
         <!-- Logo (Left aligned) -->
         <div class="header-left">
           <button class="menu-toggle mobile-only" @click="toggleMobileMenu">
-            <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" />
+            <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" class="icon" />
           </button>
           <NuxtLink to="/" class="logo-link">
             <h1 class="logo-text">InvestCool <small class="v-tag">v2.0</small></h1>
@@ -48,62 +65,64 @@ watch(() => route.path, () => {
     <!-- Main Page Body -->
     <div class="page-body">
       <!-- Left Sidebar: Reorganized Sections -->
-      <aside class="left-sidebar" :class="{ 'is-active': isMobileMenuOpen }">
+      <Transition name="slide">
+        <aside v-if="!isMobile || isMobileMenuOpen" class="left-sidebar" :class="{ 'is-active': isMobileMenuOpen }">
+          <nav class="sidebar-nav">
+            <!-- Section 1: Investment -->
+            <div class="nav-section">
+              <div class="nav-section-label">投资</div>
+              <NuxtLink to="/" class="nav-item">
+                <Icon name="lucide:layout-dashboard" class="nav-icon" /> 市场概览
+              </NuxtLink>
+              <NuxtLink to="/analysis" class="nav-item">
+                <Icon name="lucide:trending-up" class="nav-icon" /> 深度分析
+              </NuxtLink>
+              <NuxtLink to="/tools" class="nav-item">
+                <Icon name="lucide:wrench" class="nav-icon" /> 策略工具
+              </NuxtLink>
+            </div>
+
+            <!-- Section 2: Tutorials -->
+            <div class="nav-section">
+              <div class="nav-section-label">AI & 教程</div>
+              <NuxtLink to="/ai" class="nav-item">
+                <Icon name="lucide:brain-circuit" class="nav-icon" /> AI 投资建议
+              </NuxtLink>
+              <NuxtLink to="/tutorials" class="nav-item">
+                <Icon name="lucide:book-open" class="nav-icon" /> 架构与教程
+              </NuxtLink>
+            </div>
+
+            <!-- Section 3: Community -->
+            <div class="nav-section">
+              <div class="nav-section-label">社区</div>
+              <NuxtLink to="/daily" class="nav-item">
+                <Icon name="lucide:calendar-days" class="nav-icon" /> 每日信息
+              </NuxtLink>
+              <NuxtLink to="/community/wechat" class="nav-item">
+                <Icon name="lucide:users" class="nav-icon" /> 微信群组
+              </NuxtLink>
+            </div>
+
+            <!-- Section 4: Links -->
+            <div class="nav-section">
+              <div class="nav-section-label">外部链接</div>
+              <a href="https://github.com" target="_blank" class="nav-item">
+                <Icon name="lucide:github" class="nav-icon" /> GitHub
+              </a>
+            </div>
+          </nav>
+
+          <div class="sidebar-footer">
+            <ThemeToggle />
+          </div>
+        </aside>
+      </Transition>
+
+      <!-- Overlay for mobile drawer -->
+      <Transition name="fade">
         <div v-if="isMobileMenuOpen" class="menu-overlay" @click="toggleMobileMenu"></div>
-        
-        <nav class="sidebar-nav">
-          <!-- Section 1: Investment -->
-          <div class="nav-section">
-            <div class="nav-section-label">投资</div>
-            <NuxtLink to="/" class="nav-item">
-              <Icon name="lucide:layout-dashboard" class="nav-icon" /> 市场概览
-            </NuxtLink>
-            <NuxtLink to="/analysis" class="nav-item">
-              <Icon name="lucide:trending-up" class="nav-icon" /> 深度分析
-            </NuxtLink>
-            <NuxtLink to="/tools" class="nav-item">
-              <Icon name="lucide:wrench" class="nav-icon" /> 策略工具
-            </NuxtLink>
-          </div>
-
-          <!-- Section 2: Tutorials -->
-          <div class="nav-section">
-            <div class="nav-section-label">教程</div>
-            <NuxtLink to="/ai" class="nav-item">
-              <Icon name="lucide:brain-circuit" class="nav-icon" /> AI 赋能
-            </NuxtLink>
-            <NuxtLink to="/tutorials" class="nav-item">
-              <Icon name="lucide:github" class="nav-icon" /> 开源项目
-            </NuxtLink>
-          </div>
-
-          <!-- Section 3: Community -->
-          <div class="nav-section">
-            <div class="nav-section-label">社区</div>
-            <NuxtLink to="/daily" class="nav-item">
-              <Icon name="lucide:calendar-days" class="nav-icon" /> 每日信息
-            </NuxtLink>
-            <NuxtLink to="/community/wechat" class="nav-item">
-              <Icon name="lucide:users" class="nav-icon" /> 微信群组
-            </NuxtLink>
-          </div>
-
-          <!-- Section 4: Links -->
-          <div class="nav-section">
-            <div class="nav-section-label">Links</div>
-            <a href="https://github.com" target="_blank" class="nav-item">
-              <Icon name="lucide:github" class="nav-icon" /> GitHub
-            </a>
-            <a href="https://tradingview.com" target="_blank" class="nav-item">
-              <Icon name="lucide:line-chart" class="nav-icon" /> TradingView
-            </a>
-          </div>
-        </nav>
-
-        <div class="sidebar-footer">
-          <ThemeToggle />
-        </div>
-      </aside>
+      </Transition>
 
       <!-- Center Content Area -->
       <main class="main-feed">
@@ -163,4 +182,11 @@ watch(() => route.path, () => {
 
 .nav-section { margin-bottom: 2rem; }
 .nav-section:last-child { margin-bottom: 0; }
+
+/* Transition Animations */
+.slide-enter-active, .slide-leave-active { transition: transform 0.3s ease; }
+.slide-enter-from, .slide-leave-to { transform: translateX(-100%); }
+
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
 </style>
