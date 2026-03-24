@@ -121,7 +121,7 @@ onMounted(() => {
   align-items: center;
   gap: 0.5rem;
   padding: 1rem;
-  border-radius: 1rem;
+  border-radius: var(--radius-lg);
   border: 1px solid var(--border-color);
   background: var(--hover-bg);
   cursor: pointer;

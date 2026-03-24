@@ -1,24 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { marked } from 'marked'
 
 const route = useRoute()
-const config = useRuntimeConfig()
 
-// In our new dynamic setup, tutorials are accessed via ID like /tutorials/5
-// The slug will be the ID
-const id = computed(() => {
-  const parts = route.params.slug as string[]
-  return parts[0]
+// Query the tutorial from Nuxt Content v3 collection
+const { data: page, error, pending } = await useAsyncData(`tutorial-${route.path}`, () => {
+  return queryCollection('tutorials').path(route.path).first()
 })
-
-const { data: tutorial, error, pending } = await useFetch(`${config.public.apiBase}/analysis/${id.value}`, {
-  key: `tutorial-detail-${id.value}`,
-  lazy: true,
-  server: true
-})
-
-const page = computed(() => tutorial.value as any)
 
 // SEO Optimization
 useHead({
@@ -38,13 +26,6 @@ const updateScrollProgress = () => {
   const height = document.documentElement.scrollHeight - document.documentElement.clientHeight
   scrollProgress.value = (winScroll / height) * 100
 }
-
-const parsedContent = computed(() => {
-  if (page.value?.content) {
-    return marked(page.value.content)
-  }
-  return ''
-})
 
 onMounted(() => {
   window.addEventListener('scroll', updateScrollProgress)
@@ -100,7 +81,9 @@ onUnmounted(() => {
           <img :src="page.cover" :alt="page.title" />
         </div>
 
-        <div class="article-body prose-modern" v-html="parsedContent"></div>
+        <div class="article-body prose-modern">
+          <ContentRenderer v-if="page" :value="page" />
+        </div>
 
         <footer class="article-footer">
           <div class="disclaimer">

@@ -1,7 +1,7 @@
 ---
 title: '纳斯达克相关QDII购买指南'
 description: '纳斯达克相关QDII购买指南'
-category: '深度分析'
+category: '投资入门'
 cover: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?q=80&w=800&auto=format&fit=crop'
 content_type: 'analysis'
 created_at: '2026-03-16 05:41:42'

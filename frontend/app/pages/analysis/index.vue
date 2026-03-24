@@ -1,252 +1,181 @@
 <script setup lang="ts">
-const config = useRuntimeConfig()
-const { data: allArticles } = await useFetch(`${config.public.apiBase}/analysis?type=analysis`)
+// Fetch all items from analysis collection, ensuring visibility
+const { data: allArticles } = await useAsyncData('analysis-list', () => 
+  queryCollection('analysis').all()
+)
 
-const selectedCategory = ref('All')
-const categories = ['All', '深度分析', '市场趋势', 'AI 基础设施', '宏观策略', '半导体', '投资入门']
+const activeCategory = ref('全部')
 
-const filteredArticles = computed(() => {
-  if (!allArticles.value) return []
-  if (selectedCategory.value === 'All') return allArticles.value as any[]
-  return (allArticles.value as any[]).filter(a => a.category === selectedCategory.value)
+// Mandatory categories according to change.md
+const standardCategories = ['全部', '投资入门', '深度分析', '公司基本面', 'AI']
+
+const categories = computed(() => {
+  if (!allArticles.value) return standardCategories
+  const existingCats = [...new Set(allArticles.value.map(a => a.category))].filter(Boolean)
+  return [...new Set([...standardCategories, ...existingCats])]
 })
 
-const getCategoryLabel = (cat: string) => {
-  const map: any = {
-    'Market Trends': '市场趋势',
-    'AI Infrastructure': 'AI 基础设施',
-    'Macro Strategy': '宏观策略',
-    'Semiconductors': '半导体',
-    '深度分析': '深度分析',
-    '市场趋势': '市场趋势',
-    'AI 基础设施': 'AI 基础设施',
-    '宏观策略': '宏观策略',
-    '半导体': '半导体',
-    '投资入门': '投资入门'
-  }
-  return map[cat] || cat
-}
+// Computed filter for robust UI
+const filteredArticles = computed(() => {
+  if (!allArticles.value) return []
+  let items = allArticles.value.filter(a => a.is_deleted !== true && a.is_deleted !== 'True')
+  
+  if (activeCategory.value === '全部') return items
+  return items.filter(a => a.category === activeCategory.value)
+})
 
-const formatDate = (dateStr: string) => {
-  return new Date(dateStr).toLocaleDateString('zh-CN', { year: 'numeric', month: 'long', day: 'numeric' })
-}
+useHead({
+  title: '深度投研分析 - InvestCool',
+  meta: [
+    { name: 'description', content: '专注于纳斯达克100指数及核心科技股的专业投研分析。' }
+  ]
+})
 </script>
 
 <template>
-  <div class="analysis-container">
-    <header class="page-header">
-      <h2 class="text-3xl font-black">投资分析</h2>
-      <p class="text-secondary">透过噪音，捕捉科技与资本的长期共振。</p>
-      
-      <!-- Category Filter -->
-      <div class="filter-bar">
-        <button 
-          v-for="cat in categories" 
-          :key="cat"
-          class="filter-btn"
-          :class="{ active: selectedCategory === cat }"
-          @click="selectedCategory = cat"
-        >
-          {{ cat === 'All' ? '全部' : getCategoryLabel(cat) }}
-        </button>
+  <div class="analysis-page">
+    <!-- Hero Section -->
+    <header class="analysis-hero">
+      <div class="hero-content">
+        <div class="badge premium-badge">Premium Analysis</div>
+        <h2 class="hero-title">洞察纳斯达克 100 <br/><span class="text-accent">把握科技股脉搏</span></h2>
+        <p class="hero-subtitle">由 AI 辅助，结合宏观经济指标与实时盘面数据，为您呈现深度的投研见解。</p>
       </div>
     </header>
 
-    <div class="analysis-grid">
-      <NuxtLink 
-        v-for="article in filteredArticles" 
-        :key="article.id" 
-        :to="`/analysis/${article.id}`"
-        class="analysis-card"
-      >
-        <div v-if="article.cover" class="card-cover-wrapper">
-          <img :src="article.cover" :alt="article.title" class="card-cover-img" />
-        </div>
-        
-        <div class="card-content">
-          <div class="card-meta">
-            <span class="card-category">{{ getCategoryLabel(article.category) }}</span>
-            <span class="card-date">{{ formatDate(article.created_at) }}</span>
-          </div>
-          <h3 class="card-title">{{ article.title }}</h3>
-          <p class="card-summary">{{ article.summary }}</p>
-          <div class="card-footer">
-            <span class="read-more">阅读全文</span>
-            <Icon name="lucide:chevron-right" class="footer-icon" />
+    <!-- Filter & Content Area -->
+    <div class="content-container">
+      <div class="filter-bar">
+        <div class="categories-scroll">
+          <div class="categories">
+            <button v-for="cat in categories" :key="cat" 
+                    @click="activeCategory = cat"
+                    class="filter-btn" :class="{ 'active': activeCategory === cat }">
+              {{ cat }}
+            </button>
           </div>
         </div>
-      </NuxtLink>
-    </div>
+        <div class="search-box">
+          <Icon name="lucide:search" class="search-icon" />
+          <input type="text" placeholder="搜索报告标题..." class="search-input" />
+        </div>
+      </div>
 
-    <div v-if="filteredArticles.length === 0" class="empty-state">
-      <Icon name="lucide:search-x" style="font-size: 3rem; opacity: 0.2;" />
-      <p>该分类下暂无文章</p>
+      <!-- Animation wrapper for smooth transitions -->
+      <TransitionGroup name="list" tag="div" class="articles-grid">
+        <PremiumPostCard v-for="article in filteredArticles" :key="article.path" :article="article" />
+      </TransitionGroup>
+
+      <!-- Empty State -->
+      <div v-if="filteredArticles.length === 0" class="empty-state">
+        <Icon name="lucide:file-question" class="empty-icon" />
+        <p>暂无相关类别的分析报告</p>
+      </div>
     </div>
   </div>
 </template>
 
 <style scoped>
-.analysis-container {
-  padding-bottom: 4rem;
+.analysis-page { min-height: 100vh; padding-bottom: 5rem; }
+
+.analysis-hero {
+  padding: 5rem 0;
+  background: radial-gradient(circle at top right, rgba(93, 135, 255, 0.08), transparent),
+              radial-gradient(circle at bottom left, rgba(93, 135, 255, 0.03), transparent);
+  border-bottom: 1px solid var(--border-color);
+  margin-bottom: 3.5rem;
 }
 
-.page-header {
-  margin-bottom: 3rem;
+.hero-content { max-width: 800px; }
+
+.premium-badge {
+  background: var(--accent-soft);
+  color: var(--accent-color);
+  padding: 0.4rem 1rem;
+  border-radius: 2rem;
+  font-size: 0.75rem;
+  font-weight: 800;
+  margin-bottom: 1.5rem;
+  display: inline-block;
 }
 
-.text-secondary {
+.hero-title {
+  font-size: 3.5rem;
+  font-weight: 900;
+  color: var(--text-primary);
+  line-height: 1.1;
+  margin-bottom: 1.5rem;
+  letter-spacing: -0.02em;
+}
+
+.text-accent { color: var(--accent-color); }
+
+.hero-subtitle {
+  font-size: 1.25rem;
   color: var(--text-secondary);
-  margin-top: 0.5rem;
+  max-width: 600px;
+  line-height: 1.6;
 }
 
 .filter-bar {
   display: flex;
-  gap: 0.75rem;
-  margin-top: 2rem;
-  flex-wrap: wrap;
-}
-
-.filter-btn {
-  padding: 0.5rem 1.25rem;
-  border-radius: 2rem;
-  border: 1px solid var(--border-color);
-  background: var(--card-bg);
-  color: var(--text-secondary);
-  font-size: 0.875rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.2s;
-}
-
-.filter-btn:hover {
-  border-color: var(--accent-color);
-  color: var(--accent-color);
-}
-
-.filter-btn.active {
-  background: var(--accent-color);
-  color: white;
-  border-color: var(--accent-color);
-}
-
-.analysis-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(340px, 1fr));
-  gap: 1.5rem;
-}
-
-.analysis-card {
-  background: var(--card-bg);
-  border: 1px solid var(--border-color);
-  border-radius: 1.5rem;
-  text-decoration: none;
-  color: inherit;
-  display: flex;
-  flex-direction: column;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-  overflow: hidden;
-}
-
-.card-cover-wrapper {
-  aspect-ratio: 16 / 9;
-  width: 100%;
-  overflow: hidden;
-  border-bottom: 1px solid var(--border-color);
-}
-
-.card-cover-img {
-  width: 100%;
-  height: 100%;
-  object-cover: cover;
-  transition: transform 0.5s ease;
-}
-
-.analysis-card:hover .card-cover-img {
-  transform: scale(1.05);
-}
-
-.card-content {
-  padding: 1.5rem;
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-}
-
-.analysis-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 12px 20px -5px rgba(0, 0, 0, 0.1);
-  border-color: var(--accent-color);
-}
-
-.card-meta {
-  display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 1rem;
+  margin-bottom: 3rem;
+  gap: 2rem;
 }
 
-.card-category {
-  font-size: 0.7rem;
-  font-weight: 800;
-  text-transform: uppercase;
-  color: var(--accent-color);
-  background: var(--hover-bg);
-  padding: 0.25rem 0.6rem;
-  border-radius: 0.4rem;
-}
+.categories-scroll { flex: 1; overflow-x: auto; padding-bottom: 5px; }
+.categories-scroll::-webkit-scrollbar { height: 4px; }
+.categories-scroll::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 10px; }
 
-.card-date {
-  font-size: 0.75rem;
+.categories { display: flex; gap: 0.75rem; }
+
+.filter-btn {
+  white-space: nowrap;
+  padding: 0.7rem 1.5rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-color);
+  background: var(--card-bg);
   color: var(--text-secondary);
-}
-
-.card-title {
-  font-size: 1.25rem;
-  font-weight: 800;
-  line-height: 1.4;
-  margin-bottom: 0.75rem;
-  color: var(--text-primary);
-}
-
-.card-summary {
-  font-size: 0.9rem;
-  line-height: 1.6;
-  color: var(--text-secondary);
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-  margin-bottom: 1.5rem;
-  flex-grow: 1;
-}
-
-.card-footer {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
   font-weight: 700;
-  font-size: 0.875rem;
-  color: var(--accent-color);
+  font-size: 0.95rem;
+  cursor: pointer;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.footer-icon {
-  width: 1rem;
-  transition: transform 0.2s;
+.filter-btn:hover { border-color: var(--accent-color); color: var(--accent-color); transform: translateY(-2px); }
+.filter-btn.active { 
+  background: var(--accent-color); 
+  color: white; 
+  border-color: var(--accent-color); 
+  box-shadow: 0 8px 20px rgba(93, 135, 255, 0.3); 
 }
 
-.analysis-card:hover .footer-icon {
-  transform: translateX(4px);
+.search-box { position: relative; max-width: 320px; width: 100%; }
+.search-icon { position: absolute; left: 1rem; top: 50%; transform: translateY(-50%); color: var(--text-tertiary); }
+.search-input {
+  width: 100%; padding: 0.8rem 1rem 0.8rem 2.75rem; border-radius: var(--radius-md);
+  border: 1px solid var(--border-color); background: var(--card-bg); font-size: 0.95rem; outline: none; transition: all 0.3s;
+}
+.search-input:focus { border-color: var(--accent-color); box-shadow: 0 0 0 4px var(--accent-soft); }
+
+.articles-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+  gap: 2.5rem;
 }
 
-.empty-state {
-  text-align: center;
-  padding: 5rem 0;
-  color: var(--text-secondary);
-}
+/* Transition Group Animations */
+.list-enter-active, .list-leave-active { transition: all 0.5s ease; }
+.list-enter-from, .list-leave-to { opacity: 0; transform: translateY(30px); }
 
-@media (max-width: 640px) {
-  .analysis-grid {
-    grid-template-columns: 1fr;
-  }
+.empty-state { text-align: center; padding: 6rem 0; color: var(--text-tertiary); }
+.empty-icon { font-size: 4rem; margin-bottom: 1.5rem; opacity: 0.2; }
+
+@media (max-width: 1024px) {
+  .hero-title { font-size: 2.75rem; }
+  .filter-bar { flex-direction: column; align-items: flex-start; }
+  .search-box { max-width: 100%; }
 }
 </style>

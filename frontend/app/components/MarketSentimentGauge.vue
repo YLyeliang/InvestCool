@@ -188,9 +188,9 @@ onUnmounted(() => {
 <style scoped>
 .sentiment-gauge-container {
   background: var(--card-bg);
-  border-radius: 12px;
+  border-radius: var(--radius-lg);
   padding: 0.75rem 1rem;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  box-shadow: var(--shadow-sm);
   border: 1px solid var(--border-color);
   display: flex;
   flex-direction: column;

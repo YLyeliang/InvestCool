@@ -40,23 +40,29 @@ watch(() => route.path, () => {
             <Icon :name="isMobileMenuOpen ? 'lucide:x' : 'lucide:menu'" class="icon" />
           </button>
           <NuxtLink to="/" class="logo-link">
-            <h1 class="logo-text">InvestCool <small class="v-tag">v2.0</small></h1>
+            <div class="logo-container">
+              <Icon name="lucide:trending-up" class="logo-icon" />
+              <h1 class="logo-text">InvestCool</h1>
+            </div>
           </NuxtLink>
         </div>
 
-        <!-- Navigation Links (Centered) -->
-        <nav class="header-center">
+        <!-- Navigation Links (Hidden on small mobile, visible on tablet+) -->
+        <nav class="header-center hide-mobile">
           <div class="nav-links">
-            <NuxtLink to="/" class="top-nav-item">Home</NuxtLink>
-            <NuxtLink to="/community/wechat" class="top-nav-item">加入社区</NuxtLink>
-            <NuxtLink to="/daily" class="top-nav-item">每日信息</NuxtLink>
+            <NuxtLink to="/" class="top-nav-item">首页</NuxtLink>
+            <NuxtLink to="/analysis" class="top-nav-item">深度分析</NuxtLink>
+            <NuxtLink to="/ai" class="top-nav-item">AI 策略</NuxtLink>
+            <NuxtLink to="/daily" class="top-nav-item">每日动态</NuxtLink>
           </div>
         </nav>
 
         <!-- Right Side -->
-        <div class="header-right hide-mobile">
-          <NuxtLink to="/admin" class="admin-icon-link">
-            <Icon name="lucide:user-cog" />
+        <div class="header-right">
+          <ThemeToggle class="hide-mobile" />
+          <NuxtLink to="/admin" class="admin-btn">
+            <Icon name="lucide:user" />
+            <span class="hide-mobile">管理后台</span>
           </NuxtLink>
         </div>
       </div>
@@ -131,23 +137,26 @@ watch(() => route.path, () => {
 
       <!-- Right Panel -->
       <aside class="right-panel">
-        <div class="card social-card">
+        <!-- Section: Follow Me -->
+        <div class="card premium-side-card">
           <h3 class="widget-title">关注我</h3>
           <div class="qr-grid">
             <div class="qr-item">
-              <img src="/images/qrcodes/qr1.jpg" alt="公众号" class="qr-img" />
+              <img src="/images/qrcodes/qr1.jpg" class="qr-img" alt="公众号" />
               <span>公众号</span>
             </div>
             <div class="qr-item">
-              <img src="/images/qrcodes/qr2.jpg" alt="小红书" class="qr-img" />
+              <img src="/images/qrcodes/qr2.jpg" class="qr-img" alt="小红书" />
               <span>小红书</span>
             </div>
           </div>
         </div>
 
-        <TickerWatchlist />
-
-        <MarketQuoteCard />
+        <!-- Section: Daily Insights -->
+        <div class="card premium-side-card">
+          <h3 class="widget-title">每日交易锦报</h3>
+          <MarketQuoteCard />
+        </div>
       </aside>
     </div>
 
@@ -174,11 +183,26 @@ watch(() => route.path, () => {
 </template>
 
 <style scoped>
-.logo-link { text-decoration: none; display: block; }
-.logo-text { font-size: 1.25rem; font-weight: 900; color: var(--accent-color); margin: 0; letter-spacing: -0.02em; }
-.v-tag { font-size: 0.6rem; font-weight: 600; vertical-align: middle; opacity: 0.5; background: var(--hover-bg); padding: 0.1rem 0.3rem; border-radius: 0.2rem; margin-left: 0.2rem; }
-.admin-icon-link { color: var(--text-secondary); font-size: 1.25rem; transition: color 0.2s; }
-.admin-icon-link:hover { color: var(--accent-color); }
+.logo-link { text-decoration: none; }
+.logo-container { display: flex; align-items: center; gap: 0.75rem; }
+.logo-icon { font-size: 1.75rem; color: var(--accent-color); }
+.logo-text { font-size: 1.5rem; font-weight: 900; color: var(--text-primary); letter-spacing: -0.03em; }
+
+.admin-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: var(--accent-color);
+  color: white;
+  padding: 0.6rem 1.25rem;
+  border-radius: var(--radius-md);
+  font-weight: 700;
+  font-size: 0.85rem;
+  text-decoration: none;
+  transition: all 0.3s;
+  box-shadow: 0 4px 10px rgba(93, 135, 255, 0.3);
+}
+.admin-btn:hover { transform: translateY(-2px); box-shadow: 0 6px 15px rgba(93, 135, 255, 0.4); }
 
 .nav-section { margin-bottom: 2rem; }
 .nav-section:last-child { margin-bottom: 0; }

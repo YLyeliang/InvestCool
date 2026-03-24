@@ -118,39 +118,46 @@ onUnmounted(() => {
 
 <style scoped>
 .nasdaq-tracker {
-  background: #0f172a !important;
-  color: white !important;
-  border: 1px solid #1e293b;
-  padding: 1.5rem !important;
+  background: var(--card-bg) !important;
+  color: var(--text-primary) !important;
+  border: 1px solid var(--border-color);
+  padding: 2rem !important;
+  border-radius: var(--radius-lg) !important;
   position: relative;
   overflow: hidden;
-  transition: all 0.3s ease;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: var(--shadow-sm);
 }
 
-.nasdaq-tracker.is-offline {
-  border-color: #ef4444;
-  opacity: 0.9;
+.nasdaq-tracker:hover {
+  transform: translateY(-4px);
+  box-shadow: var(--shadow-lg);
+  border-color: var(--accent-color);
 }
 
-.label-group {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+.current-price {
+  font-size: 3rem;
+  font-weight: 900;
+  margin: 0;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: var(--text-primary);
 }
 
 .index-name {
-  font-size: 0.75rem;
-  font-weight: 700;
-  color: #94a3b8;
-  letter-spacing: 0.05em;
+  font-size: 0.85rem;
+  font-weight: 800;
+  color: var(--text-secondary);
+  text-transform: uppercase;
 }
 
 .index-symbol {
-  font-size: 0.65rem;
-  background: #1e293b;
-  padding: 0.1rem 0.4rem;
-  border-radius: 0.25rem;
-  color: #3b82f6;
+  font-size: 0.7rem;
+  background: var(--accent-soft);
+  padding: 0.2rem 0.5rem;
+  border-radius: 0.4rem;
+  color: var(--accent-color);
+  font-weight: 700;
 }
 
 .error-tag {

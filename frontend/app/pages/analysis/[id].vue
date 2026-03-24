@@ -1,19 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { marked } from 'marked'
 
 const route = useRoute()
-const config = useRuntimeConfig()
 
-// Use a unique key for each article to prevent hydration issues
-const { data: analysis, error, pending } = await useFetch(`${config.public.apiBase}/analysis/${route.params.id}`, {
-  key: `analysis-detail-${route.params.id}`,
-  lazy: true,
-  server: true
+// Query the article from Nuxt Content v3 collection
+const { data: article, error, pending } = await useAsyncData(`analysis-${route.path}`, () => {
+  return queryCollection('analysis').path(route.path).first()
 })
-
-// Safe data access wrapper
-const article = computed(() => analysis.value as any)
 
 // SEO Optimization with fallbacks
 useHead({
@@ -35,19 +28,12 @@ const updateScrollProgress = () => {
   scrollProgress.value = (winScroll / height) * 100
 }
 
-const parsedContent = computed(() => {
-  if (article.value?.content) {
-    return marked(article.value.content)
-  }
-  return ''
-})
-
 const readingTime = computed(() => {
-  if (article.value?.content) {
-    const words = article.value.content.length
-    return Math.ceil(words / 400)
+  if (article.value?.body?.value) {
+    const textLength = JSON.stringify(article.value.body.value).length
+    return Math.max(1, Math.ceil(textLength / 800))
   }
-  return 0
+  return 5
 })
 
 const getCategoryLabel = (cat: string) => {
@@ -142,7 +128,9 @@ onUnmounted(() => {
           </div>
         </header>
 
-        <div class="article-body prose-modern" v-html="parsedContent"></div>
+        <div class="article-body prose-modern">
+          <ContentRenderer v-if="article" :value="article" />
+        </div>
 
         <footer class="article-footer-modern">
           <div class="footer-top">
