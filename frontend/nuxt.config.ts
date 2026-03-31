@@ -3,7 +3,7 @@ export default defineNuxtConfig({
   compatibilityDate: '2024-11-01',
   devtools: { enabled: true },
   modules: ['@nuxt/content', '@nuxt/ui', '@nuxtjs/sitemap'],
-  css: ['~/assets/css/main.css'],
+  css: ['~/assets/css/main.css', '~/assets/css/prose.css'],
   
   // Nitro Proxy: Fixes the F5 refresh SSR issue
   nitro: {

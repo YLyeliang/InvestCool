@@ -51,6 +51,12 @@ macro_cache = {"data": [], "last_update": None}
 ai_latest_cache = {"data": None, "last_update": None}
 
 # Models
+class PageView(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ip_hash = db.Column(db.String(64), nullable=False)
+    path = db.Column(db.String(200), nullable=False)
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
+
 class Analysis(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
@@ -533,12 +539,61 @@ def get_all_analysis():
     analyses = query.order_by(Analysis.created_at.desc()).all()
     return jsonify([a.to_dict() for a in analyses])
 
+@app.route('/api/track', methods=['POST'])
+def track_page_view():
+    data = request.json or {}
+    path = data.get('path', '/')
+    ip = request.remote_addr or 'unknown'
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    
+    with app.app_context():
+        # Prevent spamming the same path from the same IP within 1 minute
+        recent = PageView.query.filter(
+            PageView.ip_hash == ip_hash,
+            PageView.path == path,
+            PageView.timestamp > datetime.utcnow() - timedelta(minutes=1)
+        ).first()
+        if not recent:
+            pv = PageView(ip_hash=ip_hash, path=path)
+            db.session.add(pv)
+            db.session.commit()
+            
+    return jsonify({"success": True})
+
 @app.route('/api/admin/all-content', methods=['GET'])
 @require_admin
 def get_admin_content():
     # Admin sees everything including trash
     items = Analysis.query.order_by(Analysis.created_at.desc()).all()
     return jsonify([a.to_dict() for a in items])
+
+@app.route('/api/admin/stats', methods=['GET'])
+@require_admin
+def get_admin_stats():
+    today_start = datetime.utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    today_visits = PageView.query.filter(PageView.timestamp >= today_start).count()
+    total_visits = PageView.query.count()
+    
+    # Active users (unique IPs in the last 15 minutes)
+    active_users = db.session.query(db.func.count(db.func.distinct(PageView.ip_hash)))\
+        .filter(PageView.timestamp >= datetime.utcnow() - timedelta(minutes=15)).scalar() or 0
+        
+    # Bounce rate calculation
+    total_unique_ips = db.session.query(db.func.count(db.func.distinct(PageView.ip_hash))).scalar() or 1
+    
+    # Subquery to count single-page IPs
+    subq = db.session.query(PageView.ip_hash).group_by(PageView.ip_hash).having(db.func.count(PageView.id) == 1).subquery()
+    single_page_ips = db.session.query(db.func.count(subq.c.ip_hash)).scalar() or 0
+        
+    bounce_rate_pct = round((single_page_ips / total_unique_ips) * 100) if total_unique_ips > 0 else 0
+    
+    return jsonify({
+        "today_visits": today_visits,
+        "total_visits": total_visits,
+        "active_users": active_users,
+        "bounce_rate": f"{bounce_rate_pct}%"
+    })
 
 @app.route('/api/analysis/<int:id>', methods=['GET'])
 def get_analysis_by_id(id):

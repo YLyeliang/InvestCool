@@ -1,0 +1,194 @@
+/* Modern Typography & Article Styles */
+
+.prose-modern {
+  --text-main: var(--text-primary);
+  --text-muted: var(--text-secondary);
+  line-height: 1.8;
+  font-size: 1.05rem;
+  letter-spacing: -0.011em;
+  color: var(--text-main);
+  max-width: 100%;
+}
+
+/* Headers - Removed :deep() as this is global CSS */
+.prose-modern h1, 
+.prose-modern h2, 
+.prose-modern h3,
+.prose-modern h4 {
+  color: var(--text-primary); /* Explicitly use text-primary */
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.2;
+  margin-top: 3.5rem;
+  margin-bottom: 1.25rem;
+}
+
+/* Ensure visibility in Dark Mode */
+[data-theme='dark'] .prose-modern h1,
+[data-theme='dark'] .prose-modern h2,
+[data-theme='dark'] .prose-modern h3,
+[data-theme='dark'] .prose-modern h4 {
+  color: #eaeef4 !important; /* Force off-white for high contrast */
+}
+
+.prose-modern h1 { font-size: 2.5rem; }
+.prose-modern h2 { 
+  font-size: 2rem; 
+  padding-bottom: 0.75rem;
+  border-bottom: 1px solid var(--border-color);
+}
+.prose-modern h3 { font-size: 1.5rem; }
+.prose-modern h4 { font-size: 1.25rem; }
+
+/* Paragraphs & Lists */
+.prose-modern p {
+  margin-bottom: 1.5rem;
+  opacity: 0.95;
+  text-align: justify; /* Better alignment for CJK and English mixed text */
+}
+
+.prose-modern ul, 
+.prose-modern ol {
+  margin-bottom: 2rem;
+  padding-left: 1.5rem;
+}
+
+.prose-modern li {
+  margin-bottom: 0.6rem;
+}
+
+.prose-modern li::marker {
+  color: var(--accent-color);
+  font-weight: bold;
+}
+
+/* Blockquotes */
+.prose-modern blockquote {
+  margin: 3rem 0;
+  padding: 1.5rem 2rem;
+  background: var(--hover-bg);
+  border-left: 4px solid var(--accent-color);
+  border-radius: 0 1rem 1rem 0;
+  font-style: italic;
+  font-size: 1.15rem;
+  color: var(--text-secondary);
+  position: relative;
+}
+
+/* Code Blocks */
+.prose-modern code {
+  background: var(--accent-soft);
+  padding: 0.2rem 0.4rem;
+  border-radius: 0.4rem;
+  font-size: 0.9em;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  color: var(--accent-color);
+}
+
+.prose-modern pre {
+  margin: 2.5rem 0;
+  background: #1a1b26;
+  padding: 1.5rem;
+  border-radius: 1rem;
+  overflow-x: auto;
+  border: 1px solid rgba(255,255,255,0.05);
+}
+
+[data-theme='dark'] .prose-modern pre {
+  background: #0f1117;
+}
+
+.prose-modern pre code {
+  background: transparent;
+  padding: 0;
+  color: #a9b1d6;
+  font-size: 0.9rem;
+  line-height: 1.6;
+  border: none;
+}
+
+/* Tables */
+.prose-modern table {
+  width: 100%;
+  margin: 3rem 0;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+  font-size: 0.9rem;
+}
+
+.prose-modern th {
+  background: var(--hover-bg);
+  padding: 1rem;
+  text-align: left;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.prose-modern td {
+  padding: 1rem;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.prose-modern tr:last-child td {
+  border-bottom: none;
+}
+
+.prose-modern tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+/* Media */
+.prose-modern img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 1rem;
+  margin: 3.5rem auto;
+  display: block;
+  box-shadow: var(--shadow-md);
+  transition: transform 0.3s ease;
+}
+
+.prose-modern img:hover {
+  transform: scale(1.01);
+}
+
+.prose-modern hr {
+  margin: 4rem 0;
+  border: none;
+  border-top: 1px solid var(--border-color);
+}
+
+/* Links */
+.prose-modern a {
+  color: var(--accent-color);
+  text-decoration: none;
+  font-weight: 600;
+  border-bottom: 1px solid transparent;
+  transition: all 0.2s;
+}
+
+.prose-modern a:hover {
+  border-bottom-color: var(--accent-color);
+  opacity: 0.8;
+}
+
+/* Responsive adjustments for article content */
+@media (max-width: 768px) {
+  .prose-modern {
+    font-size: 1rem; /* Slightly smaller on mobile */
+  }
+  .prose-modern h1 { font-size: 1.8rem; }
+  .prose-modern h2 { font-size: 1.5rem; }
+  .prose-modern h3 { font-size: 1.3rem; }
+  
+  .prose-modern pre {
+    padding: 1rem;
+    margin: 1.5rem -1.5rem; /* Break out of container padding if needed, but let's be careful */
+    border-radius: 0;
+  }
+}

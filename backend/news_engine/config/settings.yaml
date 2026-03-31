@@ -1,0 +1,48 @@
+# NewsEngine Configuration
+# Define news sources, target companies, and keywords for monitoring.
+
+sources:
+  tech:
+    - name: "36Kr Technology"
+      url: "https://36kr.com/information/technology/"
+      type: "html"
+    - name: "IT Home"
+      url: "https://www.ithome.com/"
+      type: "html"
+  finance:
+    - name: "WallstreetCN"
+      url: "https://wallstreetcn.com/news/global"
+      type: "html"
+    - name: "Eastmoney"
+      url: "https://finance.eastmoney.com/"
+      type: "html"
+
+monitoring:
+  companies:
+    - "NVIDIA"
+    - "Apple"
+    - "Microsoft"
+    - "Tesla"
+    - "Google"
+    - "Meta"
+    - "Amazon"
+    - "TSMC"
+  keywords:
+    - "纳斯达克"
+    - "NDX"
+    - "加息"
+    - "降息"
+    - "AI 芯片"
+    - "大模型"
+    - "财报"
+    - "半导体"
+    - "宏观经济"
+
+output:
+  content_dir: "frontend/content/daily"
+  file_format: "markdown"
+  include_investcool_perspective: true
+
+ai_settings:
+  model: "gemini-pro" # Placeholder for standalone API usage
+  summary_length: "medium" # short, medium, long

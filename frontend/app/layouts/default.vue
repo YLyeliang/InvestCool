@@ -88,7 +88,15 @@ watch(() => route.path, () => {
               </NuxtLink>
             </div>
 
-            <!-- Section 2: Tutorials -->
+            <!-- Section 2: HK Account -->
+            <div class="nav-section">
+              <div class="nav-section-label">香港开户</div>
+              <NuxtLink to="/hk-account" class="nav-item">
+                <Icon name="lucide:landmark" class="nav-icon" /> 一站式开户
+              </NuxtLink>
+            </div>
+
+            <!-- Section 3: Tutorials -->
             <div class="nav-section">
               <div class="nav-section-label">AI & 教程</div>
               <NuxtLink to="/ai" class="nav-item">

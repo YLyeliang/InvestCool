@@ -112,7 +112,11 @@ onUnmounted(() => {
 }
 
 .container-narrow {
-  max-width: 800px; margin: 0 auto; padding: 0 1.5rem;
+  max-width: 760px; margin: 0 auto; padding: 0 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .container-narrow { padding: 0 0.5rem; }
 }
 
 .nav-header { padding: 2rem 0; }
@@ -131,7 +135,7 @@ onUnmounted(() => {
 }
 
 .article-title {
-  font-size: 2.5rem; font-weight: 900; line-height: 1.2;
+  font-size: 2.25rem; font-weight: 900; line-height: 1.2;
   color: var(--text-primary); margin-bottom: 1.5rem;
 }
 
@@ -141,9 +145,10 @@ onUnmounted(() => {
 }
 
 .article-cover {
-  width: 100%; height: 350px; border-radius: 1.5rem;
-  overflow: hidden; margin-bottom: 4rem;
-  box-shadow: 0 20px 40px -10px rgba(0,0,0,0.1);
+  width: 100%; height: auto; max-height: 400px; border-radius: 1.25rem;
+  overflow: hidden; margin-bottom: 3.5rem;
+  box-shadow: var(--shadow-md);
+  border: 1px solid var(--border-color);
 }
 
 .article-cover img { width: 100%; height: 100%; object-fit: cover; }
@@ -154,8 +159,9 @@ onUnmounted(() => {
 }
 
 .disclaimer {
-  font-size: 0.85rem; color: var(--text-secondary);
-  background: var(--hover-bg); padding: 1.5rem; border-radius: 1rem;
+  font-size: 0.8rem; color: var(--text-tertiary);
+  background: var(--hover-bg); padding: 1.25rem; border-radius: 1rem;
+  line-height: 1.6;
 }
 
 .error-card {
@@ -170,21 +176,8 @@ onUnmounted(() => {
   padding: 0.75rem 2rem; border-radius: 0.75rem;
   text-decoration: none; font-weight: 700;
 }
-
-.mb-4 { margin-bottom: 1rem; }
-.mb-8 { margin-bottom: 2rem; }
-.mb-12 { margin-bottom: 3rem; }
 </style>
 
 <style>
-.prose-modern { line-height: 1.8; font-size: 1.125rem; color: var(--text-primary); }
-.prose-modern h2 { font-size: 1.75rem; font-weight: 800; margin: 3.5rem 0 1.5rem; }
-.prose-modern p { margin-bottom: 1.5rem; }
-.prose-modern ul, .prose-modern ol { padding-left: 1.5rem; margin-bottom: 2rem; }
-.prose-modern li { margin-bottom: 0.75rem; }
-.prose-modern img { max-width: 100%; border-radius: 1rem; margin: 2rem 0; }
-.prose-modern blockquote {
-  border-left: 4px solid var(--accent-color); padding: 1rem 2rem;
-  background: var(--hover-bg); margin: 2.5rem 0; font-style: italic;
-}
+/* Local prose overrides removed in favor of global prose.css */
 </style>

@@ -206,6 +206,7 @@ body {
   .site-header { height: var(--mobile-header-height); }
   .header-center { display: none; }
   .mobile-only { display: flex; }
+  .main-feed { padding: 2rem 1rem; } /* Reduced padding from 2.5rem to 1rem */
   .left-sidebar {
     position: fixed;
     left: 0; top: 0; bottom: 0;

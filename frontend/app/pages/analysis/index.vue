@@ -34,13 +34,10 @@ useHead({
 
 <template>
   <div class="analysis-page">
-    <!-- Hero Section -->
-    <header class="analysis-hero">
-      <div class="hero-content">
-        <div class="badge premium-badge">Premium Analysis</div>
-        <h2 class="hero-title">洞察纳斯达克 100 <br/><span class="text-accent">把握科技股脉搏</span></h2>
-        <p class="hero-subtitle">由 AI 辅助，结合宏观经济指标与实时盘面数据，为您呈现深度的投研见解。</p>
-      </div>
+    <!-- Elegant Page Header -->
+    <header class="page-header">
+      <h2 class="title">深度投研分析</h2>
+      <p class="subtitle">由 AI 辅助，结合宏观经济指标与实时盘面数据，为您呈现专业的投资见解。</p>
     </header>
 
     <!-- Filter & Content Area -->
@@ -76,44 +73,27 @@ useHead({
 </template>
 
 <style scoped>
-.analysis-page { min-height: 100vh; padding-bottom: 5rem; }
+.analysis-page { min-height: 100vh; padding-bottom: 5rem; animation: fadeIn 0.6s ease-out; }
 
-.analysis-hero {
-  padding: 5rem 0;
-  background: radial-gradient(circle at top right, rgba(93, 135, 255, 0.08), transparent),
-              radial-gradient(circle at bottom left, rgba(93, 135, 255, 0.03), transparent);
-  border-bottom: 1px solid var(--border-color);
-  margin-bottom: 3.5rem;
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.hero-content { max-width: 800px; }
+.page-header { margin-bottom: 3rem; }
 
-.premium-badge {
-  background: var(--accent-soft);
-  color: var(--accent-color);
-  padding: 0.4rem 1rem;
-  border-radius: 2rem;
-  font-size: 0.75rem;
-  font-weight: 800;
-  margin-bottom: 1.5rem;
-  display: inline-block;
-}
-
-.hero-title {
-  font-size: 3.5rem;
-  font-weight: 900;
-  color: var(--text-primary);
-  line-height: 1.1;
-  margin-bottom: 1.5rem;
+.title { 
+  font-size: 2.5rem; 
+  font-weight: 900; 
+  margin-bottom: 0.75rem; 
+  color: var(--text-primary); 
   letter-spacing: -0.02em;
 }
 
-.text-accent { color: var(--accent-color); }
-
-.hero-subtitle {
-  font-size: 1.25rem;
-  color: var(--text-secondary);
-  max-width: 600px;
+.subtitle { 
+  color: var(--text-secondary); 
+  font-size: 1.1rem; 
+  max-width: 600px; 
   line-height: 1.6;
 }
 

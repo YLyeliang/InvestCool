@@ -23,6 +23,13 @@ const isSaving = ref(false);
 const isSidebarOpen = ref(true);
 const isDragging = ref(false);
 
+const trafficStats = ref({
+  today_visits: 0,
+  total_visits: 0,
+  active_users: 0,
+  bounce_rate: '0%'
+});
+
 const form = ref({
   title: '',
   summary: '',
@@ -93,10 +100,16 @@ const authorize = async () => {
 const fetchData = async () => {
   isListLoading.value = true;
   try {
-    const res = await fetch(`${config.public.apiBase}/admin/all-content`, { headers: getHeaders() });
-    if (res.ok) {
-      const data = await res.json();
+    const [resContent, resStats] = await Promise.all([
+      fetch(`${config.public.apiBase}/admin/all-content`, { headers: getHeaders() }),
+      fetch(`${config.public.apiBase}/admin/stats`, { headers: getHeaders() })
+    ]);
+    if (resContent.ok) {
+      const data = await resContent.json();
       articles.value = Array.isArray(data) ? data : [];
+    }
+    if (resStats.ok) {
+      trafficStats.value = await resStats.json();
     }
   } finally { isListLoading.value = false; }
 };
@@ -313,13 +326,59 @@ onMounted(() => {
         <div class="flex-1 overflow-y-auto custom-scrollbar bg-white dark:bg-[#09090b]">
           
           <!-- DASHBOARD -->
-          <div v-if="activeView === 'dashboard'" class="p-8 lg:p-16 max-w-6xl mx-auto space-y-16 animate-in fade-in duration-700">
-            <div class="space-y-3"><h2 class="text-6xl font-black tracking-tighter">Command Center.</h2><p class="text-slate-400 font-medium text-lg italic">全库资产索引状态：运行稳定</p></div>
-            <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
-              <div v-for="s in stats" :key="s.label" class="p-8 border border-slate-100 dark:border-slate-900 rounded-3xl bg-white dark:bg-[#0c0c0e] hover:border-black dark:hover:border-white transition-all group relative overflow-hidden">
-                <UIcon :name="s.icon" class="size-5 mb-6 text-slate-300 group-hover:text-black dark:group-hover:text-white" />
-                <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">{{ s.label }}</div>
-                <div class="text-4xl font-black tracking-tighter">{{ s.value }}<span class="text-sm ml-1 opacity-20">{{ s.unit }}</span></div>
+          <div v-if="activeView === 'dashboard'" class="p-8 lg:p-16 max-w-6xl mx-auto space-y-12 animate-in fade-in duration-700">
+            <div class="space-y-3">
+              <h2 class="text-5xl lg:text-6xl font-black tracking-tighter text-slate-900 dark:text-white">Command Center.</h2>
+              <p class="text-slate-500 dark:text-slate-400 font-medium text-lg italic">InvestCool 核心管理与监控引擎</p>
+            </div>
+
+            <!-- Traffic Stats -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Traffic Analytics</h3>
+              <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <div class="p-6 border border-slate-100 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-[#121214] shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                  <div class="flex items-center justify-between mb-4">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">今日访问</span>
+                    <UIcon name="i-lucide-activity" class="size-4 text-emerald-500 group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div class="text-3xl font-black tracking-tighter text-slate-800 dark:text-slate-100">{{ trafficStats.today_visits }}</div>
+                </div>
+                <div class="p-6 border border-slate-100 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-[#121214] shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                  <div class="flex items-center justify-between mb-4">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">累计访问</span>
+                    <UIcon name="i-lucide-globe" class="size-4 text-blue-500 group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div class="text-3xl font-black tracking-tighter text-slate-800 dark:text-slate-100">{{ (trafficStats.total_visits / 10000).toFixed(1) }}<span class="text-lg opacity-50 ml-0.5">w</span></div>
+                </div>
+                <div class="p-6 border border-slate-100 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-[#121214] shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                  <div class="flex items-center justify-between mb-4">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">当前在线</span>
+                    <UIcon name="i-lucide-users" class="size-4 text-orange-500 group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <div class="size-2 rounded-full bg-orange-500 animate-pulse"></div>
+                    <div class="text-3xl font-black tracking-tighter text-slate-800 dark:text-slate-100">{{ trafficStats.active_users }}</div>
+                  </div>
+                </div>
+                <div class="p-6 border border-slate-100 dark:border-slate-800/60 rounded-2xl bg-white dark:bg-[#121214] shadow-sm hover:shadow-md transition-all flex flex-col justify-between group">
+                  <div class="flex items-center justify-between mb-4">
+                    <span class="text-[10px] font-bold text-slate-500 uppercase tracking-widest">跳出率</span>
+                    <UIcon name="i-lucide-arrow-down-right" class="size-4 text-rose-500 group-hover:scale-110 transition-transform" />
+                  </div>
+                  <div class="text-3xl font-black tracking-tighter text-slate-800 dark:text-slate-100">{{ trafficStats.bounce_rate }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Content Stats -->
+            <div class="space-y-4">
+              <h3 class="text-xs font-black text-slate-400 uppercase tracking-[0.2em]">Content Index</h3>
+              <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+                <div v-for="s in stats" :key="s.label" class="p-6 border border-slate-100 dark:border-slate-800/60 rounded-2xl bg-slate-50 dark:bg-slate-900/50 hover:border-black dark:hover:border-white transition-all group relative overflow-hidden">
+                  <UIcon :name="s.icon" class="size-5 mb-6 text-slate-400 group-hover:text-black dark:group-hover:text-white transition-colors" />
+                  <div class="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-1">{{ s.label }}</div>
+                  <div class="text-4xl font-black tracking-tighter text-slate-800 dark:text-slate-200">{{ s.value }}<span class="text-sm ml-1 opacity-40 font-medium">{{ s.unit }}</span></div>
+                </div>
               </div>
             </div>
           </div>

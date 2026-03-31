@@ -1,11 +1,7 @@
 <script setup lang="ts">
-// Fetch all items from daily collection
-const { data: dailyLogs } = await useAsyncData('daily-logs-list', () => queryCollection('daily').all())
-
-// Sort by date descending
-const sortedLogs = computed(() => {
-  if (!dailyLogs.value) return []
-  return [...dailyLogs.value].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime())
+// Fetch items from our new dynamic server API to ensure immediate visibility of disk updates
+const { data: sortedLogs, pending, error } = await useFetch('/cms/daily', {
+  key: 'dynamic-daily-list'
 })
 
 useHead({
@@ -23,7 +19,7 @@ useHead({
       <p class="subtitle">记录每一天的技术成长与市场波动。</p>
     </header>
 
-    <div class="logs-grid">
+    <div v-if="sortedLogs && sortedLogs.length > 0" class="logs-grid">
       <div v-for="log in sortedLogs" :key="log.path" class="card log-card">
         <div class="log-cover">
           <img :src="log.cover || 'https://images.unsplash.com/photo-1611974714658-058e117b8161?q=80&w=1000'" :alt="log.title" class="cover-img" />
@@ -44,16 +40,14 @@ useHead({
     </div>
 
     <!-- Empty State -->
-    <div v-if="sortedLogs.length === 0" class="empty-state">
+    <div v-if="!sortedLogs || sortedLogs.length === 0" class="empty-state">
       <Icon name="lucide:inbox" class="empty-icon" />
-      <p>正在同步最新的日志数据...</p>
+      <p v-if="pending">正在同步最新的日志数据...</p>
+      <p v-else-if="error">数据加载失败，请刷新重试。</p>
+      <p v-else>暂无简报数据，请运行 NewsEngine 生成内容。</p>
     </div>
   </div>
 </template>
-
-<script lang="ts">
-// Note: Added explicit path mapping for Nuxt Content v3 items
-</script>
 
 <style scoped>
 .page-header {
