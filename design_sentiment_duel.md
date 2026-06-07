@@ -22,7 +22,7 @@
     - `POST /api/poll/vote`: 接收 `{ "type": "bull" }`，执行防刷检查并入库。
 
 ## 4. 视觉与交互 (Frontend)
-- **组件名称**：`SentimentDuel.vue`
+- **组件名称**：`frontend/src/components/SentimentDuel.tsx`
 - **状态切换**：
     - **未投状态**：展示两个彩色大按钮，背景微动（呼吸效果）。
     - **已投状态**：展示圆角“拔河进度条”，比例变化带弹性动画效果。

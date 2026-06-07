@@ -1,22 +1,28 @@
 from flask import Flask, jsonify, request, abort
 from flask_sqlalchemy import SQLAlchemy
-from flask_cors import CORS
 import os
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
-import threading
 import time
 from functools import wraps
 import logging
 import hashlib
+import hmac
+import io
+import json
+from glob import glob
+from logging.handlers import RotatingFileHandler
+from PIL import Image, UnidentifiedImageError
 
 app = Flask(__name__)
-CORS(app)
 
 # Database Configuration
 basedir = os.path.abspath(os.path.dirname(__file__))
-app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///' + os.path.join(basedir, 'investcool.db')
+app.config['SQLALCHEMY_DATABASE_URI'] = os.environ.get(
+    "DATABASE_URL",
+    'sqlite:///' + os.path.join(basedir, 'investcool.db'),
+)
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 # Configure logging
@@ -24,14 +30,18 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(message)s',
     handlers=[
-        logging.FileHandler(os.path.join(basedir, "../backend.log")),
+        RotatingFileHandler(
+            os.path.join(basedir, "../backend.log"),
+            maxBytes=10 * 1024 * 1024,
+            backupCount=5,
+        ),
         logging.StreamHandler()
     ]
 )
 logger = logging.getLogger(__name__)
 
 # Security
-ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN", "investcool-master-key-2026")
+ADMIN_TOKEN = os.environ.get("ADMIN_TOKEN")
 
 db = SQLAlchemy(app)
 
@@ -121,8 +131,12 @@ class AIRecommendation(db.Model):
 def require_admin(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
+        if not ADMIN_TOKEN:
+            logger.error("ADMIN_TOKEN is not configured")
+            return jsonify({"error": "Admin access is not configured"}), 503
         token = request.headers.get('Authorization')
-        if not token or token != f"Bearer {ADMIN_TOKEN}":
+        expected = f"Bearer {ADMIN_TOKEN}"
+        if not token or not hmac.compare_digest(token, expected):
             return jsonify({"error": "Unauthorized"}), 403
         return f(*args, **kwargs)
     return decorated_function
@@ -209,16 +223,22 @@ def refresh_watchlist_data():
     for symbol in tickers:
         try:
             t = yf.Ticker(symbol)
-            info = t.fast_info
-            if info is None: raise ValueError("fast_info is None")
-            
-            price = safe_float(info.last_price)
-            prev_close = safe_float(info.previous_close)
-            
-            if price == 0: raise ValueError("Price is 0")
-            
+            hist = t.history(period="2d")
+            if hist.empty or len(hist) < 1:
+                raise ValueError(f"No history for {symbol}")
+
+            # Use last available row for current price
+            price = float(hist['Close'].iloc[-1])
+
+            # Calculate change based on previous close if available, else use yesterday's close from history
+            if len(hist) >= 2:
+                prev_close = float(hist['Close'].iloc[-2])
+            else:
+                prev_close = price # fallback
+
             change = price - prev_close
-            pct = (change / prev_close) * 100 if prev_close else 0
+            pct = (change / prev_close) * 100 if prev_close != 0 else 0
+
             new_data.append({
                 "symbol": symbol, 
                 "price": round(price, 2), 
@@ -227,7 +247,6 @@ def refresh_watchlist_data():
             })
         except Exception as e:
             logger.error(f"Watchlist item {symbol} error: {e}")
-            # Fallback to existing data if available
             existing = next((x for x in watchlist_cache.get("data", []) if x.get('symbol') == symbol), None)
             if existing: new_data.append(existing)
 
@@ -350,19 +369,20 @@ def run_ai_analysis():
         run_fallback_analysis(index_pos)
 
 def run_fallback_analysis(index_pos):
-    # Heuristic strategy based on market sentiment
-    metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
-    if not metric: return
-    
-    val = metric.index_value
-    if val > 75: 
-        status, summary = "观察", "市场进入极度贪婪区，RSI 指数偏高。建议在当前点位保持警惕，等待回踩机会。"
-    elif val < 25:
-        status, summary = "看多", "情绪跌入超卖区间，恐慌指数高企。当前点位具备中长期配置价值，建议分批买入。"
-    else:
-        status, summary = "中性", "市场处于均衡博弈阶段，波动率趋稳。建议持仓观望，关注权重股财报指引。"
-
     with app.app_context():
+        metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
+        if not metric:
+            logger.warning("Fallback analysis skipped: no market metric available")
+            return
+
+        val = metric.index_value
+        if val > 75:
+            status, summary = "观察", "市场进入极度贪婪区，RSI 指数偏高。建议在当前点位保持警惕，等待回踩机会。"
+        elif val < 25:
+            status, summary = "看多", "情绪跌入超卖区间，恐慌指数高企。当前点位具备中长期配置价值，建议分批买入。"
+        else:
+            status, summary = "中性", "市场处于均衡博弈阶段，波动率趋稳。建议持仓观望，关注权重股财报指引。"
+
         new_rec = AIRecommendation(status=status, summary=f"[系统保底] {summary}", index_position=float(index_pos))
         db.session.add(new_rec)
         db.session.commit()
@@ -453,8 +473,7 @@ def get_sitemap_urls():
     for a in analyses:
         urls.append({"loc": f"/analysis/{a.id}", "lastmod": a.created_at.isoformat()})
     
-    # Daily logs are handled by Nuxt Content sitemap integration automatically 
-    # since they are files in the content/ directory.
+    # Daily logs are discovered directly from the Markdown content directory.
     return jsonify(urls)
 
 @app.route('/api/poll/status', methods=['GET'])
@@ -471,7 +490,23 @@ def get_poll_status():
 
 @app.route('/api/poll/vote', methods=['POST'])
 def submit_vote():
-    # ... (existing code)
+    data = request.get_json(silent=True) or {}
+    vote_type = data.get("type")
+    if vote_type not in {"bull", "bear"}:
+        return jsonify({"error": "Invalid vote type"}), 400
+
+    ip = request.remote_addr or "unknown"
+    ip_hash = hashlib.sha256(ip.encode()).hexdigest()
+    last_24h = datetime.utcnow() - timedelta(hours=24)
+    existing = PollVote.query.filter(
+        PollVote.ip_hash == ip_hash,
+        PollVote.created_at > last_24h,
+    ).first()
+    if existing:
+        return jsonify({"error": "Already voted"}), 403
+
+    db.session.add(PollVote(vote_type=vote_type, ip_hash=ip_hash))
+    db.session.commit()
     return jsonify({"success": True})
 
 @app.route('/api/market-quote', methods=['GET'])
@@ -601,10 +636,64 @@ def get_analysis_by_id(id):
     if a.is_deleted: abort(404)
     return jsonify(a.to_dict())
 
+def content_file_paths(analysis_id):
+    content_base = os.path.abspath(os.path.join(basedir, "../../frontend/content"))
+    paths = []
+    for folder in ("analysis", "tutorials"):
+        paths.extend(glob(os.path.join(content_base, folder, f"{analysis_id}_*.md")))
+    return paths
+
+
+def remove_analysis_files(analysis_id):
+    for file_path in content_file_paths(analysis_id):
+        try:
+            os.remove(file_path)
+        except FileNotFoundError:
+            pass
+
+
+# Keep the public Markdown collection synchronized with the admin database.
+def sync_analysis_to_file(analysis_obj):
+    try:
+        content_base = os.path.abspath(os.path.join(basedir, "../../frontend/content"))
+        folder = "analysis" if analysis_obj.content_type == 'analysis' else "tutorials"
+        target_dir = os.path.join(content_base, folder)
+        os.makedirs(target_dir, exist_ok=True)
+
+        remove_analysis_files(analysis_obj.id)
+        if analysis_obj.is_deleted:
+            return
+
+        filename = f"{analysis_obj.id}_{analysis_obj.title.replace(' ', '_')}.md"
+        for char in ['/', '\\', ':', '*', '?', '"', '<', '>', '|']:
+            filename = filename.replace(char, '')
+        file_path = os.path.join(target_dir, filename)
+
+        fm = "---\n"
+        fm += f"title: {json.dumps(analysis_obj.title, ensure_ascii=False)}\n"
+        fm += f"category: {json.dumps(analysis_obj.category, ensure_ascii=False)}\n"
+        fm += f"summary: {json.dumps(analysis_obj.summary, ensure_ascii=False)}\n"
+        fm += f"cover: {json.dumps(analysis_obj.cover or '', ensure_ascii=False)}\n"
+        fm += f"date: {json.dumps(analysis_obj.created_at.strftime('%Y-%m-%d'))}\n"
+        fm += "---\n\n"
+
+        temp_path = f"{file_path}.tmp"
+        with open(temp_path, 'w', encoding='utf-8') as f:
+            f.write(fm + analysis_obj.content)
+        os.replace(temp_path, file_path)
+
+        logger.info(f"Synced article #{analysis_obj.id} to file: {file_path}")
+    except Exception as e:
+        logger.error(f"Sync to file failed: {e}")
+
 @app.route('/api/analysis', methods=['POST'])
 @require_admin
 def create_analysis():
-    data = request.json
+    data = request.get_json(silent=True) or {}
+    required = ("title", "summary", "content", "category")
+    missing = [field for field in required if not str(data.get(field, "")).strip()]
+    if missing:
+        return jsonify({"error": f"Missing required fields: {', '.join(missing)}"}), 400
     try:
         new_analysis = Analysis(
             title=data.get('title'),
@@ -616,6 +705,7 @@ def create_analysis():
         )
         db.session.add(new_analysis)
         db.session.commit()
+        sync_analysis_to_file(new_analysis)
         return jsonify(new_analysis.to_dict()), 201
     except Exception as e:
         db.session.rollback()
@@ -634,6 +724,7 @@ def update_analysis(id):
         a.cover = data.get('cover', a.cover)
         a.content_type = data.get('content_type', a.content_type)
         db.session.commit()
+        sync_analysis_to_file(a)
         return jsonify(a.to_dict())
     except Exception as e:
         db.session.rollback()
@@ -648,6 +739,7 @@ def delete_analysis(id):
         a.is_deleted = True
         a.deleted_at = datetime.utcnow()
         db.session.commit()
+        sync_analysis_to_file(a)
         return jsonify({"success": True, "message": "Moved to trash"})
     except Exception as e:
         db.session.rollback()
@@ -661,6 +753,7 @@ def restore_analysis(id):
         a.is_deleted = False
         a.deleted_at = None
         db.session.commit()
+        sync_analysis_to_file(a)
         return jsonify({"success": True})
     except Exception as e:
         db.session.rollback()
@@ -671,16 +764,13 @@ def restore_analysis(id):
 def hard_delete_analysis(id):
     a = Analysis.query.get_or_404(id)
     try:
+        remove_analysis_files(a.id)
         db.session.delete(a)
         db.session.commit()
         return jsonify({"success": True})
     except Exception as e:
         db.session.rollback()
         return jsonify({"error": str(e)}), 400
-
-import hashlib
-import werkzeug
-from werkzeug.utils import secure_filename
 
 # Configuration for uploads
 UPLOAD_FOLDER = os.path.join(os.path.dirname(__file__), '../../frontend/public/uploads')
@@ -708,9 +798,14 @@ def upload_file():
         return jsonify({"error": "No selected file"}), 400
     
     if file and allowed_file(file.filename):
-        # Generate a unique filename using hash to avoid duplicates and collisions
         ext = file.filename.rsplit('.', 1)[1].lower()
         file_content = file.read()
+        try:
+            image = Image.open(io.BytesIO(file_content))
+            image.verify()
+        except (UnidentifiedImageError, OSError):
+            return jsonify({"error": "Invalid image file"}), 400
+
         file_hash = hashlib.md5(file_content).hexdigest()
         filename = f"{file_hash}.{ext}"
         
@@ -734,23 +829,10 @@ def verify_token():
 
 @app.route('/api/health', methods=['GET'])
 def health():
-    return jsonify({"status": "healthy", "worker_active": threading.active_count() > 1})
-
-def start_worker():
-    if os.environ.get('WERKZEUG_RUN_MAIN') == 'true' or os.environ.get('GUNICORN_WORKER_ID') == '1' or not os.environ.get('GUNICORN_WORKER_ID'):
-        if "DataWorker" not in [t.name for t in threading.enumerate()]:
-            threading.Thread(target=background_worker, daemon=True, name="DataWorker").start()
-            logger.info("Worker started")
-            
-            # Phase 15 Add-on: Initial AI Analysis check
-            with app.app_context():
-                if AIRecommendation.query.count() == 0:
-                    logger.info("First run detected, triggering initial AI analysis...")
-                    threading.Thread(target=run_ai_analysis, daemon=True).start()
+    return jsonify({"status": "healthy"})
 
 with app.app_context():
     db.create_all()
-    start_worker()
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=False)

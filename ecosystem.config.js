@@ -7,7 +7,18 @@ module.exports = {
       interpreter: "python3",
       env: {
         NODE_ENV: "production",
-        ADMIN_TOKEN: "investcool-master-key-2026"
+        ADMIN_TOKEN: process.env.ADMIN_TOKEN
+      },
+      autorestart: true,
+      watch: false,
+      max_memory_restart: "500M"
+    },
+    {
+      name: "investcool-worker",
+      script: "./backend/worker.py",
+      interpreter: "./backend/venv/bin/python",
+      env: {
+        NODE_ENV: "production"
       },
       autorestart: true,
       watch: false,
@@ -15,7 +26,9 @@ module.exports = {
     },
     {
       name: "investcool-frontend",
-      script: "./frontend/.output/server/index.mjs",
+      script: "npm",
+      args: "start",
+      cwd: "./frontend",
       env: {
         PORT: 3000,
         NODE_ENV: "production"

@@ -26,7 +26,7 @@
 1. **后端 (Flask)**: 每 10 分钟调用 `yfinance` 获取数据并执行加权计算。
 2. **存储**: 将最新得分及因子组成存入 SQLite `market_metrics` 表。
 3. **API**: 暴露 `GET /api/market-index` 接口。
-4. **前端 (Nuxt 4)**: 仪表盘组件定时（10min）轮询该接口。
+4. **前端 (Next.js / React)**: 仪表盘组件定时（10min）轮询该接口。
 
 ## 5. 决策记录 (Decision Log)
 - **视觉选择**: 半圆型 (简洁、适合仪表盘磁贴布局)。
