@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
+import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 
@@ -98,6 +99,13 @@ export default function RiskPage() {
           <Icon name="lucide:radar" className="text-[var(--accent-color)]" /> 实时 NDX 风险简报
         </h3>
         <NDXRiskBriefCard />
+      </section>
+
+      <section className="diagnostics-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> 机构式风险诊断
+        </h3>
+        <NDXRiskDiagnosticsPanel />
       </section>
 
       <div className="main-content-layout grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">

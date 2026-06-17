@@ -59,6 +59,7 @@ watchlist_cache = {"data": [], "last_update": None}
 nasdaq_cache = {"data": None, "last_update": None}
 macro_cache = {"data": [], "last_update": None}
 ai_latest_cache = {"data": None, "last_update": None}
+risk_diagnostics_cache = {"data": None, "last_update": None}
 
 
 def should_refresh_empty_cache(cache, cooldown_seconds=60):
@@ -68,6 +69,10 @@ def should_refresh_empty_cache(cache, cooldown_seconds=60):
         return False
     cache["last_attempt"] = now
     return True
+
+def cache_is_fresh(cache, ttl_seconds):
+    last_update = cache.get("last_update")
+    return bool(last_update and datetime.utcnow() - last_update < timedelta(seconds=ttl_seconds))
 
 # Models
 class PageView(db.Model):
@@ -169,6 +174,35 @@ def safe_float(val, default=0.0):
         if val is None or pd.isna(val): return default
         return float(val)
     except: return default
+
+def clamp(value, minimum=0, maximum=100):
+    return max(minimum, min(maximum, value))
+
+def pct_change(current, base):
+    return ((current - base) / base * 100) if base else 0
+
+def risk_label(score):
+    if score >= 75:
+        return "高风险"
+    if score >= 55:
+        return "偏高"
+    if score >= 35:
+        return "中性"
+    return "低风险"
+
+def risk_color(score):
+    if score >= 75:
+        return "red"
+    if score >= 55:
+        return "amber"
+    if score >= 35:
+        return "blue"
+    return "green"
+
+def round_optional(value, digits=2):
+    if value is None:
+        return None
+    return round(float(value), digits)
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -320,6 +354,215 @@ def refresh_macro_data():
         logger.info("Macro updated")
 
 
+def build_pillar(key, label, score, comment, metrics):
+    normalized_score = round(clamp(score), 1)
+    return {
+        "key": key,
+        "label": label,
+        "score": normalized_score,
+        "level": risk_label(normalized_score),
+        "color": risk_color(normalized_score),
+        "comment": comment,
+        "metrics": metrics,
+    }
+
+def refresh_risk_diagnostics():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_diagnostics_cache
+
+    try:
+        ndx_hist = yf.Ticker("^NDX").history(period="1y")
+        if ndx_hist is None or ndx_hist.empty or "Close" not in ndx_hist.columns:
+            raise ValueError("NDX history unavailable for diagnostics")
+
+        closes = ndx_hist["Close"].dropna()
+        if closes.empty:
+            raise ValueError("NDX close history unavailable for diagnostics")
+
+        latest = float(closes.iloc[-1])
+        ma50 = float(closes.rolling(50).mean().iloc[-1]) if len(closes) >= 50 else float(closes.mean())
+        ma200 = float(closes.rolling(200).mean().iloc[-1]) if len(closes) >= 200 else float(closes.mean())
+        distance_50 = pct_change(latest, ma50)
+        distance_200 = pct_change(latest, ma200)
+        one_month_return = pct_change(latest, float(closes.iloc[-22])) if len(closes) > 22 else 0
+        three_month_return = pct_change(latest, float(closes.iloc[-64])) if len(closes) > 64 else 0
+
+        if latest >= ma50 and ma50 >= ma200:
+            trend_score = 25
+            trend_comment = "价格位于 50/200 日均线上方，趋势结构仍偏多。"
+        elif latest >= ma50:
+            trend_score = 45
+            trend_comment = "价格站上 50 日线，但中长期结构仍需确认。"
+        elif latest >= ma200:
+            trend_score = 60
+            trend_comment = "价格跌破 50 日线，短线趋势进入修复观察区。"
+        else:
+            trend_score = 82
+            trend_comment = "价格跌破 200 日线，趋势结构转弱，需要优先控制回撤。"
+
+        if distance_50 > 8:
+            trend_score += 8
+            trend_comment = "价格显著高于 50 日线，趋势虽强但追高风险上升。"
+        if one_month_return < -5:
+            trend_score += 8
+        if three_month_return < -10:
+            trend_score += 8
+
+        returns = closes.pct_change().dropna()
+        vol20 = float(returns.tail(20).std() * (252 ** 0.5) * 100) if len(returns) >= 20 else 0
+        vol60 = float(returns.tail(60).std() * (252 ** 0.5) * 100) if len(returns) >= 60 else vol20
+        try:
+            vix_price = safe_float(yf.Ticker("^VIX").fast_info.last_price, None)
+        except Exception as e:
+            logger.error(f"VIX diagnostics fetch error: {e}")
+            vix_price = None
+
+        if vol20 < 18:
+            volatility_score = 25
+            volatility_comment = "20 日实现波动率处于低位，短线风险定价较温和。"
+        elif vol20 < 25:
+            volatility_score = 45
+            volatility_comment = "波动率回到常态区间，适合用仓位纪律管理日内扰动。"
+        elif vol20 < 35:
+            volatility_score = 68
+            volatility_comment = "实现波动率偏高，指数对利率和权重股消息更敏感。"
+        else:
+            volatility_score = 86
+            volatility_comment = "波动率处于压力区，组合需要优先考虑尾部风险和止损纪律。"
+
+        if vix_price is not None and vix_price >= 25:
+            volatility_score += 8
+        elif vix_price is not None and vix_price <= 14:
+            volatility_score -= 5
+
+        high_52w = float(closes.max())
+        low_52w = float(closes.min())
+        drawdown = pct_change(latest, high_52w)
+        drawdown_depth = abs(min(drawdown, 0))
+
+        if drawdown_depth < 5:
+            drawdown_score = 28
+            drawdown_comment = "指数距离 52 周高点较近，尚未出现系统性回撤压力。"
+        elif drawdown_depth < 10:
+            drawdown_score = 45
+            drawdown_comment = "回撤进入温和区间，适合观察支撑位和资金回流强度。"
+        elif drawdown_depth < 18:
+            drawdown_score = 67
+            drawdown_comment = "回撤压力偏高，需要关注是否演化为中期趋势破位。"
+        else:
+            drawdown_score = 88
+            drawdown_comment = "指数已进入深度回撤，风险预算和再平衡节奏比择时更重要。"
+
+        if not watchlist_cache.get("data"):
+            refresh_watchlist_data()
+        watchlist = watchlist_cache.get("data", [])
+        total = len(watchlist)
+        advancers = len([item for item in watchlist if safe_float(item.get("percent"), -999) >= 0])
+        avg_change = sum(safe_float(item.get("percent"), 0) for item in watchlist) / total if total else 0
+        breadth_ratio = advancers / total if total else 0.5
+
+        if breadth_ratio >= 0.65:
+            breadth_score = 25
+            breadth_comment = "MAG7 上涨家数占优，权重股广度对指数构成支撑。"
+        elif breadth_ratio >= 0.45:
+            breadth_score = 45
+            breadth_comment = "权重股涨跌分化，指数需要观察龙头之间的轮动质量。"
+        elif breadth_ratio >= 0.25:
+            breadth_score = 68
+            breadth_comment = "多数权重股走弱，指数上涨若只靠少数股票会降低持续性。"
+        else:
+            breadth_score = 86
+            breadth_comment = "MAG7 广度明显转弱，组合层面需要降低单一主题暴露。"
+
+        if avg_change < -1.5:
+            breadth_score += 8
+        elif avg_change > 1:
+            breadth_score -= 5
+
+        sorted_watchlist = sorted(watchlist, key=lambda item: safe_float(item.get("percent"), 0), reverse=True)
+        leaders = [
+            {"symbol": item.get("symbol"), "percent": round_optional(item.get("percent"), 2)}
+            for item in sorted_watchlist[:2]
+        ]
+        laggards = [
+            {"symbol": item.get("symbol"), "percent": round_optional(item.get("percent"), 2)}
+            for item in sorted_watchlist[-2:]
+        ]
+
+        pillars = [
+            build_pillar(
+                "trend",
+                "趋势结构",
+                trend_score,
+                trend_comment,
+                [
+                    {"label": "距50日线", "value": f"{distance_50:+.1f}%"},
+                    {"label": "距200日线", "value": f"{distance_200:+.1f}%"},
+                    {"label": "1个月", "value": f"{one_month_return:+.1f}%"},
+                    {"label": "3个月", "value": f"{three_month_return:+.1f}%"},
+                ],
+            ),
+            build_pillar(
+                "volatility",
+                "波动压力",
+                volatility_score,
+                volatility_comment,
+                [
+                    {"label": "20日波动", "value": f"{vol20:.1f}%"},
+                    {"label": "60日波动", "value": f"{vol60:.1f}%"},
+                    {"label": "VIX", "value": f"{vix_price:.1f}" if vix_price is not None else "--"},
+                ],
+            ),
+            build_pillar(
+                "drawdown",
+                "回撤压力",
+                drawdown_score,
+                drawdown_comment,
+                [
+                    {"label": "距52周高点", "value": f"{drawdown:.1f}%"},
+                    {"label": "52周高点", "value": f"{high_52w:,.0f}"},
+                    {"label": "52周低点", "value": f"{low_52w:,.0f}"},
+                ],
+            ),
+            build_pillar(
+                "breadth",
+                "权重股广度",
+                breadth_score,
+                breadth_comment,
+                [
+                    {"label": "上涨家数", "value": f"{advancers}/{total}" if total else "--"},
+                    {"label": "平均涨跌", "value": f"{avg_change:+.2f}%"},
+                    {"label": "领涨", "value": ", ".join(item["symbol"] for item in leaders if item.get("symbol")) or "--"},
+                    {"label": "拖累", "value": ", ".join(item["symbol"] for item in laggards if item.get("symbol")) or "--"},
+                ],
+            ),
+        ]
+
+        composite_score = round(sum(pillar["score"] for pillar in pillars) / len(pillars), 1)
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": ndx_hist.index[-1].date().isoformat(),
+            "index": round(latest, 2),
+            "risk_score": composite_score,
+            "risk_level": risk_label(composite_score),
+            "risk_color": risk_color(composite_score),
+            "summary": (
+                f"综合风险 {composite_score:.1f}/100，{risk_label(composite_score)}。"
+                f"趋势分 {pillars[0]['score']:.1f}，波动分 {pillars[1]['score']:.1f}，"
+                f"回撤分 {pillars[2]['score']:.1f}，广度分 {pillars[3]['score']:.1f}。"
+            ),
+            "leaders": leaders,
+            "laggards": laggards,
+            "pillars": pillars,
+        }
+        risk_diagnostics_cache["data"] = data
+        risk_diagnostics_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX risk diagnostics updated: {composite_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX risk diagnostics refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -430,6 +673,7 @@ def run_rule_based_ndx_analysis(index_pos):
 def background_worker():
     last_cleanup = 0
     last_risk_analysis = 0
+    last_risk_diagnostics = 0
     while True:
         try:
             update_market_index()
@@ -441,6 +685,11 @@ def background_worker():
             if time.time() - last_risk_analysis > 7200:
                 run_ndx_risk_analysis()
                 last_risk_analysis = time.time()
+
+            # NDX risk diagnostics every 30 minutes
+            if time.time() - last_risk_diagnostics > 1800:
+                refresh_risk_diagnostics()
+                last_risk_diagnostics = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -479,6 +728,14 @@ def get_risk_history():
         "pages": recs.pages,
         "current_page": recs.page
     })
+
+@app.route('/api/risk/diagnostics', methods=['GET'])
+def get_risk_diagnostics():
+    if not cache_is_fresh(risk_diagnostics_cache, 15 * 60) and should_refresh_empty_cache(risk_diagnostics_cache, 60):
+        refresh_risk_diagnostics()
+
+    data = risk_diagnostics_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
 def get_market_index():
