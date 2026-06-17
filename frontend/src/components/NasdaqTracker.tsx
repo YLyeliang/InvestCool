@@ -4,13 +4,7 @@ import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
-
-interface NasdaqData {
-  index: number;
-  change: number;
-  percent: number;
-  last_update: string;
-}
+import { type NasdaqData, normalizeNasdaqData } from "@/lib/marketData";
 
 export const NasdaqTracker = () => {
   const [data, setData] = useState<NasdaqData | null>(null);
@@ -29,9 +23,13 @@ export const NasdaqTracker = () => {
       clearTimeout(timeoutId);
 
       if (response.status === 200) {
-        const result = await response.json();
-        setData(result);
-        setIsError(false);
+        const result = normalizeNasdaqData(await response.json());
+        if (result) {
+          setData(result);
+          setIsError(false);
+        } else {
+          setIsError(true);
+        }
         setIsInitializing(false);
       } else if (response.status === 202) {
         setIsInitializing(true);

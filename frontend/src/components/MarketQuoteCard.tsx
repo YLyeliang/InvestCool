@@ -6,17 +6,48 @@ import { Skeleton } from "@/components/ui/Skeleton";
 
 interface QuoteData {
   quote: string;
-  date: string;
+  date?: string;
 }
 
 export const MarketQuoteCard = () => {
   const [data, setData] = useState<QuoteData | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const getMonthLabel = (dateStr: string) => {
+  const normalizeQuote = (payload: unknown): QuoteData | null => {
+    if (!payload || typeof payload !== "object") return null;
+
+    const data = payload as Record<string, unknown>;
+    if (typeof data.quote !== "string" || !data.quote.trim()) return null;
+
+    return {
+      quote: data.quote,
+      date: typeof data.date === "string" ? data.date : undefined,
+    };
+  };
+
+  const getDateParts = (dateStr?: string) => {
+    const fallback = new Date();
+    const fallbackParts = {
+      day: String(fallback.getDate()).padStart(2, "0"),
+      monthIndex: fallback.getMonth(),
+    };
+
+    if (!dateStr) return fallbackParts;
+
     const parts = dateStr.split(".");
+    const monthIndex = Number(parts[1]) - 1;
+
+    return {
+      day: parts[2] || fallbackParts.day,
+      monthIndex: Number.isInteger(monthIndex) && monthIndex >= 0 && monthIndex <= 11
+        ? monthIndex
+        : fallbackParts.monthIndex,
+    };
+  };
+
+  const getMonthLabel = (monthIndex: number) => {
     const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-    return months[parseInt(parts[1]) - 1];
+    return months[monthIndex] || months[new Date().getMonth()];
   };
 
   useEffect(() => {
@@ -24,7 +55,7 @@ export const MarketQuoteCard = () => {
       try {
         const res = await fetch("/api/market-quote");
         if (res.status === 200) {
-          const result = await res.json();
+          const result = normalizeQuote(await res.json());
           setData(result);
         }
       } catch (e) {
@@ -46,15 +77,17 @@ export const MarketQuoteCard = () => {
 
   if (!data) return null;
 
+  const dateParts = getDateParts(data.date);
+
   return (
     <div className="group relative bg-[var(--card-bg)] border border-[var(--border-color)] rounded-2xl p-5 hover:border-[var(--accent-color)] transition-all">
       <div className="flex justify-between items-start mb-5">
         <div className="flex flex-col items-center bg-[var(--hover-bg)] px-3 py-2 rounded-xl min-w-[3rem]">
           <span className="text-xl font-black text-[var(--accent-color)] leading-none">
-            {data.date.split(".")[2]}
+            {dateParts.day}
           </span>
           <span className="text-[0.6rem] font-bold uppercase text-[var(--text-secondary)] mt-1">
-            {getMonthLabel(data.date)}
+            {getMonthLabel(dateParts.monthIndex)}
           </span>
         </div>
         <div className="px-2 py-1 rounded-full bg-blue-500/10 text-[var(--accent-color)] text-[0.65rem] font-black tracking-wider">

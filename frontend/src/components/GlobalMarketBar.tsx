@@ -3,18 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
-
-interface NasdaqData {
-  index: number;
-  change: number;
-  percent: number;
-}
-
-interface MacroAsset {
-  name: string;
-  price: number;
-  percent: number;
-}
+import { type MacroAsset, type NasdaqData, normalizeMacroAssets, normalizeNasdaqData } from "@/lib/marketData";
 
 export const GlobalMarketBar = () => {
   const [nasdaq, setNasdaq] = useState<NasdaqData | null>(null);
@@ -38,8 +27,14 @@ export const GlobalMarketBar = () => {
         fetch("/api/macro-assets"),
       ]);
 
-      if (nasdaqRes.ok) setNasdaq(await nasdaqRes.json());
-      if (macroRes.ok) setMacroAssets(await macroRes.json());
+      if (nasdaqRes.status === 200) {
+        const nextNasdaq = normalizeNasdaqData(await nasdaqRes.json());
+        if (nextNasdaq) setNasdaq(nextNasdaq);
+      }
+
+      if (macroRes.status === 200) {
+        setMacroAssets(normalizeMacroAssets(await macroRes.json()));
+      }
     } catch (e) {
       console.error("Market bar fetch error:", e);
     }

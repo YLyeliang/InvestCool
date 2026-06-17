@@ -60,6 +60,15 @@ nasdaq_cache = {"data": None, "last_update": None}
 macro_cache = {"data": [], "last_update": None}
 ai_latest_cache = {"data": None, "last_update": None}
 
+
+def should_refresh_empty_cache(cache, cooldown_seconds=60):
+    last_attempt = cache.get("last_attempt")
+    now = datetime.utcnow()
+    if last_attempt and now - last_attempt < timedelta(seconds=cooldown_seconds):
+        return False
+    cache["last_attempt"] = now
+    return True
+
 # Models
 class PageView(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -455,14 +464,20 @@ def get_market_history():
 
 @app.route('/api/nasdaq', methods=['GET'])
 def get_nasdaq():
+    if not nasdaq_cache["data"] and should_refresh_empty_cache(nasdaq_cache):
+        refresh_nasdaq_data()
     return jsonify(nasdaq_cache["data"]) if nasdaq_cache["data"] else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/macro-assets', methods=['GET'])
 def get_macro():
+    if not macro_cache["data"] and should_refresh_empty_cache(macro_cache):
+        refresh_macro_data()
     return jsonify(macro_cache["data"]) if macro_cache["data"] else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/watch-list', methods=['GET'])
 def get_watch():
+    if not watchlist_cache["data"] and should_refresh_empty_cache(watchlist_cache):
+        refresh_watchlist_data()
     return jsonify(watchlist_cache["data"]) if watchlist_cache["data"] else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/sitemap-urls', methods=['GET'])
@@ -516,7 +531,11 @@ def get_market_quote():
     sentiment = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
     
     if not ndx or not sentiment:
-        return jsonify({"quote": "市场正在酝酿情绪，请稍后再来...", "author": "InvestCool AI"})
+        return jsonify({
+            "quote": "市场正在酝酿情绪，请稍后再来...",
+            "author": "InvestCool AI",
+            "date": datetime.now().strftime("%Y.%m.%d")
+        })
 
     change = ndx['percent']
     value = sentiment.index_value

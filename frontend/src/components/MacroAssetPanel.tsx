@@ -3,12 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
-
-interface MacroAsset {
-  name: string;
-  price: number;
-  percent: number;
-}
+import { type MacroAsset, normalizeMacroAssets } from "@/lib/marketData";
 
 export const MacroAssetPanel = () => {
   const [assets, setAssets] = useState<MacroAsset[]>([]);
@@ -16,8 +11,8 @@ export const MacroAssetPanel = () => {
   const fetchMacro = async () => {
     try {
       const response = await fetch("/api/macro-assets");
-      if (response.ok) {
-        setAssets(await response.json());
+      if (response.status === 200) {
+        setAssets(normalizeMacroAssets(await response.json()));
       }
     } catch (e) {
       console.error("Macro fetch error:", e);

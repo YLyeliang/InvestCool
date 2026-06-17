@@ -4,23 +4,22 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Icon } from "@/components/ui/Icon";
 import { Skeleton } from "@/components/ui/Skeleton";
 import { cn } from "@/lib/utils";
-
-interface Ticker {
-  symbol: string;
-  price: number;
-  percent: number;
-}
+import { type TickerData, normalizeTickers } from "@/lib/marketData";
 
 export const TickerWatchlist = () => {
-  const [tickers, setTickers] = useState<Ticker[]>([]);
+  const [tickers, setTickers] = useState<TickerData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   const fetchWatchlist = useCallback(async () => {
     try {
       const response = await fetch("/api/watch-list");
       if (response.status === 200) {
-        const data = await response.json();
+        const data = normalizeTickers(await response.json());
         setTickers(data);
+        setIsInitializing(data.length === 0);
+      } else if (response.status === 202) {
+        setIsInitializing(true);
       }
     } catch (e) {
       console.error("Failed to fetch watchlist:", e);
@@ -45,7 +44,7 @@ export const TickerWatchlist = () => {
       </div>
 
       <div className="flex flex-col gap-3">
-        {isLoading && tickers.length === 0 ? (
+        {(isLoading || isInitializing) && tickers.length === 0 ? (
           Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="flex justify-between items-center">
               <div className="space-y-1">
