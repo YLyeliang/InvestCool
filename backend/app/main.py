@@ -60,6 +60,9 @@ nasdaq_cache = {"data": None, "last_update": None}
 macro_cache = {"data": [], "last_update": None}
 ai_latest_cache = {"data": None, "last_update": None}
 risk_diagnostics_cache = {"data": None, "last_update": None}
+risk_scenarios_cache = {"data": None, "last_update": None}
+
+RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
 
 def should_refresh_empty_cache(cache, cooldown_seconds=60):
@@ -203,6 +206,37 @@ def round_optional(value, digits=2):
     if value is None:
         return None
     return round(float(value), digits)
+
+def get_diagnostic_pillar(diagnostics, key):
+    for pillar in diagnostics.get("pillars", []):
+        if pillar.get("key") == key:
+            return pillar
+    return {"score": 50, "level": "中性", "metrics": []}
+
+def format_range(index_value, low_pct, high_pct):
+    low_point = index_value * (1 + low_pct / 100)
+    high_point = index_value * (1 + high_pct / 100)
+    return {
+        "low": round(low_point, 2),
+        "high": round(high_point, 2),
+        "label": f"{low_point:,.0f} - {high_point:,.0f}",
+    }
+
+def build_scenario(key, name, category, low_pct, high_pct, color, probability, triggers, response, rationale, index_value):
+    midpoint = (low_pct + high_pct) / 2
+    return {
+        "key": key,
+        "name": name,
+        "category": category,
+        "color": color,
+        "probability": probability,
+        "estimated_move": f"{low_pct:+.1f}% 到 {high_pct:+.1f}%",
+        "midpoint_move": round(midpoint, 1),
+        "ndx_range": format_range(index_value, low_pct, high_pct),
+        "triggers": triggers,
+        "response": response,
+        "rationale": rationale,
+    }
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -563,6 +597,132 @@ def refresh_risk_diagnostics():
         logger.error(traceback.format_exc())
 
 
+def refresh_risk_scenarios():
+    global risk_scenarios_cache
+
+    try:
+        if not cache_is_fresh(risk_diagnostics_cache, 15 * 60):
+            refresh_risk_diagnostics()
+
+        diagnostics = risk_diagnostics_cache.get("data")
+        if not diagnostics:
+            raise ValueError("Risk diagnostics unavailable for scenario analysis")
+
+        with app.app_context():
+            metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
+
+        index_value = safe_float(diagnostics.get("index"), 0)
+        if index_value <= 0:
+            raise ValueError("Invalid NDX index value for scenario analysis")
+
+        trend = get_diagnostic_pillar(diagnostics, "trend")
+        volatility = get_diagnostic_pillar(diagnostics, "volatility")
+        drawdown = get_diagnostic_pillar(diagnostics, "drawdown")
+        breadth = get_diagnostic_pillar(diagnostics, "breadth")
+
+        risk_score = safe_float(diagnostics.get("risk_score"), 50)
+        trend_score = safe_float(trend.get("score"), 50)
+        volatility_score = safe_float(volatility.get("score"), 50)
+        drawdown_score = safe_float(drawdown.get("score"), 50)
+        breadth_score = safe_float(breadth.get("score"), 50)
+        yield_buffer = safe_float(metric.yield_score, 50) if metric else 50
+        rate_pressure = clamp(100 - yield_buffer)
+
+        base_down = -(1.2 + risk_score / 45)
+        base_up = 1.5 + max(0, 70 - risk_score) / 28
+        rate_down = -(2.5 + rate_pressure / 18 + volatility_score / 65)
+        rate_up = -0.4
+        vol_down = -(3.0 + volatility_score / 10 + drawdown_score / 55)
+        vol_up = -(0.8 + volatility_score / 80)
+        breadth_down = -(0.8 + breadth_score / 45)
+        breadth_up = 1.8 + max(0, breadth_score - 35) / 16
+        trend_down = -(2.8 + trend_score / 14 + volatility_score / 45)
+        trend_up = -0.6
+
+        scenarios = [
+            build_scenario(
+                "base_case",
+                "基准延续",
+                "Base Case",
+                base_down,
+                base_up,
+                risk_color(risk_score),
+                "中",
+                ["风险分维持在当前区间", "VIX 未明显上行", "MAG7 未出现同步破位"],
+                "维持核心仓位，新增风险预算分批投入，避免用单日涨跌调整整体方向。",
+                "当前综合风险用于估计正常波动区间，上下沿随风险分自动收窄或放大。",
+                index_value,
+            ),
+            build_scenario(
+                "rate_shock",
+                "利率重新上行",
+                "Macro Shock",
+                rate_down,
+                rate_up,
+                "amber" if rate_pressure < 70 else "red",
+                "中低",
+                ["10Y 利率重新逼近阶段高点", "美元指数走强", "高估值成长股估值压缩"],
+                "压低追高仓位，优先保留现金流和盈利可见度更高的权重资产。",
+                f"当前利率缓冲分 {yield_buffer:.1f}，缓冲越低时估值久期资产对利率越敏感。",
+                index_value,
+            ),
+            build_scenario(
+                "volatility_spike",
+                "波动率冲击",
+                "Volatility Shock",
+                vol_down,
+                vol_up,
+                "amber" if volatility_score < 75 else "red",
+                "中",
+                ["VIX 快速上行", "20 日实现波动率继续抬升", "盘中振幅扩大且收盘走弱"],
+                "缩短再平衡周期，降低杠杆和集中敞口，先保护最大回撤再讨论进攻。",
+                f"波动压力分 {volatility_score:.1f}，反映指数对消息面和流动性的敏感度。",
+                index_value,
+            ),
+            build_scenario(
+                "breadth_repair",
+                "权重股广度修复",
+                "Breadth Repair",
+                breadth_down,
+                breadth_up,
+                "green" if breadth_score >= 55 else "blue",
+                "中",
+                ["MAG7 上涨家数扩散", "NVDA/MSFT/AAPL 之外的权重股跟涨", "指数上涨伴随成交改善"],
+                "把观察重点放在轮动质量，若广度改善可逐步恢复进攻性仓位。",
+                f"广度分 {breadth_score:.1f}，当前广度越弱，修复时对指数的边际贡献越大。",
+                index_value,
+            ),
+            build_scenario(
+                "trend_break",
+                "趋势破位",
+                "Trend Break",
+                trend_down,
+                trend_up,
+                "red" if trend_score >= 60 else "amber",
+                "低",
+                ["指数跌破 50 日线且无法快速收复", "回撤分继续上升", "权重股跌幅同步扩大"],
+                "降低单边 beta，设定明确的再入场条件，避免在破位初期摊平风险。",
+                f"趋势分 {trend_score:.1f}、回撤分 {drawdown_score:.1f} 共同决定破位压力。",
+                index_value,
+            ),
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round(index_value, 2),
+            "risk_score": round(risk_score, 1),
+            "risk_level": diagnostics.get("risk_level", risk_label(risk_score)),
+            "summary": "基于当前 NDX 风险诊断生成 5 个压力情景，用于检查仓位在宏观、波动、广度和趋势变化下的承压范围。",
+            "scenarios": scenarios,
+        }
+        risk_scenarios_cache["data"] = data
+        risk_scenarios_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX scenario analysis updated: {len(scenarios)} scenarios")
+    except Exception as e:
+        logger.error(f"NDX scenario analysis refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -674,6 +834,7 @@ def background_worker():
     last_cleanup = 0
     last_risk_analysis = 0
     last_risk_diagnostics = 0
+    last_risk_scenarios = 0
     while True:
         try:
             update_market_index()
@@ -691,6 +852,11 @@ def background_worker():
                 refresh_risk_diagnostics()
                 last_risk_diagnostics = time.time()
 
+            # NDX scenario analysis every 30 minutes
+            if time.time() - last_risk_scenarios > 1800:
+                refresh_risk_scenarios()
+                last_risk_scenarios = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -705,11 +871,11 @@ def background_worker():
 def get_risk_latest():
     global ai_latest_cache
     # Serve from memory cache for maximum concurrency
-    if ai_latest_cache["data"]:
+    if ai_latest_cache["data"] and ai_latest_cache["data"].get("status") in RISK_BRIEF_STATUSES:
         return jsonify(ai_latest_cache["data"])
     
     # Lazy init cache from DB if memory is empty
-    rec = RiskBrief.query.order_by(RiskBrief.created_at.desc()).first()
+    rec = RiskBrief.query.filter(RiskBrief.status.in_(RISK_BRIEF_STATUSES)).order_by(RiskBrief.created_at.desc()).first()
     if rec:
         ai_latest_cache["data"] = rec.to_dict()
         ai_latest_cache["last_update"] = datetime.utcnow()
@@ -721,7 +887,7 @@ def get_risk_latest():
 def get_risk_history():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    recs = RiskBrief.query.order_by(RiskBrief.created_at.desc()).paginate(page=page, per_page=per_page)
+    recs = RiskBrief.query.filter(RiskBrief.status.in_(RISK_BRIEF_STATUSES)).order_by(RiskBrief.created_at.desc()).paginate(page=page, per_page=per_page)
     return jsonify({
         "items": [r.to_dict() for r in recs.items],
         "total": recs.total,
@@ -735,6 +901,14 @@ def get_risk_diagnostics():
         refresh_risk_diagnostics()
 
     data = risk_diagnostics_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/scenarios', methods=['GET'])
+def get_risk_scenarios():
+    if not cache_is_fresh(risk_scenarios_cache, 15 * 60) and should_refresh_empty_cache(risk_scenarios_cache, 60):
+        refresh_risk_scenarios()
+
+    data = risk_scenarios_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
