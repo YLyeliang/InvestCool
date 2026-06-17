@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
+import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
 import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 
@@ -114,6 +115,13 @@ export default function RiskPage() {
           <Icon name="lucide:git-branch" className="text-[var(--accent-color)]" /> NDX 情景压力测试
         </h3>
         <NDXScenarioStressPanel />
+      </section>
+
+      <section className="budget-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:scale" className="text-[var(--accent-color)]" /> NDX 风险预算矩阵
+        </h3>
+        <NDXRiskBudgetPanel />
       </section>
 
       <div className="main-content-layout grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">

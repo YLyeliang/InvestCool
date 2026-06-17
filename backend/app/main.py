@@ -61,6 +61,7 @@ macro_cache = {"data": [], "last_update": None}
 ai_latest_cache = {"data": None, "last_update": None}
 risk_diagnostics_cache = {"data": None, "last_update": None}
 risk_scenarios_cache = {"data": None, "last_update": None}
+risk_budget_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -236,6 +237,23 @@ def build_scenario(key, name, category, low_pct, high_pct, color, probability, t
         "triggers": triggers,
         "response": response,
         "rationale": rationale,
+    }
+
+def exposure_profile(name, key, lower, upper, cash_buffer, max_loss_budget, rebalance_trigger, hedge_note, suitable_for, color):
+    return {
+        "key": key,
+        "name": name,
+        "color": color,
+        "exposure": {
+            "lower": round(lower),
+            "upper": round(upper),
+            "label": f"{round(lower)}% - {round(upper)}%",
+        },
+        "cash_buffer": f"{round(cash_buffer)}%+",
+        "max_loss_budget": f"{max_loss_budget:.1f}%",
+        "rebalance_trigger": rebalance_trigger,
+        "hedge_note": hedge_note,
+        "suitable_for": suitable_for,
     }
 
 def update_market_index():
@@ -723,6 +741,120 @@ def refresh_risk_scenarios():
         logger.error(traceback.format_exc())
 
 
+def refresh_risk_budget():
+    global risk_budget_cache
+
+    try:
+        if not cache_is_fresh(risk_scenarios_cache, 15 * 60):
+            refresh_risk_scenarios()
+
+        scenarios = risk_scenarios_cache.get("data")
+        diagnostics = risk_diagnostics_cache.get("data")
+        if not scenarios or not diagnostics:
+            raise ValueError("Scenario or diagnostic data unavailable for risk budget")
+
+        index_value = safe_float(scenarios.get("index"), 0)
+        risk_score = safe_float(scenarios.get("risk_score"), 50)
+        risk_level = scenarios.get("risk_level", risk_label(risk_score))
+        scenario_items = scenarios.get("scenarios", [])
+
+        worst_low = min(
+            [safe_float(item.get("ndx_range", {}).get("low"), index_value) for item in scenario_items],
+            default=index_value,
+        )
+        best_high = max(
+            [safe_float(item.get("ndx_range", {}).get("high"), index_value) for item in scenario_items],
+            default=index_value,
+        )
+        downside_pct = abs(min(pct_change(worst_low, index_value), 0))
+        upside_pct = max(pct_change(best_high, index_value), 0)
+
+        breadth = get_diagnostic_pillar(diagnostics, "breadth")
+        volatility = get_diagnostic_pillar(diagnostics, "volatility")
+        trend = get_diagnostic_pillar(diagnostics, "trend")
+        breadth_score = safe_float(breadth.get("score"), 50)
+        volatility_score = safe_float(volatility.get("score"), 50)
+        trend_score = safe_float(trend.get("score"), 50)
+
+        stress_penalty = downside_pct * 0.8 + max(0, volatility_score - 50) * 0.12 + max(0, breadth_score - 60) * 0.08
+        trend_bonus = max(0, 45 - trend_score) * 0.12
+
+        conservative_upper = clamp(52 - risk_score * 0.28 - stress_penalty + trend_bonus, 10, 45)
+        balanced_upper = clamp(78 - risk_score * 0.34 - stress_penalty + trend_bonus, 20, 68)
+        growth_upper = clamp(102 - risk_score * 0.38 - stress_penalty + trend_bonus, 35, 88)
+
+        conservative_lower = clamp(conservative_upper - 14, 0, conservative_upper)
+        balanced_lower = clamp(balanced_upper - 20, 10, balanced_upper)
+        growth_lower = clamp(growth_upper - 25, 20, growth_upper)
+
+        cash_base = clamp(20 + risk_score * 0.2 + downside_pct * 0.8, 15, 55)
+        profiles = [
+            exposure_profile(
+                "防守型",
+                "defensive",
+                conservative_lower,
+                conservative_upper,
+                cash_base + 10,
+                downside_pct * conservative_upper / 100,
+                "风险分高于 60 或跌破 50 日线时，把仓位压向区间下沿。",
+                "可用现金、短久期债券或货币基金承接等待区间。",
+                "更重视回撤控制、未来 3-6 个月有资金使用需求的投资者。",
+                "green",
+            ),
+            exposure_profile(
+                "均衡型",
+                "balanced",
+                balanced_lower,
+                balanced_upper,
+                cash_base,
+                downside_pct * balanced_upper / 100,
+                "仓位超过上沿 5 个百分点或波动分高于 75 时再平衡。",
+                "用分批买入替代一次性加仓，优先控制 MAG7 集中度。",
+                "希望保留 NDX 长期成长暴露，同时能接受中等波动的投资者。",
+                "blue",
+            ),
+            exposure_profile(
+                "进取型",
+                "growth",
+                growth_lower,
+                growth_upper,
+                max(8, cash_base - 12),
+                downside_pct * growth_upper / 100,
+                "只有在广度修复且风险分低于 45 时，才考虑靠近区间上沿。",
+                "若使用杠杆或期权，需要把波动率冲击情景作为硬约束。",
+                "投资期限较长、能承受较大净值波动并有再平衡纪律的投资者。",
+                "amber",
+            ),
+        ]
+
+        controls = [
+            f"当前压力测试最差区间约为 -{downside_pct:.1f}%，风险预算应先按该回撤承受力倒推仓位。",
+            f"上行情景高点约 +{upside_pct:.1f}%，若广度未修复，不宜单纯因上涨扩大仓位。",
+            "仓位区间是风险预算，不是买卖指令；实际组合还需考虑现金流、税务和持仓成本。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round(index_value, 2),
+            "risk_score": round(risk_score, 1),
+            "risk_level": risk_level,
+            "stress_downside": round(downside_pct, 1),
+            "stress_upside": round(upside_pct, 1),
+            "summary": (
+                f"以当前 {risk_level} 风险状态和 {downside_pct:.1f}% 压力回撤为约束，"
+                "将 NDX 暴露拆成防守、均衡、进取三档预算。"
+            ),
+            "profiles": profiles,
+            "controls": controls,
+        }
+        risk_budget_cache["data"] = data
+        risk_budget_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX risk budget updated: downside {downside_pct:.1f}%")
+    except Exception as e:
+        logger.error(f"NDX risk budget refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -835,6 +967,7 @@ def background_worker():
     last_risk_analysis = 0
     last_risk_diagnostics = 0
     last_risk_scenarios = 0
+    last_risk_budget = 0
     while True:
         try:
             update_market_index()
@@ -856,6 +989,11 @@ def background_worker():
             if time.time() - last_risk_scenarios > 1800:
                 refresh_risk_scenarios()
                 last_risk_scenarios = time.time()
+
+            # NDX risk budget every 30 minutes
+            if time.time() - last_risk_budget > 1800:
+                refresh_risk_budget()
+                last_risk_budget = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -909,6 +1047,14 @@ def get_risk_scenarios():
         refresh_risk_scenarios()
 
     data = risk_scenarios_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/budget', methods=['GET'])
+def get_risk_budget():
+    if not cache_is_fresh(risk_budget_cache, 15 * 60) and should_refresh_empty_cache(risk_budget_cache, 60):
+        refresh_risk_budget()
+
+    data = risk_budget_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
