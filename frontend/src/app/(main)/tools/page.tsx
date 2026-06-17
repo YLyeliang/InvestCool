@@ -184,8 +184,8 @@ export default function ToolsPage() {
   return (
     <div className="tools-page space-y-10 pb-20">
       <header className="tools-header">
-        <h2 className="text-4xl font-black tracking-tighter text-[var(--text-primary)] mb-2">策略中心.</h2>
-        <p className="text-[var(--text-secondary)] font-medium">数据驱动决策，模型预演未来。</p>
+        <h2 className="text-4xl font-black text-[var(--text-primary)] mb-2">策略中心.</h2>
+        <p className="text-[var(--text-secondary)] font-semibold">数据驱动决策，模型预演未来。</p>
       </header>
 
       <nav className="tool-tabs flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -193,10 +193,10 @@ export default function ToolsPage() {
           <button
             key={tab.id}
             className={cn(
-              "flex items-center gap-2 px-6 py-3 rounded-xl font-bold text-sm transition-all whitespace-nowrap",
+              "flex items-center gap-2 px-5 py-3 rounded-lg font-bold text-sm transition-all whitespace-nowrap border",
               activeTab === tab.id
-                ? "bg-blue-500 text-white shadow-lg shadow-blue-500/25"
-                : "bg-white dark:bg-slate-800 text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700"
+                ? "bg-[var(--accent-color)] text-white border-[var(--accent-color)] shadow-sm"
+                : "bg-[var(--card-bg)] text-[var(--text-secondary)] border-[var(--border-color)] hover:bg-[var(--hover-bg)]"
             )}
             onClick={() => setActiveTab(tab.id)}
           >
@@ -213,47 +213,48 @@ export default function ToolsPage() {
               <h3 className="text-lg font-black mb-4">退休平衡模型</h3>
               <div className="space-y-4">
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">初始资金 (万)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">初始资金 (万)</label>
                   <input
                     type="number"
                     value={initialCapital}
                     onChange={(e) => setInitialCapital(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none focus:ring-2 ring-blue-500/20"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">年化收益 (%)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">年化收益 (%)</label>
                   <input
                     type="number"
                     value={annualReturn}
                     onChange={(e) => setAnnualReturn(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none focus:ring-2 ring-blue-500/20"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">年度新增 (万)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">年度新增 (万)</label>
                   <input
                     type="number"
                     value={annualInvestment}
                     onChange={(e) => setAnnualInvestment(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none focus:ring-2 ring-blue-500/20"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none focus:ring-2 ring-blue-500/20"
                   />
                 </div>
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">年度支出 (万)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">年度支出 (万)</label>
                   <input
                     type="number"
                     value={annualExpense}
                     onChange={(e) => setAnnualExpense(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none focus:ring-2 ring-blue-500/20"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none focus:ring-2 ring-blue-500/20"
                   />
                 </div>
               </div>
               <div className={cn(
-                "p-4 rounded-xl text-sm font-bold",
-                freedomResult.yearsToRunOut === -1 ? "bg-emerald-50 text-emerald-600 dark:bg-emerald-900/20" : "bg-red-50 text-red-600 dark:bg-red-900/20"
+                "p-4 rounded-lg text-sm font-bold flex items-center gap-2",
+                freedomResult.yearsToRunOut === -1 ? "bg-emerald-500/10 text-[var(--success-color)]" : "bg-red-500/10 text-[var(--danger-color)]"
               )}>
-                {freedomResult.yearsToRunOut === -1 ? "✅ 资金在 100 年内运行稳健。" : `将在第 ${freedomResult.yearsToRunOut} 年耗尽资金。`}
+                <Icon name={freedomResult.yearsToRunOut === -1 ? "lucide:check-circle-2" : "lucide:alert-triangle"} className="size-4" />
+                {freedomResult.yearsToRunOut === -1 ? "资金在 100 年内运行稳健。" : `将在第 ${freedomResult.yearsToRunOut} 年耗尽资金。`}
               </div>
             </section>
             <section className="card p-8 !mb-0">
@@ -275,7 +276,7 @@ export default function ToolsPage() {
                 <h3 className="text-lg font-black">参数设定</h3>
                 <button 
                   onClick={() => setSimSeed(s => s + 1)}
-                  className="p-2 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                  className="p-2 hover:bg-[var(--hover-bg)] rounded-lg transition-colors"
                 >
                   <Icon name="refresh-cw" size={16} />
                 </button>
@@ -283,15 +284,15 @@ export default function ToolsPage() {
               
               <div className="space-y-6">
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">数学模型</label>
-                  <div className="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">数学模型</label>
+                  <div className="flex p-1 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg">
                     {["ideal", "stochastic", "stress"].map((m) => (
                       <button
                         key={m}
                         onClick={() => setModelType(m)}
                         className={cn(
                           "flex-1 py-1.5 text-[10px] font-black rounded-lg transition-all",
-                          modelType === m ? "bg-white dark:bg-slate-800 text-black dark:text-white shadow-sm" : "text-slate-400"
+                          modelType === m ? "bg-[var(--card-bg)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-tertiary)]"
                         )}
                       >
                         {m === "ideal" ? "理想" : m === "stochastic" ? "随机" : "极限"}
@@ -301,15 +302,15 @@ export default function ToolsPage() {
                 </div>
 
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">投入频率</label>
-                  <div className="flex p-1 bg-slate-100 dark:bg-slate-900 rounded-xl">
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">投入频率</label>
+                  <div className="flex p-1 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg">
                     {["daily", "monthly", "yearly"].map((f) => (
                       <button
                         key={f}
                         onClick={() => setInvestFrequency(f)}
                         className={cn(
                           "flex-1 py-1.5 text-[10px] font-black rounded-lg transition-all",
-                          investFrequency === f ? "bg-white dark:bg-slate-800 text-black dark:text-white shadow-sm" : "text-slate-400"
+                          investFrequency === f ? "bg-[var(--card-bg)] text-[var(--text-primary)] shadow-sm" : "text-[var(--text-tertiary)]"
                         )}
                       >
                         {f === "daily" ? "日" : f === "monthly" ? "月" : "年"}
@@ -319,21 +320,21 @@ export default function ToolsPage() {
                 </div>
 
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">单笔金额 (元)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">单笔金额 (元)</label>
                   <input
                     type="number"
                     value={investAmount}
                     onChange={(e) => setInvestAmount(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none"
                   />
                 </div>
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-slate-400 uppercase mb-2">回测年限 (年)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">回测年限 (年)</label>
                   <input
                     type="number"
                     value={backtestYears}
                     onChange={(e) => setBacktestYears(Number(e.target.value))}
-                    className="w-full p-3 bg-slate-50 dark:bg-slate-900 border-none rounded-xl font-black outline-none"
+                    className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none"
                   />
                 </div>
               </div>
@@ -347,21 +348,21 @@ export default function ToolsPage() {
                 />
               </div>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">最终本金</div>
+                <div className="p-4 bg-[var(--section-bg)] rounded-lg border border-[var(--border-color)]">
+                  <div className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">最终本金</div>
                   <div className="text-xl font-black">¥{(backtestResult.finalCapital / 10000).toFixed(1)}万</div>
                 </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">最终市值</div>
-                  <div className="text-xl font-black text-emerald-500">¥{(backtestResult.finalValue / 10000).toFixed(1)}万</div>
+                <div className="p-4 bg-[var(--section-bg)] rounded-lg border border-[var(--border-color)]">
+                  <div className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">最终市值</div>
+                  <div className="text-xl font-black text-[var(--success-color)]">¥{(backtestResult.finalValue / 10000).toFixed(1)}万</div>
                 </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">总利润</div>
-                  <div className="text-xl font-black text-blue-500">¥{(backtestResult.profit / 10000).toFixed(1)}万</div>
+                <div className="p-4 bg-[var(--section-bg)] rounded-lg border border-[var(--border-color)]">
+                  <div className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">总利润</div>
+                  <div className="text-xl font-black text-[var(--accent-strong)]">¥{(backtestResult.profit / 10000).toFixed(1)}万</div>
                 </div>
-                <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
-                  <div className="text-[10px] font-bold text-slate-400 uppercase mb-1">总收益率</div>
-                  <div className="text-xl font-black text-amber-500">{backtestResult.roi.toFixed(1)}%</div>
+                <div className="p-4 bg-[var(--section-bg)] rounded-lg border border-[var(--border-color)]">
+                  <div className="text-xs font-bold text-[var(--text-secondary)] uppercase mb-1">总收益率</div>
+                  <div className="text-xl font-black text-[var(--warning-color)]">{backtestResult.roi.toFixed(1)}%</div>
                 </div>
               </div>
             </section>
@@ -369,7 +370,7 @@ export default function ToolsPage() {
         )}
 
         {["position-size", "tax-calc"].includes(activeTab) && (
-          <div className="py-20 text-center border-2 border-dashed border-[var(--border-color)] rounded-3xl animate-in fade-in duration-500">
+          <div className="py-20 text-center border-2 border-dashed border-[var(--border-color)] rounded-lg animate-in fade-in duration-500">
             <Icon name="construction" size={48} className="mx-auto mb-4 opacity-20" />
             <p className="text-[var(--text-tertiary)] italic">该工具正在开发中，敬请期待...</p>
           </div>

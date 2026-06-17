@@ -77,10 +77,10 @@ export default function AIPage() {
   return (
     <div className="ai-page space-y-12">
       <header className="page-header">
-        <h2 className="text-4xl font-black tracking-tighter text-[var(--text-primary)] mb-2">
+        <h2 className="text-4xl font-black text-[var(--text-primary)] mb-2">
           AI 赋能投资.
         </h2>
-        <p className="text-[var(--text-secondary)] font-medium max-w-2xl leading-relaxed">
+        <p className="text-[var(--text-secondary)] font-semibold max-w-2xl leading-7">
           深度融合人工智能技术，探索下一代智慧投资范式。
         </p>
       </header>
@@ -88,7 +88,7 @@ export default function AIPage() {
       {/* AI Real-time Strategy */}
       <section className="strategy-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
-          <Icon name="lucide:zap" className="text-blue-500" /> 实时 AI 策略
+          <Icon name="lucide:zap" className="text-[var(--accent-color)]" /> 实时 AI 策略
         </h3>
         <AIRecommendationCard />
       </section>
@@ -100,26 +100,26 @@ export default function AIPage() {
           {aiArticles.length > 0 ? (
             <div className="articles-grid grid grid-cols-1 md:grid-cols-2 gap-6">
               {aiArticles.map((article) => (
-                <div key={article.slug} className="card p-6 flex flex-col justify-between min-h-[200px] border-t-4 border-blue-500 hover:-translate-y-1 transition-transform">
+                <div key={article.slug} className="card p-6 flex flex-col justify-between min-h-[200px] border-t-4 border-[var(--accent-color)] hover:-translate-y-1 transition-transform">
                   <div>
-                    <span className="inline-block px-2 py-0.5 rounded bg-blue-50 dark:bg-blue-900/30 text-blue-500 text-[10px] font-black uppercase mb-3">
+                    <span className="inline-block px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase mb-3">
                       AI Insights
                     </span>
                     <h3 className="text-lg font-bold mb-2">{article.title}</h3>
-                    <p className="text-sm text-slate-500 dark:text-slate-400 line-clamp-3 mb-6">
+                    <p className="text-base text-[var(--text-secondary)] leading-7 line-clamp-3 mb-6">
                       {article.description || "暂无描述"}
                     </p>
                   </div>
-                  <Link href={`/ai/${article.slug}`} className="text-blue-500 font-bold text-sm flex items-center gap-1 no-underline">
+                  <Link href={`/ai/${article.slug}`} className="text-[var(--accent-strong)] font-bold text-sm flex items-center gap-1 no-underline">
                     深度阅读 <Icon name="lucide:arrow-right" size={14} />
                   </Link>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="py-10 text-center border-2 border-dashed border-[var(--border-color)] rounded-2xl">
+            <div className="py-10 text-center border-2 border-dashed border-[var(--border-color)] rounded-lg">
               <Icon name="sparkles" size={40} className="mx-auto mb-2 opacity-20" />
-              <p className="text-slate-400 text-sm italic">AI 正在实验室中生成内容...</p>
+              <p className="text-[var(--text-tertiary)] text-sm">AI 正在实验室中生成内容...</p>
             </div>
           )}
         </div>
@@ -139,12 +139,12 @@ export default function AIPage() {
                     <span className="item-status font-black" style={{ color: getStatusColor(item.status) }}>
                       {item.status}
                     </span>
-                    <span className="item-time text-[10px] text-slate-400">{formatDate(item.created_at)}</span>
+                    <span className="item-time text-xs text-[var(--text-tertiary)]">{formatDate(item.created_at)}</span>
                   </div>
-                  <p className="item-summary text-slate-600 dark:text-slate-300 leading-relaxed mb-2">
+                  <p className="item-summary text-[var(--text-secondary)] leading-7 mb-2">
                     {item.summary}
                   </p>
-                  <div className="item-footer text-[10px] text-slate-400 text-right font-bold">
+                  <div className="item-footer text-xs text-[var(--text-tertiary)] text-right font-bold">
                     点位: {item.index_position}
                   </div>
                 </div>
@@ -157,15 +157,15 @@ export default function AIPage() {
               <button 
                 onClick={() => setPage(p => Math.max(1, p - 1))} 
                 disabled={page <= 1}
-                className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm disabled:opacity-50"
+                className="px-3 py-1 bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg text-sm disabled:opacity-50"
               >
                 Prev
               </button>
-              <span className="page-info text-xs font-bold text-slate-500">{page} / {history.pages}</span>
+              <span className="page-info text-xs font-bold text-[var(--text-secondary)]">{page} / {history.pages}</span>
               <button 
                 onClick={() => setPage(p => Math.min(history.pages, p + 1))} 
                 disabled={page >= history.pages}
-                className="px-3 py-1 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-lg text-sm disabled:opacity-50"
+                className="px-3 py-1 bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg text-sm disabled:opacity-50"
               >
                 Next
               </button>

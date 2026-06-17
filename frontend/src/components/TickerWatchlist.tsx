@@ -37,10 +37,10 @@ export const TickerWatchlist = () => {
   return (
     <div className="card p-4 mt-5">
       <div className="flex justify-between items-center mb-3 pb-2 border-b border-[var(--border-color)]">
-        <h3 className="text-xs font-black text-[var(--text-primary)] uppercase tracking-wider">
+        <h3 className="text-sm font-black text-[var(--text-primary)] uppercase">
           核心科技观察 (MAG7)
         </h3>
-        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-tighter">实时更新</span>
+        <span className="text-xs text-[var(--text-tertiary)] font-semibold uppercase">实时更新</span>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -56,20 +56,20 @@ export const TickerWatchlist = () => {
           ))
         ) : (
           tickers.map((ticker) => (
-            <div key={ticker.symbol} className="flex justify-between items-center group cursor-pointer hover:bg-[var(--hover-bg)] -mx-2 px-2 py-1 rounded-xl transition-colors">
+            <div key={ticker.symbol} className="flex justify-between items-center group cursor-pointer hover:bg-[var(--hover-bg)] -mx-2 px-2 py-2 rounded-lg transition-colors">
               <div className="flex flex-col">
-                <span className="text-[0.85rem] font-black text-[var(--text-primary)] group-hover:text-[var(--accent-color)] transition-colors">
+                <span className="text-base font-black text-[var(--text-primary)] group-hover:text-[var(--accent-strong)] transition-colors">
                   {ticker.symbol}
                 </span>
-                <span className="text-[0.7rem] font-medium text-[var(--text-secondary)]">
+                <span className="text-xs font-semibold text-[var(--text-secondary)]">
                   ${ticker.price.toFixed(2)}
                 </span>
               </div>
               <div className={cn(
-                "flex items-center gap-1 px-2 py-1 rounded-lg text-[0.75rem] font-bold",
+                "flex items-center gap-1 px-2.5 py-1 rounded-lg text-sm font-black",
                 ticker.percent >= 0 
-                  ? "text-emerald-600 bg-emerald-500/10" 
-                  : "text-rose-600 bg-rose-500/10"
+                  ? "text-[var(--success-color)] bg-emerald-500/10" 
+                  : "text-[var(--danger-color)] bg-rose-500/10"
               )}>
                 <Icon 
                   name={ticker.percent >= 0 ? "lucide:trending-up" : "lucide:trending-down"} 

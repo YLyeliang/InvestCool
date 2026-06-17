@@ -120,15 +120,15 @@ export const MarketSentimentGauge = () => {
     )}>
       <div className="flex justify-between items-center mb-1 text-[var(--text-primary)]">
         <div className="flex items-center gap-2">
-          <h3 className="text-sm font-bold">市场情绪指数</h3>
+          <h3 className="text-sm font-black">市场情绪指数</h3>
           {isError && (
-            <span className="text-[0.6rem] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-rose-500 uppercase">离线</span>
+            <span className="text-[0.7rem] font-bold px-1.5 py-0.5 rounded bg-rose-100 text-[var(--danger-color)] uppercase">离线</span>
           )}
           {isInitializing && !isError && (
-            <span className="text-[0.6rem] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-amber-500 uppercase">同步中</span>
+            <span className="text-[0.7rem] font-bold px-1.5 py-0.5 rounded bg-amber-100 text-[var(--warning-color)] uppercase">同步中</span>
           )}
         </div>
-        <span className="text-[10px] text-slate-400">10min 自动刷新</span>
+        <span className="text-xs text-[var(--text-tertiary)] font-semibold">10min 自动刷新</span>
       </div>
 
       <div className="h-[110px] w-full flex items-center justify-center relative">
@@ -147,9 +147,9 @@ export const MarketSentimentGauge = () => {
           <div className="absolute inset-0 flex items-center justify-center z-10 bg-white/10 dark:bg-black/10 backdrop-blur-[1px]">
             <button 
               onClick={fetchMetric}
-              className="p-2 rounded-full bg-white dark:bg-slate-800 shadow-lg hover:scale-110 transition-transform"
+              className="p-2 rounded-lg bg-[var(--card-bg)] border border-[var(--border-color)] shadow-sm hover:scale-110 transition-transform"
             >
-              <Icon name="lucide:refresh-cw" className="size-5 text-slate-600 dark:text-slate-300" />
+              <Icon name="lucide:refresh-cw" className="size-5 text-[var(--text-secondary)]" />
             </button>
           </div>
         )}
@@ -159,8 +159,8 @@ export const MarketSentimentGauge = () => {
         <div className="grid grid-cols-4 gap-2 mt-2 pt-3 border-t border-dashed border-[var(--border-color)]">
           {Object.entries(data.details).map(([key, val]) => (
             <div key={key} className="flex flex-col items-center">
-              <span className="text-[0.65rem] text-[var(--text-secondary)] mb-0.5">{formatKey(key)}</span>
-              <span className="text-[0.75rem] font-bold text-[var(--text-primary)]">{val}</span>
+              <span className="text-xs text-[var(--text-secondary)] mb-0.5">{formatKey(key)}</span>
+              <span className="text-sm font-black text-[var(--text-primary)]">{val}</span>
             </div>
           ))}
         </div>

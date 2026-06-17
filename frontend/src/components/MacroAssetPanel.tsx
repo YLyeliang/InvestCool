@@ -33,8 +33,8 @@ export const MacroAssetPanel = () => {
   return (
     <div className="macro-panel card p-4 mt-5">
       <div className="panel-header flex justify-between items-center mb-3">
-        <h3 className="text-sm font-bold text-slate-800 dark:text-slate-100">全球宏观资产</h3>
-        <span className="text-[10px] text-slate-400">实时流向</span>
+        <h3 className="text-sm font-black text-[var(--text-primary)]">全球宏观资产</h3>
+        <span className="text-xs text-[var(--text-tertiary)] font-semibold">实时流向</span>
       </div>
 
       <div className="asset-grid grid grid-cols-3 gap-2">
@@ -42,18 +42,18 @@ export const MacroAssetPanel = () => {
           assets.map((asset) => (
             <div
               key={asset.name}
-              className="asset-item flex flex-col items-center p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-center"
+              className="asset-item flex flex-col items-center p-2 bg-[var(--section-bg)] rounded-lg text-center border border-[var(--border-color)]"
             >
-              <div className="asset-name text-[10px] font-bold text-slate-500 mb-1">
+              <div className="asset-name text-xs font-bold text-[var(--text-secondary)] mb-1">
                 {asset.name}
               </div>
-              <div className="asset-price text-sm font-extrabold text-slate-800 dark:text-slate-100 mb-1">
+              <div className="asset-price text-sm font-extrabold text-[var(--text-primary)] mb-1">
                 ${formatPrice(asset.price)}
               </div>
               <div
                 className={cn(
-                  "asset-change text-[10px] font-semibold px-1 py-0.5 rounded",
-                  asset.percent >= 0 ? "text-emerald-500" : "text-red-500"
+                  "asset-change text-xs font-semibold px-1 py-0.5 rounded",
+                  asset.percent >= 0 ? "text-[var(--success-color)]" : "text-[var(--danger-color)]"
                 )}
               >
                 {asset.percent >= 0 ? "+" : ""}
@@ -65,7 +65,7 @@ export const MacroAssetPanel = () => {
           [1, 2, 3].map((i) => (
             <div
               key={i}
-              className="asset-item flex flex-col items-center p-2 bg-slate-50 dark:bg-slate-800/50 rounded-lg text-center"
+              className="asset-item flex flex-col items-center p-2 bg-[var(--section-bg)] rounded-lg text-center border border-[var(--border-color)]"
             >
               <Skeleton width="30px" height="0.7rem" className="mb-1.5" />
               <Skeleton width="50px" height="0.9rem" className="mb-1.5" />

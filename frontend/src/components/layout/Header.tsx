@@ -23,7 +23,8 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
     <header 
       className={cn(
         "fixed top-0 left-0 right-0 z-[1100] h-[var(--header-height)] transition-all duration-300",
-        scrolled ? "bg-white/80 dark:bg-[#020617]/80 backdrop-blur-xl border-b border-[var(--border-color)] shadow-sm" : "bg-transparent"
+        "bg-[var(--card-bg)]/95 backdrop-blur-xl border-b border-[var(--border-color)]",
+        scrolled && "shadow-sm"
       )}
     >
       <div className="h-full px-6 flex items-center justify-between max-w-[1600px] mx-auto">
@@ -36,14 +37,14 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
           </button>
           
           <Link href="/" className="flex items-center gap-2.5 no-underline group">
-            <div className="size-9 bg-blue-600 rounded-xl flex items-center justify-center shadow-lg shadow-blue-500/20 group-hover:scale-105 transition-transform">
+            <div className="size-9 bg-[var(--accent-color)] rounded-lg flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
               <Icon name="trending-up" className="text-white size-5" />
             </div>
             <div className="flex flex-col">
-              <span className="text-lg font-black tracking-tighter text-[var(--text-primary)] leading-tight">
-                InvestCool<span className="text-blue-500">.</span>
+              <span className="text-lg font-black text-[var(--text-primary)] leading-tight">
+                InvestCool<span className="text-[var(--accent-color)]">.</span>
               </span>
-              <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase tracking-[0.2em] leading-tight">
+              <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase leading-tight">
                 Intelligence
               </span>
             </div>
@@ -53,7 +54,7 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
         <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-1 mr-4">
             <div className="size-2 rounded-full bg-emerald-500 animate-pulse"></div>
-            <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Market Live</span>
+            <span className="text-[11px] font-black text-[var(--text-secondary)] uppercase">Market Live</span>
           </div>
           
           <ThemeToggle />
@@ -62,7 +63,7 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
           
           <Link 
             href="/admin" 
-            className="flex items-center gap-2 px-4 py-2 bg-slate-900 dark:bg-white text-white dark:text-black rounded-xl text-xs font-black transition-all hover:scale-105 active:scale-95 shadow-md shadow-slate-200 dark:shadow-none"
+            className="flex items-center gap-2 px-4 py-2 bg-[var(--text-primary)] text-[var(--card-bg)] rounded-lg text-xs font-black transition-all hover:opacity-90 active:scale-95 shadow-sm"
           >
             <Icon name="user" size={14} />
             <span className="hidden sm:inline">STUDIO</span>

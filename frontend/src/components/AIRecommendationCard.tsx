@@ -62,25 +62,25 @@ export const AIRecommendationCard = () => {
               <Icon name="bot" size={18} />
               {latest.status}
             </div>
-            <div className="meta flex flex-col items-end text-[10px] text-slate-500">
+            <div className="meta flex flex-col items-end text-xs text-[var(--text-tertiary)] font-semibold">
               <span className="time">{formatDate(latest.created_at)}</span>
               <span className="index-pos">执行点位: {latest.index_position}</span>
             </div>
           </div>
 
-          <div className="summary-box bg-slate-50 dark:bg-slate-800/30 p-5 rounded-xl border-l-4 border-blue-500 mb-4">
-            <p className="summary-text text-lg leading-relaxed font-medium text-slate-800 dark:text-slate-100 m-0">
+          <div className="summary-box bg-[var(--section-bg)] p-5 rounded-lg border-l-4 border-[var(--accent-color)] mb-4">
+            <p className="summary-text text-lg leading-8 font-semibold text-[var(--text-primary)] m-0">
               {latest.summary}
             </p>
           </div>
 
-          <div className="card-footer flex justify-between items-center pt-3 border-t border-slate-100 dark:border-slate-800">
-            <span className="hint text-[10px] text-slate-400">
+          <div className="card-footer flex justify-between items-center pt-3 border-t border-[var(--border-color)]">
+            <span className="hint text-xs text-[var(--text-tertiary)] font-semibold">
               每 2 小时由 Gemini 自动更新
             </span>
             <button
               onClick={fetchData}
-              className="refresh-btn text-slate-500 hover:text-blue-500 transition-all p-1"
+              className="refresh-btn text-[var(--text-tertiary)] hover:text-[var(--accent-strong)] transition-all p-1"
               disabled={pending}
             >
               <Icon
@@ -92,7 +92,7 @@ export const AIRecommendationCard = () => {
           </div>
         </div>
       ) : !pending ? (
-        <div className="empty-state text-center py-8 text-slate-400">
+        <div className="empty-state text-center py-8 text-[var(--text-tertiary)]">
           <Icon name="brain-circuit" size={40} className="mx-auto mb-2 opacity-30" />
           <p className="text-sm">暂无实时策略，AI 正在分析市场数据...</p>
         </div>
@@ -102,10 +102,10 @@ export const AIRecommendationCard = () => {
         .ai-recommendation-card {
           background: var(--card-bg);
           border: 1px solid var(--border-color);
-          border-radius: 1rem;
+          border-radius: var(--radius-lg);
           padding: 1.5rem;
           margin-bottom: 2rem;
-          box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
+          box-shadow: var(--shadow-soft);
           position: relative;
           overflow: hidden;
         }
@@ -116,7 +116,7 @@ export const AIRecommendationCard = () => {
           left: 0;
           right: 0;
           height: 4px;
-          background: linear-gradient(90deg, var(--accent-color), #8b5cf6);
+          background: var(--accent-color);
         }
       `}</style>
     </div>

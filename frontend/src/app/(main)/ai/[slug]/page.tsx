@@ -43,21 +43,21 @@ export default async function AIDetailPage({ params }: AIPageProps) {
 
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <span className="px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-500 text-[0.7rem] font-black uppercase tracking-widest">
+              <span className="px-3 py-1 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase">
                 AI Insights
               </span>
-              <span className="text-[0.8rem] text-slate-400 font-bold flex items-center gap-1.5">
+              <span className="text-sm text-[var(--text-tertiary)] font-bold flex items-center gap-1.5">
                 <Icon name="lucide:calendar" className="size-3.5" />
                 {formatDate(article.date || article.created_at || new Date().toISOString())}
               </span>
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-[var(--text-primary)] leading-[1.1]">
+            <h1 className="text-4xl md:text-5xl font-black text-[var(--text-primary)] leading-tight">
               {article.title}
             </h1>
             
             {article.description && (
-              <p className="text-xl text-[var(--text-secondary)] font-medium leading-relaxed">
+              <p className="text-xl text-[var(--text-secondary)] font-semibold leading-8">
                 {article.description}
               </p>
             )}
@@ -70,7 +70,7 @@ export default async function AIDetailPage({ params }: AIPageProps) {
         />
 
         <footer className="mt-20 pt-10 border-t border-[var(--border-color)] text-center">
-          <p className="text-xs text-slate-400 italic">
+          <p className="text-xs text-[var(--text-tertiary)]">
             探索 AI 与投资的边界 @ InvestCool
           </p>
         </footer>

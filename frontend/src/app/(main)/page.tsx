@@ -9,10 +9,10 @@ import { AIRecommendationCard } from "@/components/AIRecommendationCard";
 
 export default function Home() {
   return (
-    <div className="finance-terminal max-w-[1400px] mx-auto space-y-6 pb-20 animate-in fade-in duration-700">
+    <div className="finance-terminal max-w-[1240px] mx-auto space-y-8 pb-20 animate-in fade-in duration-700">
       
       {/* 1. Global Marquee - Slim Style */}
-      <div className="scale-90 origin-left -mb-2">
+      <div>
         <GlobalMarketBar />
       </div>
 
@@ -23,7 +23,7 @@ export default function Home() {
           <section className="ai-console">
             <div className="flex items-center gap-2 mb-4 px-1">
               <div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_#3b82f6]"></div>
-              <h2 className="text-sm font-black tracking-widest uppercase text-slate-400">AI 策略指挥部</h2>
+              <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">AI 策略指挥部</h2>
             </div>
             <AIRecommendationCard />
           </section>
@@ -32,9 +32,9 @@ export default function Home() {
             <section className="gauge-console">
               <div className="flex items-center gap-2 mb-4 px-1">
                 <div className="size-1.5 rounded-full bg-emerald-500 shadow-[0_0_8px_#10b981]"></div>
-                <h2 className="text-sm font-black tracking-widest uppercase text-slate-400">市场情绪</h2>
+                <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">市场情绪</h2>
               </div>
-              <div className="card p-6 min-h-[200px] flex items-center justify-center">
+              <div className="card p-5 min-h-[200px] flex items-center justify-center">
                 <LazyMarketSentimentGauge />
               </div>
             </section>
@@ -45,9 +45,9 @@ export default function Home() {
         <section className="market-core">
           <div className="flex items-center gap-2 mb-4 px-1">
             <div className="size-1.5 rounded-full bg-indigo-500 shadow-[0_0_8px_#6366f1]"></div>
-            <h2 className="text-sm font-black tracking-widest uppercase text-slate-400">核心资产观察 (MAG7)</h2>
+            <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">核心资产观察 (MAG7)</h2>
           </div>
-          <div className="card p-8">
+          <div className="card p-6">
             <TickerWatchlist />
           </div>
         </section>
@@ -56,9 +56,9 @@ export default function Home() {
         <section className="community-vibe">
           <div className="flex items-center gap-2 mb-4 px-1">
             <div className="size-1.5 rounded-full bg-amber-500 shadow-[0_0_8px_#f59e0b]"></div>
-            <h2 className="text-sm font-black tracking-widest uppercase text-slate-400">散户多空博弈</h2>
+            <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">散户多空博弈</h2>
           </div>
-          <div className="card p-8">
+          <div className="card p-6">
             <SentimentDuel />
           </div>
         </section>

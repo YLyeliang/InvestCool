@@ -91,10 +91,10 @@ export const NasdaqTracker = () => {
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-6">
         <div className="space-y-4">
           <div className="flex items-center gap-3">
-            <span className="text-[0.8rem] font-black text-[var(--text-secondary)] uppercase tracking-wider">
+            <span className="text-sm font-black text-[var(--text-secondary)] uppercase">
               NASDAQ 100
             </span>
-            <span className="px-2 py-0.5 rounded-md bg-[var(--accent-soft)] text-[var(--accent-color)] text-[0.65rem] font-black">
+            <span className="px-2 py-0.5 rounded-md bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black">
               NDX
             </span>
             {isError && (
@@ -112,12 +112,12 @@ export const NasdaqTracker = () => {
           <div className="price-area min-h-[3rem]">
             {data ? (
               <div className="space-y-1">
-                <h2 className="text-5xl font-black tracking-tighter text-[var(--text-primary)] leading-none">
+                <h2 className="text-5xl font-black text-[var(--text-primary)] leading-none">
                   {formatNumber(data.index)}
                 </h2>
                 <div className={cn(
                   "flex items-center gap-2 text-[0.95rem] font-bold",
-                  data.change >= 0 ? "text-emerald-500" : "text-rose-500"
+                  data.change >= 0 ? "text-[var(--success-color)]" : "text-[var(--danger-color)]"
                 )}>
                   <Icon 
                     name={data.change >= 0 ? "lucide:trending-up" : "lucide:trending-down"} 
@@ -140,8 +140,8 @@ export const NasdaqTracker = () => {
           <div className={cn(
             "flex items-center gap-2 px-3 py-1.5 rounded-full text-[0.7rem] font-bold transition-colors",
             isLive && !isError && !isInitializing
-              ? "bg-emerald-500/10 text-emerald-500"
-              : "bg-slate-100 dark:bg-slate-800 text-slate-500"
+              ? "bg-emerald-500/10 text-[var(--success-color)]"
+              : "bg-[var(--section-bg)] text-[var(--text-secondary)]"
           )}>
             <div className={cn(
               "size-1.5 rounded-full bg-current",
@@ -151,7 +151,7 @@ export const NasdaqTracker = () => {
           </div>
           
           {data && (
-            <div className="text-[0.65rem] text-slate-400 font-medium">
+            <div className="text-xs text-[var(--text-tertiary)] font-semibold">
               {isError ? "上个快照:" : "最后更新:"} {data.last_update}
             </div>
           )}

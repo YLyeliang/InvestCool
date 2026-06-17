@@ -19,20 +19,20 @@ const steps = [
 export default function HKNannyGuidePage() {
   return (
     <div className="max-w-4xl pb-20">
-      <Link href="/hk-account" className="inline-flex items-center gap-2 text-sm font-bold text-blue-500 mb-8">
+      <Link href="/hk-account" className="inline-flex items-center gap-2 text-sm font-bold text-[var(--accent-strong)] mb-8">
         <Icon name="lucide:arrow-left" className="size-4" />
         返回香港开户指南
       </Link>
 
       <header className="mb-10">
-        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-500 text-[0.75rem] font-black uppercase tracking-widest mb-5">
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase mb-5">
           <Icon name="lucide:book-open-check" className="size-4" />
           Step-by-step
         </div>
-        <h2 className="text-4xl font-black tracking-tighter text-[var(--text-primary)] mb-3">
+        <h2 className="text-4xl font-black text-[var(--text-primary)] mb-3">
           保姆级开户指南.
         </h2>
-        <p className="text-[var(--text-secondary)] text-lg font-medium leading-relaxed">
+        <p className="text-[var(--text-secondary)] text-lg font-semibold leading-8">
           适合第一次办理香港银行卡和券商账户的投资者。重点是材料齐、话术稳、到店流程不走回头路。
         </p>
       </header>
@@ -41,15 +41,15 @@ export default function HKNannyGuidePage() {
         {steps.map((step, index) => (
           <section key={step.title} className="card p-7">
             <div className="flex items-center gap-4 mb-5">
-              <span className="size-10 rounded-xl bg-blue-500 text-white flex items-center justify-center font-black">
+              <span className="size-10 rounded-lg bg-[var(--accent-color)] text-white flex items-center justify-center font-black">
                 {index + 1}
               </span>
               <h3 className="text-xl font-black text-[var(--text-primary)]">{step.title}</h3>
             </div>
             <ul className="space-y-3">
               {step.items.map((item) => (
-                <li key={item} className="flex items-start gap-3 text-sm font-medium text-[var(--text-secondary)]">
-                  <Icon name="lucide:check-circle-2" className="size-5 text-emerald-500 shrink-0 mt-0.5" />
+                <li key={item} className="flex items-start gap-3 text-base font-semibold text-[var(--text-secondary)]">
+                  <Icon name="lucide:check-circle-2" className="size-5 text-[var(--success-color)] shrink-0 mt-0.5" />
                   <span>{item}</span>
                 </li>
               ))}

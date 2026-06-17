@@ -60,40 +60,40 @@ export const SentimentDuel = () => {
   return (
     <div className="card p-5">
       <div className="flex justify-between items-center mb-5">
-        <h3 className="text-sm font-bold text-[var(--text-primary)]">多空阵营拔河</h3>
-        <span className="text-[10px] text-slate-400">过去 24 小时民意</span>
+        <h3 className="text-sm font-black text-[var(--text-primary)]">多空阵营拔河</h3>
+        <span className="text-xs text-[var(--text-tertiary)] font-semibold">过去 24 小时民意</span>
       </div>
 
       {!hasVoted && !pending ? (
         <div className="grid grid-cols-2 gap-4">
           <button 
             onClick={() => vote("bull")}
-            className="flex flex-col items-center gap-2 p-4 rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--hover-bg)] hover:bg-emerald-500/10 hover:border-emerald-500 transition-all group"
+            className="flex flex-col items-center gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] hover:bg-emerald-500/10 hover:border-emerald-500 transition-all group"
           >
-            <span className="text-2xl group-hover:scale-110 transition-transform">🐂</span>
+            <Icon name="lucide:trending-up" className="size-6 text-[var(--success-color)] group-hover:scale-110 transition-transform" />
             <span className="text-[0.85rem] font-bold">我看涨</span>
           </button>
           <button 
             onClick={() => vote("bear")}
-            className="flex flex-col items-center gap-2 p-4 rounded-[var(--radius-lg)] border border-[var(--border-color)] bg-[var(--hover-bg)] hover:bg-rose-500/10 hover:border-rose-500 transition-all group"
+            className="flex flex-col items-center gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] hover:bg-rose-500/10 hover:border-rose-500 transition-all group"
           >
-            <span className="text-2xl group-hover:scale-110 transition-transform">🐻</span>
+            <Icon name="lucide:trending-down" className="size-6 text-[var(--danger-color)] group-hover:scale-110 transition-transform" />
             <span className="text-[0.85rem] font-bold">我看跌</span>
           </button>
         </div>
       ) : (
         <div className={cn("space-y-4", pending && "opacity-60")}>
           <div className="relative h-10 mt-6 mb-4">
-            <div className="flex h-full rounded-full overflow-hidden bg-slate-200 dark:bg-slate-800">
+            <div className="flex h-full rounded-lg overflow-hidden bg-[var(--hover-bg)] border border-[var(--border-color)]">
               <motion.div 
                 initial={{ width: "50%" }}
                 animate={{ width: `${bullPct}%` }}
                 transition={{ type: "spring", stiffness: 50, damping: 20 }}
-                className="h-full bg-gradient-to-r from-emerald-500 to-emerald-400 flex items-center pl-4"
+                className="h-full bg-[var(--success-color)] flex items-center pl-4"
               >
                 <span className="text-white font-black text-[0.9rem] drop-shadow-sm">{bullPct}%</span>
               </motion.div>
-              <div className="h-full flex-1 bg-gradient-to-r from-rose-400 to-rose-500 flex items-center justify-end pr-4">
+              <div className="h-full flex-1 bg-[var(--danger-color)] flex items-center justify-end pr-4">
                 <span className="text-white font-black text-[0.9rem] drop-shadow-sm">{bearPct}%</span>
               </div>
             </div>
@@ -102,16 +102,16 @@ export const SentimentDuel = () => {
               initial={{ left: "50%" }}
               animate={{ left: `${bullPct}%` }}
               transition={{ type: "spring", stiffness: 50, damping: 20 }}
-              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-8 bg-[var(--card-bg)] border-[3px] border-[var(--border-color)] rounded-full flex items-center justify-center z-10 shadow-md"
+              className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 size-8 bg-[var(--card-bg)] border-[3px] border-[var(--border-color)] rounded-full flex items-center justify-center z-10 shadow-sm"
             >
-              <Icon name="lucide:swords" className="size-4 text-slate-500" />
+              <Icon name="lucide:swords" className="size-4 text-[var(--text-secondary)]" />
             </motion.div>
           </div>
           
           <div className="flex justify-between items-center text-[0.7rem] font-bold">
-            <span className="text-emerald-500 uppercase tracking-tighter">多头阵营</span>
-            <span className="text-slate-400 font-medium">{totalVotes} 人参与</span>
-            <span className="text-rose-500 uppercase tracking-tighter">空头阵营</span>
+            <span className="text-[var(--success-color)] uppercase">多头阵营</span>
+            <span className="text-[var(--text-tertiary)] font-medium">{totalVotes} 人参与</span>
+            <span className="text-[var(--danger-color)] uppercase">空头阵营</span>
           </div>
         </div>
       )}

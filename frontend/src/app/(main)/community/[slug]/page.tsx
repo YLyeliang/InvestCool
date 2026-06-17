@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Icon } from "@/components/ui/Icon";
 import { notFound } from "next/navigation";
 import { Metadata } from "next";
+import { getReliableCover } from "@/lib/images";
 
 interface CommunityPageProps {
   params: Promise<{ slug: string }>;
@@ -53,17 +54,17 @@ export default async function CommunityDetailPage({ params }: CommunityPageProps
           </Link>
 
           {page.cover && (
-            <div className="mb-10 rounded-3xl overflow-hidden shadow-xl">
-              <img src={page.cover} alt={page.title} className="w-full h-[240px] object-cover" />
+            <div className="mb-10 rounded-lg overflow-hidden shadow-sm border border-[var(--border-color)]">
+              <img src={getReliableCover(page.cover)} alt={page.title} className="w-full h-[240px] object-cover" />
             </div>
           )}
 
-          <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-[var(--text-primary)] leading-[1.1] mb-4">
+          <h1 className="text-4xl md:text-5xl font-black text-[var(--text-primary)] leading-tight mb-4">
             {page.title}
           </h1>
           
           {page.description && (
-            <p className="text-xl text-[var(--text-secondary)] font-medium leading-relaxed">
+            <p className="text-xl text-[var(--text-secondary)] font-semibold leading-8">
               {page.description}
             </p>
           )}

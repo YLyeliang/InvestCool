@@ -5,6 +5,7 @@ import { formatDate } from "@/lib/utils";
 import { notFound } from "next/navigation";
 import { Metadata } from "next";
 import { getDocBySlug } from "@/lib/cms";
+import { getReliableCover } from "@/lib/images";
 
 interface TutorialPageProps {
   params: Promise<{ slug: string }>;
@@ -43,24 +44,24 @@ export default async function TutorialDetailPage({ params }: TutorialPageProps) 
 
           <div className="space-y-6">
             <div className="flex items-center gap-3">
-              <span className="px-3 py-1 rounded-lg bg-blue-50 dark:bg-blue-900/30 text-blue-500 text-[0.7rem] font-black uppercase tracking-widest">
+              <span className="px-3 py-1 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase">
                 {tutorial.category || "技术教程"}
               </span>
-              <span className="text-[0.8rem] text-slate-400 font-bold flex items-center gap-1.5">
+              <span className="text-sm text-[var(--text-tertiary)] font-bold flex items-center gap-1.5">
                 <Icon name="lucide:calendar" className="size-3.5" />
                 {formatDate(tutorial.date || tutorial.created_at || new Date().toISOString())}
               </span>
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-[var(--text-primary)] leading-[1.1]">
+            <h1 className="text-4xl md:text-5xl font-black text-[var(--text-primary)] leading-tight">
               {tutorial.title}
             </h1>
           </div>
         </header>
 
         {tutorial.cover && (
-          <div className="mb-12 rounded-3xl overflow-hidden border border-[var(--border-color)] shadow-xl shadow-slate-200/50 dark:shadow-none">
-            <img src={tutorial.cover} alt={tutorial.title} className="w-full h-auto" />
+          <div className="mb-12 rounded-lg overflow-hidden border border-[var(--border-color)] shadow-sm">
+            <img src={getReliableCover(tutorial.cover)} alt={tutorial.title} className="w-full h-auto" />
           </div>
         )}
 
@@ -70,7 +71,7 @@ export default async function TutorialDetailPage({ params }: TutorialPageProps) 
         />
 
         <footer className="mt-20 pt-10 border-t border-[var(--border-color)] text-center">
-          <p className="text-xs text-slate-500 leading-relaxed m-0 italic">
+          <p className="text-xs text-[var(--text-secondary)] leading-relaxed m-0">
             本文为 InvestCool 原创技术教程，转载请注明出处。
           </p>
         </footer>

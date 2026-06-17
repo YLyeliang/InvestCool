@@ -80,30 +80,30 @@ export const MarketQuoteCard = () => {
   const dateParts = getDateParts(data.date);
 
   return (
-    <div className="group relative bg-[var(--card-bg)] border border-[var(--border-color)] rounded-2xl p-5 hover:border-[var(--accent-color)] transition-all">
+    <div className="group relative bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg p-5 hover:border-[var(--accent-color)] transition-all shadow-sm">
       <div className="flex justify-between items-start mb-5">
-        <div className="flex flex-col items-center bg-[var(--hover-bg)] px-3 py-2 rounded-xl min-w-[3rem]">
+        <div className="flex flex-col items-center bg-[var(--section-bg)] px-3 py-2 rounded-lg min-w-[3rem] border border-[var(--border-color)]">
           <span className="text-xl font-black text-[var(--accent-color)] leading-none">
             {dateParts.day}
           </span>
-          <span className="text-[0.6rem] font-bold uppercase text-[var(--text-secondary)] mt-1">
+          <span className="text-[0.65rem] font-bold uppercase text-[var(--text-secondary)] mt-1">
             {getMonthLabel(dateParts.monthIndex)}
           </span>
         </div>
-        <div className="px-2 py-1 rounded-full bg-blue-500/10 text-[var(--accent-color)] text-[0.65rem] font-black tracking-wider">
+        <div className="px-2 py-1 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)] text-[0.7rem] font-black">
           市场观察员
         </div>
       </div>
 
       <div className="relative mb-4">
         <Icon name="lucide:quote" className="absolute -top-2 -left-2 size-8 opacity-5 text-[var(--text-primary)]" />
-        <p className="text-[0.95rem] leading-relaxed text-[var(--text-primary)] font-medium relative z-10">
+        <p className="text-base leading-7 text-[var(--text-primary)] font-semibold relative z-10">
           {data.quote}
         </p>
       </div>
 
       <div className="flex justify-end">
-        <span className="text-[0.7rem] font-bold text-slate-400 uppercase tracking-widest opacity-60">
+        <span className="text-xs font-bold text-[var(--text-tertiary)] uppercase">
           AI Analysis
         </span>
       </div>

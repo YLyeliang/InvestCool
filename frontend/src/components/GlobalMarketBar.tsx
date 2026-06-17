@@ -56,27 +56,27 @@ export const GlobalMarketBar = () => {
   }, []);
 
   return (
-    <div className="market-bar card py-4 px-6 mb-6">
-      <div className="market-grid grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 items-center">
+    <div className="market-bar card py-4 px-5 mb-6">
+      <div className="market-grid grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-3 md:gap-5 items-center">
         {/* NASDAQ 100 */}
-        <div className="market-item highlight flex flex-col md:pr-5 md:border-r border-slate-200 dark:border-slate-800">
+        <div className="market-item highlight flex flex-col md:pr-5 md:border-r border-[var(--border-color)]">
           <div className="item-label flex items-center gap-2 mb-1">
-            <span className="name text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+            <span className="name text-xs font-extrabold text-[var(--text-secondary)] uppercase">
               纳斯达克 100
             </span>
-            <span className="symbol text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-blue-500">
+            <span className="symbol text-[10px] bg-[var(--accent-soft)] px-1.5 py-0.5 rounded text-[var(--accent-strong)] font-bold">
               NDX
             </span>
           </div>
           {nasdaq ? (
             <div className="item-value flex items-baseline gap-2">
-              <span className="price text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter">
+              <span className="price text-xl md:text-2xl font-black text-[var(--text-primary)]">
                 {formatNumber(nasdaq.index)}
               </span>
               <span
                 className={cn(
                   "change text-xs font-bold",
-                  nasdaq.change >= 0 ? "text-emerald-500" : "text-red-500"
+                  nasdaq.change >= 0 ? "text-[var(--success-color)]" : "text-[var(--danger-color)]"
                 )}
               >
                 {nasdaq.percent.toFixed(2)}%
@@ -93,27 +93,27 @@ export const GlobalMarketBar = () => {
             <div
               key={asset.name}
               className={cn(
-                "market-item flex flex-col md:pr-5 border-slate-200 dark:border-slate-800",
+                "market-item flex flex-col md:pr-5 border-[var(--border-color)]",
                 index !== macroAssets.length - 1 ? "md:border-r" : ""
               )}
             >
               <div className="item-label flex items-center gap-2 mb-1">
-                <span className="name text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+                <span className="name text-xs font-extrabold text-[var(--text-secondary)] uppercase">
                   {getAssetNameCN(asset.name)}
                 </span>
-                <span className="symbol text-[10px] bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-blue-500">
+                <span className="symbol text-[10px] bg-[var(--accent-soft)] px-1.5 py-0.5 rounded text-[var(--accent-strong)] font-bold">
                   {asset.name}
                 </span>
               </div>
               <div className="item-value flex items-baseline gap-2">
-                <span className="price text-xl md:text-2xl font-black text-slate-800 dark:text-slate-100 tracking-tighter">
+                <span className="price text-xl md:text-2xl font-black text-[var(--text-primary)]">
                   {(asset.name === "GOLD" || asset.name === "OIL") && "$"}
                   {formatPrice(asset.price)}
                 </span>
                 <span
                   className={cn(
                     "change text-xs font-bold",
-                    asset.percent >= 0 ? "text-emerald-500" : "text-red-500"
+                    asset.percent >= 0 ? "text-[var(--success-color)]" : "text-[var(--danger-color)]"
                   )}
                 >
                   {asset.percent >= 0 ? "+" : ""}
@@ -124,7 +124,7 @@ export const GlobalMarketBar = () => {
           ))
         ) : (
           [1, 2, 3].map((i) => (
-            <div key={i} className="market-item flex flex-col md:pr-5 md:border-r border-slate-200 dark:border-slate-800 last:border-r-0">
+            <div key={i} className="market-item flex flex-col md:pr-5 md:border-r border-[var(--border-color)] last:border-r-0">
               <Skeleton width="40px" height="0.7rem" className="mb-1" />
               <Skeleton width="60px" height="1.2rem" />
             </div>
@@ -133,9 +133,10 @@ export const GlobalMarketBar = () => {
       </div>
       <style jsx>{`
         .highlight {
-          background: rgba(59, 130, 246, 0.04);
+          background: var(--section-bg);
           margin: -1rem 0;
-          padding: 1rem 1.25rem 1rem 0;
+          padding: 1rem 1.25rem 1rem 0.25rem;
+          border-radius: var(--radius-lg);
         }
         @media (max-width: 768px) {
           .highlight {

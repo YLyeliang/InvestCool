@@ -14,14 +14,14 @@ export const ThemeToggle = ({ className }: { className?: string }) => {
       onClick={toggleTheme}
       className={cn(
         "flex items-center justify-center p-2 rounded-lg transition-all",
-        "bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700",
+        "bg-[var(--section-bg)] border border-[var(--border-color)] hover:bg-[var(--hover-bg)]",
         className
       )}
       title={isDark ? "切换到浅色模式" : "切换到深色模式"}
     >
       <Icon
         name={isDark ? "lucide:sun" : "lucide:moon"}
-        className="size-5 text-slate-600 dark:text-slate-300"
+        className="size-5 text-[var(--text-secondary)]"
       />
     </button>
   );

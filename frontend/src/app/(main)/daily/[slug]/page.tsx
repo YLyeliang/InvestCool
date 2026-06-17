@@ -41,17 +41,17 @@ export default async function DailyDetailPage({ params }: DailyPageProps) {
           </Link>
 
           <div className="space-y-6">
-            <div className="flex items-center gap-2.5 text-blue-500 text-sm font-black tracking-wider uppercase">
+            <div className="flex items-center gap-2.5 text-[var(--accent-strong)] text-sm font-black uppercase">
               <Icon name="lucide:calendar" size={16} />
               {page.date}
             </div>
 
-            <h1 className="text-4xl md:text-5xl font-black tracking-tighter text-[var(--text-primary)] leading-[1.1]">
+            <h1 className="text-4xl md:text-5xl font-black text-[var(--text-primary)] leading-tight">
               {page.title}
             </h1>
             
             {page.description && (
-              <p className="text-xl text-[var(--text-secondary)] font-medium leading-relaxed italic">
+              <p className="text-xl text-[var(--text-secondary)] font-semibold leading-8">
                 {page.description}
               </p>
             )}
@@ -64,7 +64,7 @@ export default async function DailyDetailPage({ params }: DailyPageProps) {
         />
 
         <footer className="mt-20 pt-10 border-t border-[var(--border-color)] text-center">
-          <p className="text-xs text-slate-400 font-bold uppercase tracking-[0.2em]">
+          <p className="text-xs text-[var(--text-tertiary)] font-bold uppercase">
             Daily Market Log @ InvestCool
           </p>
         </footer>
