@@ -13,7 +13,7 @@ from backend.app.services.news_intelligence.service import NewsIntelligenceServi
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 
 def run():
-    print("🚀 Initializing InvestCool News Intelligence Service...")
+    print("Initializing InvestCool News Intelligence Service...")
     
     # 1. Setup Service
     service = NewsIntelligenceService(NewsConfig)
@@ -21,13 +21,12 @@ def run():
     # 2. Get Workflow Task (This defines what the Agent should do)
     task = service.run_daily_workflow()
     
-    print(f"📡 Task Definition: {task['instruction']}")
+    print(f"Task Definition: {task['instruction']}")
     print("\n--- AGENT EXECUTION START ---")
     
-    # Note: In this interactive session, I (the Agent) will now manually 
-    # fulfill the instruction provided by the task definition.
-    # In a fully automated production environment, this would be a trigger 
-    # to a standalone Gemini API worker.
+    # Note: In this interactive session, the operator can fulfill the
+    # instruction provided by the task definition. In production this remains
+    # a lightweight task descriptor, not a model-specific runtime dependency.
     
     return task
 

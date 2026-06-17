@@ -4,7 +4,7 @@ import "./globals.css";
 
 export const metadata = {
   title: 'InvestCool Pro',
-  description: 'AI-Powered Finance Terminal',
+  description: 'Nasdaq 100 risk and research terminal',
 };
 
 export default function RootLayout({

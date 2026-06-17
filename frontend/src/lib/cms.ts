@@ -6,7 +6,7 @@ import { unstable_cache } from "next/cache";
 import { sanitizeMarkdownHtml } from "@/lib/sanitize";
 
 const CONTENT_DIR = path.resolve(process.cwd(), "content");
-const COLLECTIONS = new Set(["analysis", "ai", "community", "daily", "tutorials"]);
+const COLLECTIONS = new Set(["analysis", "community", "daily", "tutorials"]);
 
 export interface ContentMetadata {
   slug: string;

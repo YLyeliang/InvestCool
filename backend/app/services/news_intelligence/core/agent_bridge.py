@@ -1,7 +1,7 @@
 import logging
 
 class NewsFetcher:
-    """仅负责定义抓取指令，具体的动作由 Agent 技能完成"""
+    """仅负责定义抓取指令，具体的动作由研究流水线完成"""
     def __init__(self, config):
         self.config = config
 
@@ -21,7 +21,7 @@ class NewsProcessor:
         return raw_data
 
 class AgentBridge:
-    """Gemini CLI 技能的连接器"""
+    """新闻研究任务连接器"""
     def __init__(self, fetcher, processor):
         self.fetcher = fetcher
         self.processor = processor
@@ -29,8 +29,7 @@ class AgentBridge:
     def execute_intelligence_task(self):
         """
         这个方法在 Python 代码中是一个占位符。
-        实际运行时，由 Gemini CLI Agent 识别此任务并调用其内置的
-        google_web_search, web_fetch, daily-news-report 技能。
+        实际运行时，由新闻研究流水线识别此任务并调用采集、抽取和简报生成能力。
         """
         instruction = self.fetcher.get_fetch_instruction()
         return {

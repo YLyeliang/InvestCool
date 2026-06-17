@@ -18,7 +18,7 @@ export default function AnalysisPageClient({ initialArticles }: AnalysisPageClie
   const categories = useMemo(() => {
     const dynamic = Array.from(new Set(initialArticles.map(a => a.category)))
       .filter((category): category is string => Boolean(category));
-    const standard = ["全部", "投资入门", "深度分析", "公司基本面", "AI"];
+    const standard = ["全部", "投资入门", "深度分析", "公司基本面", "AI 产业"];
     // 合并并去重，保持 standard 的顺序
     return Array.from(new Set([...standard, ...dynamic]));
   }, [initialArticles]);
@@ -35,7 +35,7 @@ export default function AnalysisPageClient({ initialArticles }: AnalysisPageClie
           深度投研<span className="text-[var(--accent-color)]">.</span>
         </h2>
         <p className="text-[var(--text-secondary)] font-semibold max-w-2xl leading-7">
-          由 AI 辅助，结合宏观经济指标与实时盘面数据，为您呈现专业的投资见解。
+          结合宏观经济指标、实时盘面数据与纳指权重股基本面，为您呈现专业的投资见解。
         </p>
       </header>
 

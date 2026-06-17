@@ -23,7 +23,7 @@ InvestCool 采用前后端分离架构，并已统一为 Next.js 与 Flask 技�
 - **Flask / Gunicorn**：提供行情、投票、内容管理和统计 API。
 - **SQLAlchemy / SQLite WAL**：持久化市场指标、策略、投票和访问数据。
 - **yfinance**：抓取纳斯达克 100、MAG7 和宏观资产行情。
-- **独立 worker**：行情采集和 Gemini 策略生成不在 Web worker 中运行，
+- **独立 worker**：行情采集和 NDX 风险简报不在 Web worker 中运行，
   避免 Gunicorn 多进程重复执行任务。
 
 ## 内容流
@@ -37,7 +37,7 @@ PM2 管理三个独立进程：
 
 1. Next.js 前端服务。
 2. Gunicorn API 服务。
-3. Python 数据与 AI worker。
+3. Python 数据与风险分析 worker。
 
 Nginx 仅需代理 Next.js 的 `3000` 端口；Next.js 将 `/api/*` 请求转发到
 本机 Flask `5000` 端口。

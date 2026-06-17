@@ -120,9 +120,12 @@ class PollVote(db.Model):
     ip_hash = db.Column(db.String(64), nullable=False)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-class AIRecommendation(db.Model):
+class RiskBrief(db.Model):
+    __tablename__ = "ai_recommendation"
+
+    # Legacy table name kept to preserve existing production history.
     id = db.Column(db.Integer, primary_key=True)
-    status = db.Column(db.String(20), nullable=False) # '看多', '看空', '中性', '观察'
+    status = db.Column(db.String(20), nullable=False)
     summary = db.Column(db.Text, nullable=False)
     index_position = db.Column(db.Float)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -327,9 +330,45 @@ def cleanup_old_data():
             logger.info("Cleanup done")
     except Exception as e: logger.error(f"Cleanup error: {e}")
 
-import subprocess
+def describe_ndx_risk(metric, ndx_data):
+    score = safe_float(metric.index_value, 50)
+    rsi = safe_float(metric.rsi, 50)
+    vix_buffer = safe_float(metric.vix_score, 50)
+    price_position = safe_float(metric.price_score, 50)
+    macro_buffer = safe_float(metric.yield_score, 50)
+    change_pct = safe_float(ndx_data.get("percent"), 0)
 
-def run_ai_analysis():
+    if score >= 80:
+        status = "风险偏高"
+        action = "不宜继续追高，优先检查仓位集中度、止盈纪律和权重股拥挤交易。"
+    elif score >= 65:
+        status = "谨慎观察"
+        action = "趋势仍有韧性，但新开仓应等待回踩确认，重点观察 MAG7 轮动是否扩散。"
+    elif score >= 40:
+        status = "中性震荡"
+        action = "指数处在均衡区间，更适合用分批和再平衡处理波动，避免单日涨跌驱动决策。"
+    elif score >= 25:
+        status = "防守观察"
+        action = "风险偏好降温，短线先控制回撤，等待波动率和成交结构稳定后再提高敞口。"
+    else:
+        status = "机会窗口"
+        action = "情绪已明显降温，可把关注点放在现金流稳健、盈利可见度高的纳指核心资产。"
+
+    if change_pct > 0.2:
+        intraday = f"NDX 最新上涨 {change_pct:.2f}%"
+    elif change_pct < -0.2:
+        intraday = f"NDX 最新下跌 {abs(change_pct):.2f}%"
+    else:
+        intraday = "NDX 最新基本持平"
+
+    summary = (
+        f"{intraday}，综合风险温度 {score:.1f}/100，RSI {rsi:.1f}，"
+        f"价格分位 {price_position:.1f}，VIX 缓冲 {vix_buffer:.1f}，"
+        f"利率缓冲 {macro_buffer:.1f}。{action}"
+    )
+    return status, summary
+
+def run_ndx_risk_analysis():
     # Ensure data is available
     global nasdaq_cache
     if not nasdaq_cache.get("data"):
@@ -337,71 +376,60 @@ def run_ai_analysis():
         
     ndx_data = nasdaq_cache.get("data")
     if not ndx_data:
-        logger.warning("No Nasdaq data available for AI analysis after refresh attempt")
+        logger.warning("No Nasdaq data available for NDX risk analysis after refresh attempt")
         return
 
     index_pos = ndx_data['index']
-    
-    # Construct Prompt
-    prompt = f"你是一个资深科技股分析师。结合最近48小时纳斯达克100指数动态及权重股NVDA,AAPL,MSFT新闻，当前点位{index_pos}。给出投资策略。1.状态[看多/看空/中性/观察]之一。2.不超过3句话。3.仅按此格式：STATUS: [状态]\nSUMMARY: [内容]"
-    
+
     try:
-        # Call gemini command with longer timeout
-        result = subprocess.run(['gemini', prompt], capture_output=True, text=True, timeout=150)
-        
-        if result.returncode != 0:
-            logger.error(f"gemini-cli error: {result.stderr}")
-            # Fallback heuristic logic
-            run_fallback_analysis(index_pos)
+        with app.app_context():
+            metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
+
+        if not metric:
+            update_market_index()
+            with app.app_context():
+                metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
+
+        if not metric:
+            logger.warning("NDX risk analysis skipped: no market metric available")
             return
 
-        output = result.stdout.strip()
-        status = "观察"
-        summary = ""
-        for line in output.split('\n'):
-            if "STATUS:" in line: status = line.split("STATUS:")[1].strip()
-            elif "SUMMARY:" in line: summary = line.split("SUMMARY:")[1].strip()
-        
-        if not summary: summary = output
+        status, summary = describe_ndx_risk(metric, ndx_data)
 
         with app.app_context():
-            new_rec = AIRecommendation(status=status[:20], summary=summary, index_position=float(index_pos))
+            new_rec = RiskBrief(status=status[:20], summary=summary, index_position=float(index_pos))
             db.session.add(new_rec)
             db.session.commit()
             global ai_latest_cache
             ai_latest_cache["data"] = new_rec.to_dict()
             ai_latest_cache["last_update"] = datetime.utcnow()
-            logger.info(f"AI Recommendation updated and cached: {status}")
+            logger.info(f"NDX risk brief updated and cached: {status}")
             
     except Exception as e:
-        logger.error(f"AI analysis job failed: {e}")
-        run_fallback_analysis(index_pos)
+        logger.error(f"NDX risk analysis job failed: {e}")
+        run_rule_based_ndx_analysis(index_pos)
 
-def run_fallback_analysis(index_pos):
+def run_rule_based_ndx_analysis(index_pos):
     with app.app_context():
         metric = MarketMetric.query.order_by(MarketMetric.timestamp.desc()).first()
         if not metric:
-            logger.warning("Fallback analysis skipped: no market metric available")
+            logger.warning("Rule-based NDX analysis skipped: no market metric available")
             return
 
-        val = metric.index_value
-        if val > 75:
-            status, summary = "观察", "市场进入极度贪婪区，RSI 指数偏高。建议在当前点位保持警惕，等待回踩机会。"
-        elif val < 25:
-            status, summary = "看多", "情绪跌入超卖区间，恐慌指数高企。当前点位具备中长期配置价值，建议分批买入。"
-        else:
-            status, summary = "中性", "市场处于均衡博弈阶段，波动率趋稳。建议持仓观望，关注权重股财报指引。"
+        ndx_data = nasdaq_cache.get("data") or {"index": index_pos, "percent": 0}
+        status, summary = describe_ndx_risk(metric, ndx_data)
 
-        new_rec = AIRecommendation(status=status, summary=f"[系统保底] {summary}", index_position=float(index_pos))
+        new_rec = RiskBrief(status=status, summary=summary, index_position=float(index_pos))
         db.session.add(new_rec)
         db.session.commit()
         global ai_latest_cache
         ai_latest_cache["data"] = new_rec.to_dict()
-        logger.info(f"Fallback recommendation generated: {status}")
+        ai_latest_cache["last_update"] = datetime.utcnow()
+        logger.info(f"Rule-based NDX risk brief generated: {status}")
 
 def background_worker():
     last_cleanup = 0
-    last_ai_analysis = 0
+    last_risk_analysis = 0
     while True:
         try:
             update_market_index()
@@ -409,10 +437,10 @@ def background_worker():
             refresh_nasdaq_data()
             refresh_macro_data()
             
-            # AI Analysis every 2 hours (7200 seconds)
-            if time.time() - last_ai_analysis > 7200:
-                run_ai_analysis()
-                last_ai_analysis = time.time()
+            # NDX risk analysis every 2 hours (7200 seconds)
+            if time.time() - last_risk_analysis > 7200:
+                run_ndx_risk_analysis()
+                last_risk_analysis = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -424,15 +452,15 @@ def background_worker():
         time.sleep(60) 
 
 # Routes
-@app.route('/api/ai/latest', methods=['GET'])
-def get_ai_latest():
+@app.route('/api/risk/latest', methods=['GET'])
+def get_risk_latest():
     global ai_latest_cache
     # Serve from memory cache for maximum concurrency
     if ai_latest_cache["data"]:
         return jsonify(ai_latest_cache["data"])
     
     # Lazy init cache from DB if memory is empty
-    rec = AIRecommendation.query.order_by(AIRecommendation.created_at.desc()).first()
+    rec = RiskBrief.query.order_by(RiskBrief.created_at.desc()).first()
     if rec:
         ai_latest_cache["data"] = rec.to_dict()
         ai_latest_cache["last_update"] = datetime.utcnow()
@@ -440,11 +468,11 @@ def get_ai_latest():
         
     return jsonify({"error": "No recommendations yet"}), 202
 
-@app.route('/api/ai/history', methods=['GET'])
-def get_ai_history():
+@app.route('/api/risk/history', methods=['GET'])
+def get_risk_history():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    recs = AIRecommendation.query.order_by(AIRecommendation.created_at.desc()).paginate(page=page, per_page=per_page)
+    recs = RiskBrief.query.order_by(RiskBrief.created_at.desc()).paginate(page=page, per_page=per_page)
     return jsonify({
         "items": [r.to_dict() for r in recs.items],
         "total": recs.total,
@@ -533,14 +561,14 @@ def get_market_quote():
     if not ndx or not sentiment:
         return jsonify({
             "quote": "市场正在酝酿情绪，请稍后再来...",
-            "author": "InvestCool AI",
+            "author": "InvestCool Risk Desk",
             "date": datetime.now().strftime("%Y.%m.%d")
         })
 
     change = ndx['percent']
     value = sentiment.index_value
     
-    # Logic Engine for "AI-like" Quotes
+    # Rule engine for market quotes
     if change > 1.5 and value > 70:
         quotes = [
             "多头们今天可能在喝香槟，但别忘了系好安全带，高处不胜寒。",

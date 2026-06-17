@@ -187,7 +187,7 @@ export const AdminEditor = ({ initialData, onSave, onCancel, isSaving }: AdminEd
                     { label: "投资入门", type: "analysis" },
                     { label: "深度分析", type: "analysis" },
                     { label: "公司基本面", type: "analysis" },
-                    { label: "AI", type: "analysis" },
+                    { label: "AI 产业", type: "analysis" },
                     { label: "技术教程", type: "tutorial" },
                   ].map(({ label, type }) => (
                     <button 

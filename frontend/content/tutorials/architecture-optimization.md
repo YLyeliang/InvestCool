@@ -12,9 +12,9 @@ InvestCool 已从混合框架实验项目收敛为单一的 Next.js + Flask 架�
 
 ## 1. Web 与后台任务隔离
 
-Gunicorn 只处理 HTTP 请求。行情抓取、指标计算、数据清理和 AI 策略生成
+Gunicorn 只处理 HTTP 请求。行情抓取、指标计算、数据清理和 NDX 风险简报
 由独立 Python worker 执行。这样可以避免多 Gunicorn worker 重复抓取、
-重复调用模型或并发写入 SQLite。
+重复计算或并发写入 SQLite。
 
 ## 2. 内容发布安全
 

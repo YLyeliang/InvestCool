@@ -1,15 +1,16 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { AIRecommendationCard } from "@/components/AIRecommendationCard";
+import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { Icon } from "@/components/ui/Icon";
 import Link from "next/link";
 
-interface AIArticle {
+interface ResearchArticle {
   slug: string;
   title: string;
   description: string;
   path: string;
+  is_deleted?: boolean | string;
 }
 
 interface StrategyHistoryItem {
@@ -27,25 +28,30 @@ interface StrategyHistory {
   pages: number;
 }
 
-export default function AIPage() {
-  const [aiArticles, setAIArticles] = useState<AIArticle[]>([]);
+export default function RiskPage() {
+  const [researchArticles, setResearchArticles] = useState<ResearchArticle[]>([]);
   const [history, setHistory] = useState<StrategyHistory | null>(null);
   const [page, setPage] = useState(1);
 
   const fetchArticles = async () => {
     try {
-      const res = await fetch("/content-api/cms/ai");
+      const res = await fetch("/content-api/cms/analysis");
       if (res.ok) {
-        setAIArticles(await res.json());
+        const items = await res.json() as ResearchArticle[];
+        setResearchArticles(
+          items
+            .filter((item) => String(item.is_deleted).toLowerCase() !== "true")
+            .slice(0, 4)
+        );
       }
     } catch (e) {
-      console.error("Failed to fetch AI articles:", e);
+      console.error("Failed to fetch NDX research articles:", e);
     }
   };
 
   const fetchHistory = async (p: number) => {
     try {
-      const res = await fetch(`/api/ai/history?page=${p}&per_page=5`);
+      const res = await fetch(`/api/risk/history?page=${p}&per_page=5`);
       if (res.ok) {
         setHistory(await res.json());
       }
@@ -59,10 +65,11 @@ export default function AIPage() {
   }, [page]);
 
   const getStatusColor = (status: string) => {
-    if (status.includes("看多")) return "#10b981";
-    if (status.includes("看空")) return "#ef4444";
-    if (status.includes("中性")) return "#f59e0b";
-    return "#6b7280";
+    if (status.includes("风险偏高") || status.includes("看空")) return "#dc2626";
+    if (status.includes("谨慎") || status.includes("防守") || status.includes("观察")) return "#d97706";
+    if (status.includes("机会") || status.includes("看多")) return "#059669";
+    if (status.includes("中性")) return "#2563eb";
+    return "#64748b";
   };
 
   const formatDate = (dateStr: string) => {
@@ -75,42 +82,42 @@ export default function AIPage() {
   };
 
   return (
-    <div className="ai-page space-y-12">
+    <div className="risk-page space-y-12">
       <header className="page-header">
         <h2 className="text-4xl font-black text-[var(--text-primary)] mb-2">
-          AI 赋能投资.
+          NDX 风险研究.
         </h2>
         <p className="text-[var(--text-secondary)] font-semibold max-w-2xl leading-7">
-          深度融合人工智能技术，探索下一代智慧投资范式。
+          聚焦纳斯达克 100 的价格位置、波动率、利率压力和权重股结构。
         </p>
       </header>
 
-      {/* AI Real-time Strategy */}
+      {/* Real-time NDX risk brief */}
       <section className="strategy-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
-          <Icon name="lucide:zap" className="text-[var(--accent-color)]" /> 实时 AI 策略
+          <Icon name="lucide:radar" className="text-[var(--accent-color)]" /> 实时 NDX 风险简报
         </h3>
-        <AIRecommendationCard />
+        <NDXRiskBriefCard />
       </section>
 
       <div className="main-content-layout grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">
         {/* Left: Articles */}
         <div className="articles-column space-y-8">
           <h3 className="section-title text-xl font-bold">深度阅读</h3>
-          {aiArticles.length > 0 ? (
+          {researchArticles.length > 0 ? (
             <div className="articles-grid grid grid-cols-1 md:grid-cols-2 gap-6">
-              {aiArticles.map((article) => (
+              {researchArticles.map((article) => (
                 <div key={article.slug} className="card p-6 flex flex-col justify-between min-h-[200px] border-t-4 border-[var(--accent-color)] hover:-translate-y-1 transition-transform">
                   <div>
                     <span className="inline-block px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase mb-3">
-                      AI Insights
+                      NDX Research
                     </span>
                     <h3 className="text-lg font-bold mb-2">{article.title}</h3>
                     <p className="text-base text-[var(--text-secondary)] leading-7 line-clamp-3 mb-6">
                       {article.description || "暂无描述"}
                     </p>
                   </div>
-                  <Link href={`/ai/${article.slug}`} className="text-[var(--accent-strong)] font-bold text-sm flex items-center gap-1 no-underline">
+                  <Link href={`/analysis/${article.slug}`} className="text-[var(--accent-strong)] font-bold text-sm flex items-center gap-1 no-underline">
                     深度阅读 <Icon name="lucide:arrow-right" size={14} />
                   </Link>
                 </div>
@@ -118,15 +125,15 @@ export default function AIPage() {
             </div>
           ) : (
             <div className="py-10 text-center border-2 border-dashed border-[var(--border-color)] rounded-lg">
-              <Icon name="sparkles" size={40} className="mx-auto mb-2 opacity-20" />
-              <p className="text-[var(--text-tertiary)] text-sm">AI 正在实验室中生成内容...</p>
+              <Icon name="radar" size={40} className="mx-auto mb-2 opacity-20" />
+              <p className="text-[var(--text-tertiary)] text-sm">研究内容正在整理中...</p>
             </div>
           )}
         </div>
 
-        {/* Right: Strategy History */}
+        {/* Right: Risk History */}
         <aside className="history-column space-y-8">
-          <h3 className="section-title text-xl font-bold">策略足迹</h3>
+          <h3 className="section-title text-xl font-bold">风险足迹</h3>
           <div className="timeline relative pl-6 border-l-2 border-[var(--border-color)] space-y-6">
             {history?.items.map((item) => (
               <div key={item.id} className="timeline-item relative">

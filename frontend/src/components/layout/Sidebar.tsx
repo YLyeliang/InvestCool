@@ -23,9 +23,9 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       ],
     },
     {
-      label: "智慧中心",
+      label: "研究中心",
       items: [
-        { label: "AI 决策建议", path: "/ai", icon: "brain-circuit" },
+        { label: "NDX 风险雷达", path: "/risk", icon: "radar" },
         { label: "架构与教程", path: "/tutorials", icon: "book-open" },
       ],
     },

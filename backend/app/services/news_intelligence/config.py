@@ -23,6 +23,6 @@ class NewsConfig:
 
     @classmethod
     def get_search_query(cls):
-        """生成用于 Gemini 技能搜索的动态指令"""
+        """生成用于新闻研究流水线的动态指令"""
         targets = cls.MONITORING["companies"] + cls.MONITORING["indices"]
         return f"Latest high-impact tech and finance news about {', '.join(targets[:5])} and {cls.MONITORING['keywords'][0]} for today."

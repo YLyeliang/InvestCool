@@ -1,20 +1,20 @@
 # InvestCool
 
-InvestCool 是一个面向纳斯达克 100 的 AI 投研平台。当前仓库采用单一前端方案：
+InvestCool 是一个面向纳斯达克 100 的金融研究与风险分析平台。当前仓库采用单一前端方案：
 
 - Next.js 16、React 19、TypeScript、Tailwind CSS 4
 - Flask、SQLAlchemy、SQLite WAL、yfinance
 - 独立 Python 数据 worker
-- Gemini CLI 策略生成，失败时回退到量化启发式策略
+- NDX 风险引擎，基于 RSI、VIX、价格分位与利率缓冲生成定时简报
 
-旧 Nuxt/Vue 实现已移除。
+旧前端实现已移除。
 
 ## 目录
 
 ```text
 backend/
   app/main.py       Flask API 与数据模型
-  worker.py         行情和 AI 定时任务
+  worker.py         行情和风险分析定时任务
   news_engine/      每日新闻报告流水线
 frontend/
   src/app/          Next.js App Router
@@ -49,7 +49,7 @@ npm run dev
 访问 `http://localhost:3000`。Next.js 会将 `/api/*` 转发至
 `http://127.0.0.1:5000`。
 
-如需运行行情和 AI 定时任务：
+如需运行行情和风险分析定时任务：
 
 ```bash
 source backend/venv/bin/activate
@@ -86,7 +86,7 @@ pm2 save
 PM2 分别运行：
 
 - `investcool-backend`：Gunicorn Web API
-- `investcool-worker`：唯一的行情与 AI 定时任务进程
+- `investcool-worker`：唯一的行情与风险分析定时任务进程
 - `investcool-frontend`：Next.js 生产服务
 
 生产环境应由 Nginx 反向代理 `127.0.0.1:3000`。后端只监听

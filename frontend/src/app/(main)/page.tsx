@@ -5,7 +5,7 @@ import { LazyMarketSentimentGauge } from "@/components/LazyCharts";
 import { SentimentDuel } from "@/components/SentimentDuel";
 import { TickerWatchlist } from "@/components/TickerWatchlist";
 import { GlobalMarketBar } from "@/components/GlobalMarketBar";
-import { AIRecommendationCard } from "@/components/AIRecommendationCard";
+import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 
 export default function Home() {
   return (
@@ -18,14 +18,14 @@ export default function Home() {
 
       <main className="grid grid-cols-1 gap-6">
         
-        {/* Top Row: AI Strategy & Critical Stats */}
+        {/* Top Row: NDX risk brief & critical stats */}
         <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-6">
-          <section className="ai-console">
+          <section className="risk-console">
             <div className="flex items-center gap-2 mb-4 px-1">
               <div className="size-1.5 rounded-full bg-blue-500 shadow-[0_0_8px_#3b82f6]"></div>
-              <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">AI 策略指挥部</h2>
+              <h2 className="text-sm font-black uppercase text-[var(--text-secondary)]">NDX 风险指挥部</h2>
             </div>
-            <AIRecommendationCard />
+            <NDXRiskBriefCard />
           </section>
 
           <div className="space-y-6">

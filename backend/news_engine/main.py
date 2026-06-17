@@ -38,17 +38,16 @@ def main():
     processed_news = processor.process(raw_news)
     logging.info(f"Filtered to {len(processed_news)} relevant items.")
 
-    # In a real automated cron, you would call an AI API here.
-    # For now, we generate the structured template.
+    # For now, generate the structured research template locally.
     report_content = summarizer.summarize(processed_news)
 
     # 4. Save Output
     saved_path = writer.save(report_content)
     
     if saved_path:
-        print(f"✅ Success! Today's report generated at: {saved_path}")
+        print(f"Success! Today's report generated at: {saved_path}")
     else:
-        print("❌ Failed to generate report.")
+        print("Failed to generate report.")
 
 if __name__ == "__main__":
     main()

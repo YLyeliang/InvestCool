@@ -43,6 +43,6 @@ output:
   file_format: "markdown"
   include_investcool_perspective: true
 
-ai_settings:
-  model: "gemini-pro" # Placeholder for standalone API usage
+analysis_settings:
+  model: "rule-based-risk-desk"
   summary_length: "medium" # short, medium, long

@@ -23,7 +23,7 @@ export default async function TutorialsPage() {
           架构与技术教程.
         </h2>
         <p className="text-[var(--text-secondary)] font-semibold max-w-2xl leading-7">
-          深度解析 InvestCool 如何从单机博客进化为高可用 AI 投研平台。
+          深度解析 InvestCool 如何从单机博客进化为高可用金融研究系统。
         </p>
       </header>
 
