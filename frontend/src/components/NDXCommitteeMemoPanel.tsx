@@ -28,6 +28,29 @@ interface RelativePayload {
   primary_excess_20d: number;
 }
 
+interface BreadthPayload {
+  breadth_score: number;
+  breadth_label: string;
+  participation_gap_20d: number;
+  equal_symbol: string;
+}
+
+interface ThemeRotationPayload {
+  leadership_score: number;
+  regime: string;
+  top_theme: string;
+  top_theme_excess_20d: number;
+  participation_count: number;
+  theme_count: number;
+}
+
+interface LiquidityPayload {
+  flow_score: number;
+  regime: string;
+  volume_ratio_20: number;
+  flow_balance: number;
+}
+
 interface LevelsPayload {
   zone_label: string;
   zone_score: number;
@@ -43,11 +66,39 @@ interface TailPayload {
   expected_shortfall_95: number;
 }
 
+interface OptionsPayload {
+  regime: string;
+  implied_move: number;
+  put_call_oi_ratio: number;
+}
+
+interface VolatilityTermPayload {
+  regime: string;
+  term_score: number;
+  front_ratio: number;
+  vvix_z_score: number;
+}
+
 interface ConcentrationPayload {
   concentration_level: string;
   top3_weight: number;
   top1_symbol: string;
   top1_weight: number;
+}
+
+interface ValuationPayload {
+  valuation_score: number;
+  valuation_label: string;
+  weighted_forward_pe: number | null;
+  top_pressure_symbol: string;
+}
+
+interface EarningsPayload {
+  event_score: number;
+  event_label: string;
+  nearest_symbol: string;
+  nearest_days: number;
+  event_weight_45d: number;
 }
 
 interface BudgetPayload {
@@ -66,9 +117,16 @@ interface MemoData {
   diagnostics: DiagnosticsPayload | null;
   factors: FactorPayload | null;
   relative: RelativePayload | null;
+  breadth: BreadthPayload | null;
+  themeRotation: ThemeRotationPayload | null;
+  liquidity: LiquidityPayload | null;
   levels: LevelsPayload | null;
   tail: TailPayload | null;
+  options: OptionsPayload | null;
+  volatilityTerm: VolatilityTermPayload | null;
   concentration: ConcentrationPayload | null;
+  valuation: ValuationPayload | null;
+  earnings: EarningsPayload | null;
   budget: BudgetPayload | null;
 }
 
@@ -138,6 +196,16 @@ const concentrationRiskScore = (level?: string) => {
   return 35;
 };
 
+const inverseRiskScore = (score?: number) => {
+  if (typeof score !== "number" || Number.isNaN(score)) return 50;
+  return clamp(100 - score, 20, 80);
+};
+
+const optionsRiskScore = (payload?: OptionsPayload | null) => {
+  if (!payload) return 50;
+  return clamp(32 + payload.implied_move * 8 + Math.max(0, payload.put_call_oi_ratio - 0.9) * 18, 25, 85);
+};
+
 export const NDXCommitteeMemoPanel = () => {
   const [data, setData] = useState<MemoData | null>(null);
   const [pending, setPending] = useState(true);
@@ -150,21 +218,50 @@ export const NDXCommitteeMemoPanel = () => {
           diagnostics,
           factors,
           relative,
+          breadth,
+          themeRotation,
+          liquidity,
           levels,
           tail,
+          options,
+          volatilityTerm,
           concentration,
+          valuation,
+          earnings,
           budget,
         ] = await Promise.all([
           fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<RelativePayload>("/api/risk/relative"),
+          fetchJson<BreadthPayload>("/api/risk/breadth"),
+          fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
+          fetchJson<LiquidityPayload>("/api/risk/liquidity"),
           fetchJson<LevelsPayload>("/api/risk/levels"),
           fetchJson<TailPayload>("/api/risk/tail"),
+          fetchJson<OptionsPayload>("/api/risk/options"),
+          fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
+          fetchJson<ValuationPayload>("/api/risk/valuation"),
+          fetchJson<EarningsPayload>("/api/risk/earnings"),
           fetchJson<BudgetPayload>("/api/risk/budget"),
         ]);
 
-        setData({ diagnostics, factors, relative, levels, tail, concentration, budget });
+        setData({
+          diagnostics,
+          factors,
+          relative,
+          breadth,
+          themeRotation,
+          liquidity,
+          levels,
+          tail,
+          options,
+          volatilityTerm,
+          concentration,
+          valuation,
+          earnings,
+          budget,
+        });
       } catch (e) {
         console.error("Failed to fetch NDX committee memo:", e);
         setData(null);
@@ -181,17 +278,29 @@ export const NDXCommitteeMemoPanel = () => {
 
     const diagnostics = data.diagnostics;
     const macroScore = data.factors?.pressure_score ?? 50;
-    const relativeRisk = clamp(100 - (data.relative?.leadership_score ?? 50), 25, 75);
+    const relativeRisk = inverseRiskScore(data.relative?.leadership_score);
+    const breadthRisk = inverseRiskScore(data.breadth?.breadth_score);
+    const themeRisk = inverseRiskScore(data.themeRotation?.leadership_score);
+    const liquidityRisk = inverseRiskScore(data.liquidity?.flow_score);
+    const internalRisk = (relativeRisk + breadthRisk + themeRisk + liquidityRisk) / 4;
     const levelsRisk = technicalRiskScore(data.levels?.zone_label);
     const tailScore = data.tail?.tail_score ?? 50;
     const concentrationScore = concentrationRiskScore(data.concentration?.concentration_level);
+    const optionsScore = optionsRiskScore(data.options);
+    const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
+    const pricingRisk = (tailScore + optionsScore + volatilityTermScore) / 3;
+    const valuationScore = data.valuation?.valuation_score ?? 50;
+    const earningsScore = data.earnings?.event_score ?? 50;
     const riskTemperature = clamp(
-      diagnostics.risk_score * 0.34
-        + macroScore * 0.14
-        + relativeRisk * 0.14
-        + levelsRisk * 0.12
-        + tailScore * 0.14
-        + concentrationScore * 0.12
+      diagnostics.risk_score * 0.24
+        + macroScore * 0.1
+        + internalRisk * 0.18
+        + levelsRisk * 0.1
+        + pricingRisk * 0.14
+        + concentrationScore * 0.07
+        + valuationScore * 0.08
+        + earningsScore * 0.05
+        + liquidityRisk * 0.04
     );
 
     const color = colorForScore(riskTemperature);
@@ -216,11 +325,17 @@ export const NDXCommitteeMemoPanel = () => {
         ? `技术位上，最近支撑是 ${support.label} ${formatIndex(support.value)}（${support.distance_label}），最近压力是 ${resistance.label} ${formatIndex(resistance.value)}（${resistance.distance_label}）。`
         : "等待技术位监控完成初始化后，再更新支撑和压力线。",
       data.tail
-        ? `尾部风险约束：95% VaR ${formatSignedPct(data.tail.var95)}，预期尾损 ${formatSignedPct(data.tail.expected_shortfall_95)}，当前回撤 ${formatSignedPct(data.tail.current_drawdown)}。`
-        : "等待尾部风险数据完成初始化后，再更新 VaR 和回撤约束。",
+        ? `定价与尾部约束：95% VaR ${formatSignedPct(data.tail.var95)}，预期尾损 ${formatSignedPct(data.tail.expected_shortfall_95)}，期权定价为 ${data.options?.regime ?? "待确认"}，VIX 曲线为 ${data.volatilityTerm?.regime ?? "待确认"}。`
+        : "等待尾部风险和定价数据完成初始化后，再更新 VaR、期权和波动率曲线约束。",
       data.concentration
         ? `集中度观察：MAG7 代理 Top3 权重 ${data.concentration.top3_weight.toFixed(1)}%，最大权重 ${data.concentration.top1_symbol} ${data.concentration.top1_weight.toFixed(1)}%。`
         : "等待集中度数据完成初始化后，再更新权重股约束。",
+      data.themeRotation && data.breadth
+        ? `内部扩散检查：主题轮动为 ${data.themeRotation.regime}，${data.themeRotation.participation_count}/${data.themeRotation.theme_count} 个主题跑赢 QQQ；${data.breadth.equal_symbol} 20 日参与差 ${formatSignedPct(data.breadth.participation_gap_20d)}。`
+        : "等待主题轮动和等权广度数据完成初始化后，再判断上涨是否扩散。",
+      data.valuation && data.earnings
+        ? `基本面催化：估值状态 ${data.valuation.valuation_label}，加权 Forward PE ${data.valuation.weighted_forward_pe?.toFixed(1) ?? "--"}x；最近财报窗口为 ${data.earnings.nearest_symbol}，距离 ${data.earnings.nearest_days} 天。`
+        : "等待估值和财报日历完成初始化后，再更新基本面催化约束。",
     ];
 
     const signals = [
@@ -237,6 +352,24 @@ export const NDXCommitteeMemoPanel = () => {
         icon: "line-chart",
       },
       {
+        label: "内部扩散",
+        value: data.themeRotation && data.breadth
+          ? `${data.themeRotation.regime} · ${data.breadth.breadth_label}`
+          : "--",
+        detail: data.themeRotation
+          ? `领涨主题 ${data.themeRotation.top_theme}，20 日超额 ${formatSignedPct(data.themeRotation.top_theme_excess_20d)}。`
+          : "等待主题轮动和广度数据完成初始化。",
+        icon: "layers-3",
+      },
+      {
+        label: "流动性确认",
+        value: data.liquidity ? `${data.liquidity.regime} · ${data.liquidity.volume_ratio_20.toFixed(2)}x` : "--",
+        detail: data.liquidity
+          ? `20 日成交平衡 ${formatSignedPct(data.liquidity.flow_balance)}，用于确认价格突破质量。`
+          : "等待成交结构数据完成初始化。",
+        icon: "activity",
+      },
+      {
         label: "相对领导力",
         value: data.relative
           ? `${data.relative.leadership_label} · Beta ${data.relative.primary_beta.toFixed(2)}`
@@ -245,6 +378,26 @@ export const NDXCommitteeMemoPanel = () => {
           ? `相对 SPX 20 日超额 ${formatSignedPct(data.relative.primary_excess_20d)}。`
           : "等待相对强弱数据完成初始化。",
         icon: "bar-chart-3",
+      },
+      {
+        label: "定价压力",
+        value: data.volatilityTerm && data.options
+          ? `${data.volatilityTerm.regime} · ${data.options.regime}`
+          : "--",
+        detail: data.volatilityTerm
+          ? `VIX/3M ${data.volatilityTerm.front_ratio.toFixed(2)}x，VVIX z ${data.volatilityTerm.vvix_z_score.toFixed(2)}。`
+          : "等待波动率期限结构完成初始化。",
+        icon: "waves",
+      },
+      {
+        label: "基本面催化",
+        value: data.valuation && data.earnings
+          ? `${data.valuation.valuation_label} · ${data.earnings.event_label}`
+          : "--",
+        detail: data.earnings
+          ? `${data.earnings.nearest_symbol} ${data.earnings.nearest_days} 天后财报，45 天事件权重 ${data.earnings.event_weight_45d.toFixed(1)}%。`
+          : "等待财报催化数据完成初始化。",
+        icon: "calendar-clock",
       },
     ];
 
@@ -265,7 +418,7 @@ export const NDXCommitteeMemoPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-48 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {Array.from({ length: 3 }).map((_, index) => (
+          {Array.from({ length: 6 }).map((_, index) => (
             <div key={index} className="h-32 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
@@ -303,7 +456,7 @@ export const NDXCommitteeMemoPanel = () => {
 
           <div>
             <p className="text-lg leading-8 font-bold text-[var(--text-primary)] m-0">
-              以当前 NDX 风险温度、宏观压力、相对强弱、技术位、尾部风险和集中度综合判断，组合应以“{memo.posture}”作为主线。
+              以当前 NDX 风险温度、宏观压力、内部扩散、流动性确认、波动定价、估值催化和集中度综合判断，组合应以“{memo.posture}”作为主线。
             </p>
             <p className="text-sm leading-6 text-[var(--text-secondary)] mt-2 mb-0">
               这是规则化投委会摘要，用于把各风险模块压缩成执行清单；它不是交易指令。
