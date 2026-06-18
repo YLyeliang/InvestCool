@@ -20,6 +20,7 @@ import { NDXBreadthParticipationPanel } from "@/components/NDXBreadthParticipati
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
+import { NDXVolPremiumPanel } from "@/components/NDXVolPremiumPanel";
 import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
 import { NDXHedgeOverlayPanel } from "@/components/NDXHedgeOverlayPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
@@ -254,6 +255,13 @@ export default function RiskPage() {
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> 期权隐含定价
         </h3>
         <NDXOptionsPricingPanel />
+      </section>
+
+      <section className="vol-premium-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> NDX 波动风险溢价
+        </h3>
+        <NDXVolPremiumPanel />
       </section>
 
       <section className="volatility-term-section">

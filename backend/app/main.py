@@ -71,6 +71,7 @@ risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
+risk_vol_premium_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
 risk_quality_cache = {"data": None, "last_update": None}
@@ -298,6 +299,15 @@ def rate_sensitivity_regime(score):
     if score >= 36:
         return "可控敏感", "blue"
     return "利率缓冲", "green"
+
+def vol_premium_regime(underpricing_pressure, carry_cost):
+    if underpricing_pressure >= 65:
+        return "波动低估", "red"
+    if carry_cost >= 68:
+        return "保护偏贵", "amber"
+    if underpricing_pressure <= 28 and carry_cost <= 42:
+        return "保护便宜", "green"
+    return "定价均衡", "blue"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -3424,6 +3434,172 @@ def refresh_volatility_term_data():
         logger.error(traceback.format_exc())
 
 
+def refresh_vol_premium_data(allow_dependency_refresh=True):
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_vol_premium_cache
+
+    try:
+        dependencies = [
+            ("options", risk_options_cache, refresh_options_data, 15 * 60),
+            ("volatility_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60),
+        ]
+        light_dependencies = {"options", "volatility_term", "tail"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Vol premium dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 3:
+            return
+
+        options = risk_options_cache.get("data") or {}
+        volatility_term = risk_volatility_term_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        hedge = risk_hedge_overlay_cache.get("data") or {}
+
+        qqq_history = fetch_ohlc_history("QQQ", "1y", min_rows=80, attempts=3)
+        qqq_returns = qqq_history["Close"].pct_change().dropna() * 100
+        if len(qqq_returns) < 60:
+            raise ValueError("Insufficient QQQ history for volatility premium")
+
+        dte = max(1, safe_float(options.get("days_to_expiration"), 7))
+        implied_move = safe_float(options.get("implied_move"), 1.5)
+        annualized_iv = safe_float(options.get("annualized_iv_proxy"), None)
+        if annualized_iv is None:
+            annualized_iv = implied_move / max((dte / 365) ** 0.5, 0.01)
+
+        realized_vol_10d = safe_float(qqq_returns.tail(10).std() * (252 ** 0.5), 0)
+        realized_vol_20d = safe_float(qqq_returns.tail(20).std() * (252 ** 0.5), 0)
+        realized_vol_60d = safe_float(qqq_returns.tail(60).std() * (252 ** 0.5), 0)
+        realized_vol = realized_vol_20d * 0.55 + realized_vol_60d * 0.30 + realized_vol_10d * 0.15
+        realized_move = realized_vol * ((dte / 365) ** 0.5)
+        premium_points = implied_move - realized_move
+        premium_ratio = annualized_iv / realized_vol if realized_vol > 0 else 1
+
+        tail_score = safe_float(tail.get("tail_score"), 45)
+        term_score = safe_float(volatility_term.get("term_score"), 35)
+        front_ratio = safe_float(volatility_term.get("front_ratio"), 0.85)
+        vvix_z = safe_float(volatility_term.get("vvix_z_score"), 0)
+        put_call_oi_ratio = safe_float(options.get("put_call_oi_ratio"), 1)
+        hedge_score = safe_float(hedge.get("hedge_score"), 45)
+
+        underpricing_pressure = round(clamp(
+            max(0, realized_move - implied_move) * 18
+            + max(0, 1 - premium_ratio) * 38
+            + max(0, tail_score - 45) * 0.45
+            + max(0, front_ratio - 0.96) * 58
+            + max(0, vvix_z) * 6
+        ), 1)
+        carry_cost = round(clamp(
+            max(0, implied_move - realized_move) * 16
+            + max(0, premium_ratio - 1) * 34
+            + max(0, put_call_oi_ratio - 1.1) * 18
+            + max(0, hedge_score - 45) * 0.30
+        ), 1)
+        premium_score = round(clamp(underpricing_pressure * 0.58 + carry_cost * 0.28 + term_score * 0.14), 1)
+        regime, color = vol_premium_regime(underpricing_pressure, carry_cost)
+
+        if regime == "波动低估":
+            summary = f"QQQ 期权隐含到期波动低于同期限实现波动代理，市场可能低估 NDX 短线波动，保护相对便宜但风险被低估。"
+        elif regime == "保护偏贵":
+            summary = f"QQQ 期权隐含波动高于历史实现波动，保护成本偏贵，更适合分批保留而不是集中补保护。"
+        elif regime == "保护便宜":
+            summary = "期权保护价格相对历史波动不贵，若组合需要尾部保护，可用更低成本建立基础覆盖。"
+        else:
+            summary = "期权隐含波动与历史实现波动大致匹配，保护成本处在均衡区，需要结合技术位和曲线结构执行。"
+
+        metrics = [
+            {
+                "key": "implied",
+                "label": "隐含到期波动",
+                "value": f"{implied_move:.2f}%",
+                "score": round(clamp(annualized_iv), 1),
+                "color": color,
+                "detail": f"最近到期 QQQ ATM 跨式隐含区间，年化代理 {annualized_iv:.1f}%。",
+            },
+            {
+                "key": "realized",
+                "label": "实现波动代理",
+                "value": f"{realized_move:.2f}%",
+                "score": round(clamp(realized_vol), 1),
+                "color": "blue",
+                "detail": f"按 {dte:.0f} 天期限折算，20日年化 {realized_vol_20d:.1f}%，60日年化 {realized_vol_60d:.1f}%。",
+            },
+            {
+                "key": "premium",
+                "label": "风险溢价",
+                "value": f"{premium_points:+.2f}pt",
+                "score": round(clamp(50 + premium_points * 18), 1),
+                "color": "green" if premium_points < -0.4 else "amber" if premium_points > 0.8 else "blue",
+                "detail": "隐含波动减同期限实现波动。负值表示保护相对便宜，正值表示保护成本偏贵。",
+            },
+            {
+                "key": "term",
+                "label": "曲线压力",
+                "value": f"{front_ratio:.2f}x",
+                "score": round(term_score, 1),
+                "color": volatility_term.get("regime_color", "blue"),
+                "detail": f"VIX/VIX3M {front_ratio:.2f}，VVIX z-score {vvix_z:+.2f}。",
+            },
+        ]
+
+        controls = [
+            f"若 QQQ 跌破隐含下沿 {options.get('implied_range_low', '--')}，说明现货波动超过期权市场短线定价。",
+            f"隐含/实现比 {premium_ratio:.2f}x；低于 0.9x 时优先检查保护是否被低估，高于 1.25x 时避免集中补保险。",
+            f"尾部风险分 {tail_score:.1f}，若同时伴随 VIX 曲线趋平，应优先保留保护而不是卖出波动。",
+            "波动溢价用于保护成本和风险预算校准，不等同于期权交易建议。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": options.get("proxy_symbol", "QQQ"),
+            "proxy_price": options.get("proxy_price"),
+            "expiration": options.get("expiration"),
+            "days_to_expiration": round(dte),
+            "premium_score": premium_score,
+            "premium_regime": regime,
+            "premium_color": color,
+            "summary": summary,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "implied_move": round(implied_move, 2),
+            "annualized_iv": round(annualized_iv, 1),
+            "realized_move": round(realized_move, 2),
+            "realized_vol_10d": round(realized_vol_10d, 1),
+            "realized_vol_20d": round(realized_vol_20d, 1),
+            "realized_vol_60d": round(realized_vol_60d, 1),
+            "premium_points": round(premium_points, 2),
+            "premium_ratio": round(premium_ratio, 2),
+            "underpricing_pressure": underpricing_pressure,
+            "carry_cost": carry_cost,
+            "tail_score": round(tail_score, 1),
+            "term_score": round(term_score, 1),
+            "front_ratio": round(front_ratio, 2),
+            "vvix_z_score": round(vvix_z, 2),
+            "put_call_oi_ratio": round(put_call_oi_ratio, 2),
+            "implied_range_low": options.get("implied_range_low"),
+            "implied_range_high": options.get("implied_range_high"),
+            "metrics": metrics,
+            "controls": controls,
+            "methodology": "使用 QQQ 最近到期期权隐含到期波动与 QQQ 10/20/60 日实现波动折算值比较，并结合 NDX 尾部风险、VIX 期限结构、VVIX 和 Put/Call OI 判断保护成本是否偏贵或波动是否被低估。该模块是风险预算和保护成本参考，不构成期权交易建议。",
+        }
+        risk_vol_premium_cache["data"] = data
+        risk_vol_premium_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX volatility risk premium updated: {regime}, score {premium_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX volatility risk premium refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_liquidity_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_liquidity_cache
@@ -6051,6 +6227,7 @@ def background_worker():
     last_dispersion = 0
     last_options = 0
     last_volatility_term = 0
+    last_vol_premium = 0
     last_liquidity = 0
     last_valuation = 0
     last_quality = 0
@@ -6130,6 +6307,11 @@ def background_worker():
             if time.time() - last_volatility_term > 1800:
                 refresh_volatility_term_data()
                 last_volatility_term = time.time()
+
+            # QQQ volatility risk premium every 30 minutes
+            if time.time() - last_vol_premium > 1800:
+                refresh_vol_premium_data()
+                last_vol_premium = time.time()
 
             # QQQ liquidity and volume confirmation every 30 minutes
             if time.time() - last_liquidity > 1800:
@@ -6436,6 +6618,14 @@ def get_risk_volatility_term():
         refresh_volatility_term_data()
 
     data = risk_volatility_term_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/vol-premium', methods=['GET'])
+def get_risk_vol_premium():
+    if not cache_is_fresh(risk_vol_premium_cache, 15 * 60) and should_refresh_empty_cache(risk_vol_premium_cache, 60):
+        refresh_vol_premium_data(allow_dependency_refresh="light")
+
+    data = risk_vol_premium_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/liquidity', methods=['GET'])

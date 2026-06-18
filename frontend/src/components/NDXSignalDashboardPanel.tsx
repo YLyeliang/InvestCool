@@ -147,6 +147,15 @@ interface OptionsPayload {
   expiration: string;
 }
 
+interface VolPremiumPayload {
+  premium_score: number;
+  premium_regime: string;
+  implied_move: number;
+  realized_move: number;
+  premium_points: number;
+  premium_ratio: number;
+}
+
 interface VolatilityTermPayload {
   regime: string;
   term_score: number;
@@ -200,6 +209,7 @@ interface DashboardData {
   quality: QualityPayload | null;
   earnings: EarningsPayload | null;
   options: OptionsPayload | null;
+  volPremium: VolPremiumPayload | null;
   volatilityTerm: VolatilityTermPayload | null;
   hedgeOverlay: HedgeOverlayPayload | null;
   recoveryPath: RecoveryPathPayload | null;
@@ -334,6 +344,7 @@ export const NDXSignalDashboardPanel = () => {
           quality,
           earnings,
           options,
+          volPremium,
           volatilityTerm,
           hedgeOverlay,
           recoveryPath,
@@ -358,6 +369,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<QualityPayload>("/api/risk/quality"),
           fetchJson<EarningsPayload>("/api/risk/earnings"),
           fetchJson<OptionsPayload>("/api/risk/options"),
+          fetchJson<VolPremiumPayload>("/api/risk/vol-premium"),
           fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
           fetchJson<HedgeOverlayPayload>("/api/risk/hedge-overlay"),
           fetchJson<RecoveryPathPayload>("/api/risk/recovery-path"),
@@ -365,7 +377,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volPremium, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -391,6 +403,7 @@ export const NDXSignalDashboardPanel = () => {
     const alertScore = data.alerts?.alert_score ?? 50;
     const contributionScore = data.contribution?.risk_contribution_score ?? 50;
     const rateSensitivityScore = data.rateSensitivity?.rate_sensitivity_score ?? 50;
+    const volPremiumScore = data.volPremium?.premium_score ?? 50;
     const supportiveScores = [
       data.breadth?.breadth_score ?? 50,
       data.themeRotation?.leadership_score ?? 50,
@@ -401,7 +414,7 @@ export const NDXSignalDashboardPanel = () => {
       data.capacity?.capacity_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
+    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, volPremiumScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -515,6 +528,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "badge-dollar-sign",
       },
       {
+        label: "波动溢价",
+        value: data.volPremium ? data.volPremium.premium_regime : "--",
+        detail: data.volPremium ? `隐含 ${data.volPremium.implied_move.toFixed(2)}% · 实现 ${data.volPremium.realized_move.toFixed(2)}% · 溢价 ${formatSignedPoint(data.volPremium.premium_points)}` : "等待波动溢价",
+        color: data.volPremium ? scoreColor(data.volPremium.premium_score, true) : "blue",
+        icon: "activity",
+      },
+      {
         label: "波动曲线",
         value: data.volatilityTerm ? data.volatilityTerm.regime : "--",
         detail: data.volatilityTerm ? `VIX/3M ${data.volatilityTerm.front_ratio.toFixed(2)}x · VVIX z ${data.volatilityTerm.vvix_z_score.toFixed(2)}` : "等待期限结构",
@@ -584,7 +604,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 22 }).map((_, index) => (
+          {Array.from({ length: 23 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
