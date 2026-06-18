@@ -64,6 +64,7 @@ risk_scenarios_cache = {"data": None, "last_update": None}
 risk_budget_cache = {"data": None, "last_update": None}
 risk_concentration_cache = {"data": None, "last_update": None}
 risk_factors_cache = {"data": None, "last_update": None}
+risk_levels_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -299,6 +300,26 @@ def correlation_label(value):
     if absolute >= 0.15:
         return "弱相关"
     return "低相关"
+
+def technical_zone_label(score):
+    if score >= 75:
+        return "突破延伸"
+    if score >= 55:
+        return "高位震荡"
+    if score >= 35:
+        return "均衡区间"
+    if score >= 20:
+        return "支撑测试"
+    return "破位风险"
+
+def technical_zone_color(score):
+    if score >= 75:
+        return "green"
+    if score >= 55:
+        return "blue"
+    if score >= 35:
+        return "amber"
+    return "red"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -588,6 +609,25 @@ def fetch_close_history(symbols, period="6mo"):
     raise ValueError(f"No usable history for {symbols}: {last_error}")
 
 
+def fetch_ohlc_history(symbol, period="1y", min_rows=80, attempts=3):
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            history = yf.Ticker(symbol).history(period=period)
+            if history is not None and not history.empty and "Close" in history.columns:
+                history = history.dropna(subset=["Close"]).copy()
+                history.index = pd.to_datetime(history.index).tz_localize(None).normalize()
+                if len(history) >= min_rows:
+                    return history
+        except Exception as e:
+            last_error = e
+            logger.error(f"OHLC history fetch error for {symbol} attempt {attempt + 1}: {e}")
+        if attempt < attempts - 1:
+            time.sleep(1)
+
+    raise ValueError(f"No usable OHLC history for {symbol}: {last_error}")
+
+
 def factor_metric(key, label, symbols, change_mode, higher_is_risk, ndx_returns):
     symbol, closes = fetch_close_history(symbols)
 
@@ -714,6 +754,143 @@ def refresh_factor_data():
         logger.info(f"NDX factor pressure updated: {aggregate_score:.1f}")
     except Exception as e:
         logger.error(f"NDX factor pressure refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def build_level(label, value, level_type, latest):
+    distance = pct_change(value, latest)
+    return {
+        "label": label,
+        "value": round(value, 2),
+        "type": level_type,
+        "distance": round(distance, 2),
+        "distance_label": f"{distance:+.2f}%",
+    }
+
+
+def refresh_technical_levels():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_levels_cache
+
+    try:
+        history = fetch_ohlc_history("^NDX", "1y", min_rows=80, attempts=3)
+        closes = history["Close"]
+        highs = history["High"] if "High" in history.columns else closes
+        lows = history["Low"] if "Low" in history.columns else closes
+
+        if len(closes) < 80:
+            raise ValueError("Insufficient NDX history for technical levels")
+
+        latest = float(closes.iloc[-1])
+        previous_close = float(closes.iloc[-2]) if len(closes) >= 2 else latest
+        high_20 = float(highs.tail(20).max())
+        low_20 = float(lows.tail(20).min())
+        high_60 = float(highs.tail(60).max())
+        low_60 = float(lows.tail(60).min())
+        high_52w = float(highs.max())
+        low_52w = float(lows.min())
+
+        ma_windows = [20, 50, 100, 200]
+        moving_averages = []
+        for window in ma_windows:
+            if len(closes) >= window:
+                value = float(closes.rolling(window).mean().iloc[-1])
+                moving_averages.append({
+                    "label": f"{window}日均线",
+                    "window": window,
+                    "value": round(value, 2),
+                    "distance": round(pct_change(latest, value), 2),
+                    "distance_label": f"{pct_change(latest, value):+.2f}%",
+                    "state": "上方" if latest >= value else "下方",
+                })
+
+        true_ranges = pd.concat([
+            highs - lows,
+            (highs - closes.shift()).abs(),
+            (lows - closes.shift()).abs(),
+        ], axis=1).max(axis=1)
+        atr14 = float(true_ranges.tail(14).mean())
+        atr_pct = pct_change(latest + atr14, latest)
+
+        candidates = [
+            build_level("20日低点", low_20, "support", latest),
+            build_level("60日低点", low_60, "support", latest),
+            build_level("52周低点", low_52w, "support", latest),
+            build_level("20日高点", high_20, "resistance", latest),
+            build_level("60日高点", high_60, "resistance", latest),
+            build_level("52周高点", high_52w, "resistance", latest),
+        ]
+        for average in moving_averages:
+            candidates.append(build_level(average["label"], average["value"], "support" if average["value"] <= latest else "resistance", latest))
+
+        support_levels = sorted(
+            [level for level in candidates if level["value"] <= latest],
+            key=lambda level: abs(level["distance"]),
+        )[:4]
+        resistance_levels = sorted(
+            [level for level in candidates if level["value"] >= latest],
+            key=lambda level: abs(level["distance"]),
+        )[:4]
+
+        ma20 = next((item for item in moving_averages if item["window"] == 20), None)
+        ma50 = next((item for item in moving_averages if item["window"] == 50), None)
+        ma200 = next((item for item in moving_averages if item["window"] == 200), None)
+        ma20_value = safe_float(ma20.get("value") if ma20 else None, latest)
+        ma50_value = safe_float(ma50.get("value") if ma50 else None, latest)
+        ma200_value = safe_float(ma200.get("value") if ma200 else None, latest)
+
+        channel_position = pct_change(latest, low_60) / max(pct_change(high_60, low_60), 0.01) * 100
+        channel_position = clamp(channel_position)
+        extension = pct_change(latest, ma20_value)
+
+        if latest > high_20 and extension > atr_pct:
+            zone_score = 82
+            summary = "NDX 处在短线突破延伸区，新增风险预算需要等待回踩或波动降温确认。"
+        elif latest >= ma20_value and latest >= ma50_value:
+            zone_score = 64
+            summary = "NDX 位于主要短中期均线上方，趋势仍有支撑，但需要观察是否过度远离 20 日均线。"
+        elif latest >= ma50_value:
+            zone_score = 48
+            summary = "NDX 处在均衡震荡区，50 日均线是短线风险预算的核心观察位。"
+        elif latest >= ma200_value:
+            zone_score = 28
+            summary = "NDX 已跌破短中期均线但仍在 200 日线上方，适合降低追涨并观察支撑修复。"
+        else:
+            zone_score = 12
+            summary = "NDX 跌破 200 日均线，技术结构进入破位风险区，需要优先控制回撤。"
+
+        triggers = [
+            f"向上突破 {high_20:,.0f} 且收盘站稳，可视为短线动能延续确认。",
+            f"跌破 {ma50_value:,.0f} 的 50 日均线，风险预算应向下沿收缩。",
+            f"单日波动超过 1 ATR（约 {atr14:,.0f} 点 / {atr_pct:.2f}%）时，避免用盘中情绪追单。",
+        ]
+        if ma200:
+            triggers.append(f"若跌破 {ma200_value:,.0f} 的 200 日均线，应把趋势破位情景置为主场景。")
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": history.index[-1].date().isoformat(),
+            "index": round(latest, 2),
+            "daily_change": round(pct_change(latest, previous_close), 2),
+            "zone_score": round(zone_score, 1),
+            "zone_label": technical_zone_label(zone_score),
+            "zone_color": technical_zone_color(zone_score),
+            "summary": summary,
+            "atr14": round(atr14, 2),
+            "atr_pct": round(atr_pct, 2),
+            "channel_position": round(channel_position, 1),
+            "channel_label": f"{channel_position:.0f}%",
+            "support_levels": support_levels,
+            "resistance_levels": resistance_levels,
+            "moving_averages": moving_averages,
+            "triggers": triggers,
+            "methodology": "基于 NDX 最近 1 年日线计算均线、20/60 日通道、52 周高低点和 14 日 ATR；技术位用于风险触发监控，不构成交易指令。",
+        }
+        risk_levels_cache["data"] = data
+        risk_levels_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX technical levels updated: {technical_zone_label(zone_score)}")
+    except Exception as e:
+        logger.error(f"NDX technical levels refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -1281,6 +1458,7 @@ def background_worker():
     last_risk_budget = 0
     last_concentration = 0
     last_factors = 0
+    last_levels = 0
     while True:
         try:
             update_market_index()
@@ -1297,6 +1475,11 @@ def background_worker():
             if time.time() - last_factors > 1800:
                 refresh_factor_data()
                 last_factors = time.time()
+
+            # Technical levels every 30 minutes
+            if time.time() - last_levels > 1800:
+                refresh_technical_levels()
+                last_levels = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1394,6 +1577,14 @@ def get_risk_factors():
         refresh_factor_data()
 
     data = risk_factors_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/levels', methods=['GET'])
+def get_risk_levels():
+    if not cache_is_fresh(risk_levels_cache, 15 * 60) and should_refresh_empty_cache(risk_levels_cache, 60):
+        refresh_technical_levels()
+
+    data = risk_levels_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
