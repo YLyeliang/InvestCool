@@ -82,6 +82,7 @@ risk_hedge_overlay_cache = {"data": None, "last_update": None}
 risk_condition_matrix_cache = {"data": None, "last_update": None}
 risk_funding_conditions_cache = {"data": None, "last_update": None}
 risk_regime_compass_cache = {"data": None, "last_update": None}
+risk_alerts_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -285,6 +286,42 @@ def constructive_state(score):
     if score >= 35:
         return "偏弱"
     return "拖累"
+
+def alert_level(score):
+    if score >= 78:
+        return "红色预警", "red"
+    if score >= 58:
+        return "重点观察", "amber"
+    if score >= 38:
+        return "常规监控", "blue"
+    return "低扰动", "green"
+
+def alert_severity(score):
+    if score >= 78:
+        return "critical"
+    if score >= 58:
+        return "watch"
+    if score >= 38:
+        return "monitor"
+    return "confirm"
+
+def build_alert(key, category, title, score, value, trigger, action, evidence, color=None):
+    normalized_score = round(clamp(score), 1)
+    severity = alert_severity(normalized_score)
+    if color is None:
+        color = "red" if severity == "critical" else "amber" if severity == "watch" else "blue" if severity == "monitor" else "green"
+    return {
+        "key": key,
+        "category": category,
+        "title": title,
+        "severity": severity,
+        "score": normalized_score,
+        "color": color,
+        "value": value,
+        "trigger": trigger,
+        "action": action,
+        "evidence": evidence,
+    }
 
 def round_optional(value, digits=2):
     if value is None:
@@ -4367,6 +4404,347 @@ def refresh_regime_compass_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_alerts_data(allow_dependency_refresh=True):
+    global risk_alerts_cache
+
+    try:
+        dependency_refreshers = [
+            ("diagnostics", risk_diagnostics_cache, refresh_risk_diagnostics, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+            ("levels", risk_levels_cache, refresh_technical_levels, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            ("funding", risk_funding_conditions_cache, refresh_funding_conditions_data, 15 * 60),
+            ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60),
+            ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60),
+            ("options", risk_options_cache, refresh_options_data, 15 * 60),
+            ("volatility_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60),
+            ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60),
+            ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60),
+            ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60),
+            ("concentration", risk_concentration_cache, refresh_concentration_data, 15 * 60),
+        ]
+        light_dependencies = {"diagnostics", "regime", "levels", "tail", "funding", "breadth", "liquidity"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependency_refreshers:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key == "regime":
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Risk alerts dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 4:
+            return
+
+        diagnostics = risk_diagnostics_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+        levels = risk_levels_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        funding = risk_funding_conditions_cache.get("data") or {}
+        breadth = risk_breadth_cache.get("data") or {}
+        liquidity = risk_liquidity_cache.get("data") or {}
+        options = risk_options_cache.get("data") or {}
+        volatility_term = risk_volatility_term_cache.get("data") or {}
+        valuation = risk_valuation_cache.get("data") or {}
+        quality = risk_quality_cache.get("data") or {}
+        earnings = risk_earnings_cache.get("data") or {}
+        concentration = risk_concentration_cache.get("data") or {}
+
+        alerts = []
+        risk_score = safe_float(diagnostics.get("risk_score"), 50)
+        if risk_score >= 55:
+            alerts.append(build_alert(
+                "diagnostics_risk",
+                "综合风险",
+                "综合风险分抬升",
+                risk_score,
+                f"{risk_score:.1f}/100",
+                "综合风险分高于 55。",
+                "把新增风险预算放在回踩后执行，并优先检查尾部风险和技术位。",
+                diagnostics.get("summary", "风险诊断提示压力抬升。"),
+            ))
+
+        regime_pressure = safe_float(regime.get("pressure_score"), 50)
+        regime_support = safe_float(regime.get("support_score"), 50)
+        if regime_pressure >= 58 or regime.get("regime") in ("风险收缩", "高位脆弱"):
+            alerts.append(build_alert(
+                "regime_pressure",
+                "市场状态",
+                f"市场状态：{regime.get('regime', '压力上升')}",
+                max(regime_pressure, 60),
+                f"压力 {regime_pressure:.1f} / 支撑 {regime_support:.1f}",
+                "罗盘压力分高于 58，或状态进入高位脆弱/风险收缩。",
+                "仓位靠近风险预算中枢以下，等待压力轴回落或支撑轴修复。",
+                regime.get("summary", "市场状态罗盘提示压力和支撑不匹配。"),
+            ))
+
+        index_value = safe_float(levels.get("index"), 0)
+        nearest_support = (levels.get("support_levels") or [{}])[0]
+        nearest_resistance = (levels.get("resistance_levels") or [{}])[0]
+        support_distance = abs(safe_float(nearest_support.get("distance"), 99))
+        resistance_distance = abs(safe_float(nearest_resistance.get("distance"), 99))
+        zone_score = safe_float(levels.get("zone_score"), 50)
+        if zone_score <= 35:
+            alerts.append(build_alert(
+                "technical_breakdown",
+                "技术位",
+                "技术结构转弱",
+                82 - zone_score * 0.5,
+                levels.get("zone_label", "--"),
+                "技术区间分低于 35。",
+                "把 50/200 日均线和最近支撑作为硬触发线，降低追涨暴露。",
+                levels.get("summary", "技术位监控提示结构转弱。"),
+            ))
+        elif support_distance <= 1.25:
+            alerts.append(build_alert(
+                "near_support",
+                "技术位",
+                "接近关键支撑",
+                62 + max(0, 1.25 - support_distance) * 10,
+                f"{nearest_support.get('label', '支撑')} {nearest_support.get('value', 0):,.0f}",
+                "NDX 距最近支撑不足 1.25%。",
+                "若收盘跌破该支撑，应把风险预算向下沿收缩。",
+                f"NDX {index_value:,.0f}，最近支撑距离 {nearest_support.get('distance_label', '--')}。",
+            ))
+        elif zone_score >= 78:
+            alerts.append(build_alert(
+                "technical_extension",
+                "技术位",
+                "短线突破延伸",
+                zone_score,
+                levels.get("zone_label", "--"),
+                "技术区间分高于 78。",
+                "新增仓位等待回踩或成交确认，避免在远离 20 日均线时追高。",
+                levels.get("summary", "技术位监控提示短线延伸。"),
+            ))
+        elif resistance_distance <= 1.0:
+            alerts.append(build_alert(
+                "near_resistance",
+                "技术位",
+                "接近上方压力",
+                45,
+                f"{nearest_resistance.get('label', '压力')} {nearest_resistance.get('value', 0):,.0f}",
+                "NDX 距最近压力不足 1%。",
+                "若突破失败且成交转弱，降低短线加仓节奏。",
+                f"最近压力距离 {nearest_resistance.get('distance_label', '--')}。",
+                "blue",
+            ))
+
+        tail_score = safe_float(tail.get("tail_score"), 50)
+        if tail_score >= 55:
+            alerts.append(build_alert(
+                "tail_risk",
+                "尾部风险",
+                "尾部损失分布转紧",
+                tail_score,
+                f"VaR {tail.get('var95', '--')}% / ES {tail.get('expected_shortfall_95', '--')}%",
+                "尾部风险分高于 55。",
+                "用 VaR/ES 倒推最大单日损失预算，并检查现金缓冲。",
+                tail.get("summary", "尾部风险模块提示历史损失分布偏紧。"),
+            ))
+
+        funding_score = safe_float(funding.get("funding_score"), 50)
+        if funding_score >= 55:
+            alerts.append(build_alert(
+                "funding_pressure",
+                "融资条件",
+                f"融资条件：{funding.get('regime', '偏紧')}",
+                funding_score,
+                f"HYG/LQD {funding.get('credit_ratio_20d', '--')}%",
+                "融资压力分高于 55。",
+                "若信用和 VIX 同时走弱，把上涨视为脆弱反弹，降低追高。",
+                funding.get("summary", "融资条件提示信用、久期、美元或波动融资约束。"),
+            ))
+
+        breadth_score = safe_float(breadth.get("breadth_score"), 50)
+        participation_gap = safe_float(breadth.get("participation_gap_20d"), 0)
+        if breadth_score < 45 or participation_gap < -3:
+            alerts.append(build_alert(
+                "breadth_weakness",
+                "内部结构",
+                "等权参与不足",
+                58 + max(0, 45 - breadth_score) * 0.7 + max(0, -participation_gap - 3) * 2,
+                f"{breadth.get('equal_symbol', '等权')} 差 {participation_gap:+.2f}%",
+                "广度分低于 45，或等权相对 QQQ 20 日落后超过 3%。",
+                "不要把窄幅龙头上涨直接外推为指数健康扩散。",
+                breadth.get("summary", "市场广度提示内部参与不足。"),
+            ))
+
+        flow_score = safe_float(liquidity.get("flow_score"), 50)
+        distribution_days = safe_float(liquidity.get("distribution_days"), 0)
+        volume_ratio = safe_float(liquidity.get("volume_ratio_20"), 1)
+        if flow_score < 40 or distribution_days >= 5:
+            alerts.append(build_alert(
+                "liquidity_distribution",
+                "流动性",
+                f"成交确认：{liquidity.get('regime', '偏弱')}",
+                max(58, 70 - flow_score + distribution_days * 3),
+                f"派发 {distribution_days:.0f}/20 · 量能 {volume_ratio:.2f}x",
+                "流动性分低于 40，或近 20 日放量派发不少于 5 天。",
+                "上行时要求成交量和 OBV 共同确认，否则降低突破可信度。",
+                liquidity.get("summary", "成交结构提示承接质量需要观察。"),
+            ))
+
+        implied_move = safe_float(options.get("implied_move"), None)
+        put_call_oi_ratio = safe_float(options.get("put_call_oi_ratio"), None)
+        if implied_move is not None and (implied_move >= 2.8 or (put_call_oi_ratio is not None and put_call_oi_ratio >= 1.2)):
+            options_score = clamp(35 + implied_move * 10 + max(0, (put_call_oi_ratio or 0) - 1) * 30)
+            alerts.append(build_alert(
+                "options_pressure",
+                "期权定价",
+                f"期权定价：{options.get('regime', '波动抬升')}",
+                options_score,
+                f"隐含 {implied_move:.2f}% · PCR {put_call_oi_ratio:.2f}" if put_call_oi_ratio is not None else f"隐含 {implied_move:.2f}%",
+                "隐含到期波动高于 2.8%，或 Put/Call OI 高于 1.20。",
+                "若现货跌破隐含下沿，短线风险预算应立即收缩。",
+                options.get("summary", "期权市场定价提示保护需求或短线波动区间抬升。"),
+            ))
+
+        front_ratio = safe_float(volatility_term.get("front_ratio"), None)
+        vvix_z = safe_float(volatility_term.get("vvix_z_score"), None)
+        if front_ratio is not None and (front_ratio >= 0.96 or (vvix_z is not None and vvix_z >= 1.0)):
+            term_score = safe_float(volatility_term.get("term_score"), 55)
+            alerts.append(build_alert(
+                "vol_term_flattening",
+                "波动曲线",
+                f"波动曲线：{volatility_term.get('regime', '趋平')}",
+                max(term_score, 58),
+                f"VIX/3M {front_ratio:.2f}x · VVIX z {vvix_z:.2f}" if vvix_z is not None else f"VIX/3M {front_ratio:.2f}x",
+                "VIX/VIX3M 高于 0.96，或 VVIX z-score 高于 1.0。",
+                "避免在波动曲线趋平时增加杠杆；已有保护按计划分批调整。",
+                volatility_term.get("summary", "波动率期限结构提示保护成本或波动交易需求上升。"),
+            ))
+
+        valuation_score = safe_float(valuation.get("valuation_score"), None)
+        quality_score = safe_float(quality.get("quality_score"), None)
+        if valuation_score is not None and valuation_score >= 58:
+            alerts.append(build_alert(
+                "valuation_pressure",
+                "基本面",
+                f"估值压力：{valuation.get('valuation_label', '偏高')}",
+                valuation_score,
+                f"FPE {valuation.get('weighted_forward_pe', '--')}x",
+                "MAG7 估值压力分高于 58。",
+                "只有在盈利质量和财报预期同步改善时，才允许估值扩张假设上修。",
+                valuation.get("summary", "估值模块提示权重股溢价需要更强盈利兑现。"),
+            ))
+
+        if quality_score is not None and quality_score < 45:
+            alerts.append(build_alert(
+                "quality_deterioration",
+                "基本面",
+                "盈利质量转弱",
+                62 + max(0, 45 - quality_score),
+                f"质量 {quality_score:.1f}/100",
+                "MAG7 盈利质量分低于 45。",
+                "若估值仍偏高，应降低多重估值扩张和集中暴露假设。",
+                quality.get("summary", "盈利质量模块提示现金流或利润率支撑不足。"),
+            ))
+
+        event_score = safe_float(earnings.get("event_score"), None)
+        if event_score is not None and event_score >= 55:
+            alerts.append(build_alert(
+                "earnings_window",
+                "事件风险",
+                f"财报窗口：{earnings.get('event_label', '临近')}",
+                event_score,
+                f"{earnings.get('nearest_symbol', '--')} {earnings.get('nearest_days', '--')}天",
+                "MAG7 财报事件分高于 55。",
+                "财报前后预留跳空风险预算，避免把方向性仓位集中在单一权重股。",
+                earnings.get("summary", "财报催化模块提示事件窗口或预期分歧抬升。"),
+            ))
+
+        top3_weight = safe_float(concentration.get("top3_weight"), None)
+        if top3_weight is not None and top3_weight >= 65:
+            alerts.append(build_alert(
+                "concentration_risk",
+                "集中度",
+                "权重集中度偏高",
+                58 + (top3_weight - 65) * 1.2,
+                f"Top3 {top3_weight:.1f}%",
+                "MAG7 代理前三大权重超过 65%。",
+                "单一龙头回撤会放大指数波动，仓位和对冲不能只看等权信号。",
+                concentration.get("flags", ["权重股集中度提示单一龙头风险。"])[0],
+            ))
+
+        if not alerts:
+            alerts.append(build_alert(
+                "baseline_monitor",
+                "状态确认",
+                "暂无高优先级风险预警",
+                28,
+                "低扰动",
+                "主要监控项未触发红色或重点观察阈值。",
+                "维持既定风险预算，继续观察技术支撑、融资条件和广度扩散。",
+                "当前预警层未发现需要立即调整风险预算的单一压力源。",
+                "green",
+            ))
+
+        confirmations = []
+        if regime_support >= 58 and regime_pressure < 55:
+            confirmations.append("市场状态支撑分高于压力分，说明当前不是单边防守环境。")
+        if breadth_score >= 60:
+            confirmations.append("等权参与处在可用区，指数上涨质量有一定扩散支撑。")
+        if quality_score is not None and quality_score >= 58:
+            confirmations.append("MAG7 盈利质量稳健，估值溢价有部分基本面支撑。")
+        if flow_score >= 55:
+            confirmations.append("QQQ 成交确认偏正面，短线承接质量尚可。")
+        if not confirmations:
+            confirmations.append("确认项不足，短线应优先等待技术位、广度或流动性改善。")
+
+        alerts = sorted(alerts, key=lambda item: item["score"], reverse=True)
+        critical_count = len([item for item in alerts if item["severity"] == "critical"])
+        watch_count = len([item for item in alerts if item["severity"] == "watch"])
+        monitor_count = len([item for item in alerts if item["severity"] == "monitor"])
+        alert_score = round(clamp(max(item["score"] for item in alerts) * 0.55 + (critical_count * 12 + watch_count * 6 + monitor_count * 2)), 1)
+        level, color = alert_level(alert_score)
+
+        if critical_count:
+            summary = f"当前有 {critical_count} 条红色预警，最高风险来自 {alerts[0]['title']}，应优先处理仓位上限和保护覆盖。"
+        elif watch_count:
+            summary = f"当前有 {watch_count} 条重点观察项，最高优先级是 {alerts[0]['title']}，适合控制追高并等待确认。"
+        elif monitor_count:
+            summary = f"当前以常规监控为主，{alerts[0]['title']} 是最靠前的观察项。"
+        else:
+            summary = "当前没有高优先级预警，维持既定风险预算并继续观察核心触发线。"
+
+        playbook = [
+            "先处理红色预警：降低新增风险预算、确认止损位和对冲覆盖。",
+            "重点观察项需要和收盘价确认配合，避免只因盘中噪音调整组合。",
+            "若预警减少且确认项增加，再把仓位从防守区逐步恢复到中性预算。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "alert_score": alert_score,
+            "alert_level": level,
+            "alert_color": color,
+            "active_count": len(alerts),
+            "critical_count": critical_count,
+            "watch_count": watch_count,
+            "monitor_count": monitor_count,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "summary": summary,
+            "alerts": alerts[:10],
+            "confirmations": confirmations[:5],
+            "playbook": playbook,
+            "methodology": "把现有 NDX 技术位、风险诊断、市场状态罗盘、尾部风险、融资条件、广度、流动性、期权定价、波动率曲线、MAG7 估值/盈利质量/财报窗口和集中度转换成统一预警清单。该模块用于风险监控和执行优先级排序，不构成买卖指令。",
+        }
+        risk_alerts_cache["data"] = data
+        risk_alerts_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX risk alerts updated: {level}, score {alert_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX risk alerts refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -4499,6 +4877,7 @@ def background_worker():
     last_breadth = 0
     last_hedge_overlay = 0
     last_regime_compass = 0
+    last_alerts = 0
     while True:
         try:
             update_market_index()
@@ -4621,6 +5000,11 @@ def background_worker():
                 refresh_regime_compass_data()
                 last_regime_compass = time.time()
 
+            # NDX risk alert deck every 30 minutes
+            if time.time() - last_alerts > 1800:
+                refresh_alerts_data()
+                last_alerts = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -4737,6 +5121,14 @@ def get_risk_regime_compass():
         refresh_regime_compass_data(allow_dependency_refresh="light")
 
     data = risk_regime_compass_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/alerts', methods=['GET'])
+def get_risk_alerts():
+    if not cache_is_fresh(risk_alerts_cache, 15 * 60) and should_refresh_empty_cache(risk_alerts_cache, 60):
+        refresh_alerts_data(allow_dependency_refresh="light")
+
+    data = risk_alerts_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
