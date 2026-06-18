@@ -65,6 +65,7 @@ risk_budget_cache = {"data": None, "last_update": None}
 risk_concentration_cache = {"data": None, "last_update": None}
 risk_factors_cache = {"data": None, "last_update": None}
 risk_levels_cache = {"data": None, "last_update": None}
+risk_tail_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -320,6 +321,24 @@ def technical_zone_color(score):
     if score >= 35:
         return "amber"
     return "red"
+
+def tail_risk_label(score):
+    if score >= 75:
+        return "尾部压力高"
+    if score >= 55:
+        return "尾部压力偏高"
+    if score >= 35:
+        return "常态波动"
+    return "尾部温和"
+
+def tail_risk_color(score):
+    if score >= 75:
+        return "red"
+    if score >= 55:
+        return "amber"
+    if score >= 35:
+        return "blue"
+    return "green"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -894,6 +913,127 @@ def refresh_technical_levels():
         logger.error(traceback.format_exc())
 
 
+def refresh_tail_risk_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_tail_cache
+
+    try:
+        history = fetch_ohlc_history("^NDX", "2y", min_rows=250, attempts=3)
+        closes = history["Close"]
+        returns = closes.pct_change().dropna() * 100
+        if len(returns) < 180:
+            raise ValueError("Insufficient NDX return history for tail risk")
+
+        latest = float(closes.iloc[-1])
+        previous_close = float(closes.iloc[-2]) if len(closes) >= 2 else latest
+        rolling_peak = closes.cummax()
+        drawdowns = (closes / rolling_peak - 1) * 100
+        current_drawdown = float(drawdowns.iloc[-1])
+        max_drawdown_1y = float(drawdowns.tail(252).min())
+        max_drawdown_2y = float(drawdowns.min())
+
+        var95 = float(returns.quantile(0.05))
+        var99 = float(returns.quantile(0.01))
+        expected_shortfall_95 = float(returns[returns <= var95].mean())
+        vol20 = float(returns.tail(20).std() * (252 ** 0.5))
+        vol60 = float(returns.tail(60).std() * (252 ** 0.5))
+        downside_vol60 = float(returns.tail(60)[returns.tail(60) < 0].std() * (252 ** 0.5))
+        positive_ratio = float((returns.tail(60) > 0).mean() * 100)
+
+        current_streak = 0
+        streak_direction = "flat"
+        for value in reversed(returns.tail(20).tolist()):
+            if value < 0:
+                if streak_direction in ("flat", "down"):
+                    streak_direction = "down"
+                    current_streak += 1
+                else:
+                    break
+            elif value > 0:
+                if streak_direction in ("flat", "up"):
+                    streak_direction = "up"
+                    current_streak += 1
+                else:
+                    break
+            else:
+                break
+
+        worst_days = []
+        for date, value in returns.sort_values().head(5).items():
+            worst_days.append({
+                "date": date.date().isoformat(),
+                "return": round(float(value), 2),
+            })
+
+        monthly_returns = (closes.resample("ME").last().pct_change().dropna() * 100).tail(6)
+        recent_months = [
+            {
+                "month": date.strftime("%Y-%m"),
+                "return": round(float(value), 2),
+            }
+            for date, value in monthly_returns.items()
+        ]
+
+        tail_score = clamp(
+            abs(expected_shortfall_95) * 7
+            + abs(current_drawdown) * 2.2
+            + max(0, vol60 - 18) * 1.3
+            + max(0, 45 - positive_ratio) * 0.8
+        )
+
+        if tail_score >= 65:
+            summary = "NDX 尾部风险偏高，仓位管理应优先考虑单日极端波动和连续回撤承受力。"
+        elif tail_score >= 35:
+            summary = "NDX 处在常态波动区，仍需用 VaR 和预期尾部损失约束短线加仓节奏。"
+        else:
+            summary = "NDX 尾部风险温和，历史损失分布暂未显示明显压力扩散。"
+
+        if streak_direction == "down":
+            streak_label = f"连续下跌 {current_streak} 日"
+        elif streak_direction == "up":
+            streak_label = f"连续上涨 {current_streak} 日"
+        else:
+            streak_label = "无连续方向"
+
+        controls = [
+            f"用 95% 历史 VaR 估计，单日常规尾部损失约 {var95:.2f}%。",
+            f"跌破 95% VaR 后的平均损失约 {expected_shortfall_95:.2f}%，这是止损和保证金缓冲的核心参考。",
+            f"过去 60 日上涨占比 {positive_ratio:.0f}%，若继续下降，说明回撤质量正在恶化。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": history.index[-1].date().isoformat(),
+            "index": round(latest, 2),
+            "daily_change": round(pct_change(latest, previous_close), 2),
+            "tail_score": round(tail_score, 1),
+            "tail_label": tail_risk_label(tail_score),
+            "tail_color": tail_risk_color(tail_score),
+            "summary": summary,
+            "current_drawdown": round(current_drawdown, 2),
+            "max_drawdown_1y": round(max_drawdown_1y, 2),
+            "max_drawdown_2y": round(max_drawdown_2y, 2),
+            "var95": round(var95, 2),
+            "var99": round(var99, 2),
+            "expected_shortfall_95": round(expected_shortfall_95, 2),
+            "vol20": round(vol20, 1),
+            "vol60": round(vol60, 1),
+            "downside_vol60": round(downside_vol60, 1) if downside_vol60 == downside_vol60 else 0,
+            "positive_ratio": round(positive_ratio, 1),
+            "streak_label": streak_label,
+            "worst_days": worst_days,
+            "recent_months": recent_months,
+            "controls": controls,
+            "methodology": "使用 NDX 最近 2 年日收益计算历史 VaR、预期尾部损失、最大回撤和年化波动率；该模块衡量历史损失分布，不代表未来保证损失上限。",
+        }
+        risk_tail_cache["data"] = data
+        risk_tail_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX tail risk updated: {tail_risk_label(tail_score)}")
+    except Exception as e:
+        logger.error(f"NDX tail risk refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def build_pillar(key, label, score, comment, metrics):
     normalized_score = round(clamp(score), 1)
     return {
@@ -1459,6 +1599,7 @@ def background_worker():
     last_concentration = 0
     last_factors = 0
     last_levels = 0
+    last_tail = 0
     while True:
         try:
             update_market_index()
@@ -1480,6 +1621,11 @@ def background_worker():
             if time.time() - last_levels > 1800:
                 refresh_technical_levels()
                 last_levels = time.time()
+
+            # Tail risk distribution every 30 minutes
+            if time.time() - last_tail > 1800:
+                refresh_tail_risk_data()
+                last_tail = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1585,6 +1731,14 @@ def get_risk_levels():
         refresh_technical_levels()
 
     data = risk_levels_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/tail', methods=['GET'])
+def get_risk_tail():
+    if not cache_is_fresh(risk_tail_cache, 15 * 60) and should_refresh_empty_cache(risk_tail_cache, 60):
+        refresh_tail_risk_data()
+
+    data = risk_tail_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])

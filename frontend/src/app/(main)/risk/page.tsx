@@ -5,6 +5,7 @@ import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
+import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
@@ -125,6 +126,13 @@ export default function RiskPage() {
           <Icon name="lucide:milestone" className="text-[var(--accent-color)]" /> 技术位监控
         </h3>
         <NDXTechnicalLevelsPanel />
+      </section>
+
+      <section className="tail-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:waves" className="text-[var(--accent-color)]" /> 回撤与尾部风险
+        </h3>
+        <NDXTailRiskPanel />
       </section>
 
       <section className="concentration-section">
