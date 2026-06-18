@@ -9,6 +9,7 @@ import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel"
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
+import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
 import { Icon } from "@/components/ui/Icon";
@@ -156,6 +157,13 @@ export default function RiskPage() {
           <Icon name="lucide:pie-chart" className="text-[var(--accent-color)]" /> 权重股集中度
         </h3>
         <NDXConcentrationPanel />
+      </section>
+
+      <section className="dispersion-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:scatter-chart" className="text-[var(--accent-color)]" /> MAG7 相关性与离散度
+        </h3>
+        <MAG7DispersionPanel />
       </section>
 
       <section className="scenario-section">

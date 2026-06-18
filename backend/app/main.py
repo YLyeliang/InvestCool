@@ -67,6 +67,7 @@ risk_factors_cache = {"data": None, "last_update": None}
 risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
+risk_dispersion_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -358,6 +359,15 @@ def relative_strength_color(score):
     if score >= 35:
         return "amber"
     return "red"
+
+def dispersion_regime(avg_corr, dispersion):
+    if avg_corr >= 0.68 and dispersion >= 2.8:
+        return "同步高波动", "red"
+    if avg_corr >= 0.68:
+        return "Beta 主导", "amber"
+    if dispersion >= 3.2:
+        return "个股分化", "blue"
+    return "结构平衡", "green"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -1182,6 +1192,120 @@ def refresh_relative_strength_data():
         logger.error(traceback.format_exc())
 
 
+def average_pairwise_correlation(frame):
+    corr = frame.corr()
+    values = []
+    columns = list(corr.columns)
+    for i, left in enumerate(columns):
+        for right in columns[i + 1:]:
+            value = corr.loc[left, right]
+            if value == value:
+                values.append(float(value))
+    return sum(values) / len(values) if values else 0
+
+
+def refresh_dispersion_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_dispersion_cache
+
+    try:
+        names = {
+            "AAPL": "Apple",
+            "MSFT": "Microsoft",
+            "GOOGL": "Alphabet",
+            "AMZN": "Amazon",
+            "NVDA": "NVIDIA",
+            "TSLA": "Tesla",
+            "META": "Meta",
+        }
+        symbols = list(names.keys())
+        close_map = {}
+        for symbol in symbols:
+            close_map[symbol] = fetch_ohlc_history(symbol, "6mo", min_rows=80, attempts=3)["Close"]
+
+        ndx_closes = fetch_ohlc_history("^NDX", "6mo", min_rows=80, attempts=3)["Close"]
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 80:
+            raise ValueError("Insufficient aligned MAG7 history for dispersion")
+
+        returns = prices.pct_change().dropna() * 100
+        ndx_returns = ndx_closes.pct_change().dropna() * 100
+        aligned = returns.join(ndx_returns.rename("NDX"), how="inner").dropna()
+        if len(aligned) < 60:
+            raise ValueError("Insufficient aligned MAG7 and NDX return history")
+
+        mag7_returns = aligned[symbols]
+        ndx_aligned = aligned["NDX"]
+        corr20 = average_pairwise_correlation(mag7_returns.tail(20))
+        corr60 = average_pairwise_correlation(mag7_returns.tail(60))
+        dispersion20 = float(mag7_returns.tail(20).std(axis=1).mean())
+        dispersion60 = float(mag7_returns.tail(60).std(axis=1).mean())
+        regime, color = dispersion_regime(corr20, dispersion20)
+
+        ndx_20 = pct_change(ndx_closes.iloc[-1], ndx_closes.iloc[-21])
+        securities = []
+        for symbol in symbols:
+            stock_returns = aligned[symbol].tail(60)
+            ndx_tail = ndx_aligned.tail(60)
+            ndx_var = safe_float(ndx_tail.var(), 0)
+            beta = safe_float(stock_returns.cov(ndx_tail) / ndx_var, 0) if ndx_var else 0
+            correlation = safe_float(stock_returns.corr(ndx_tail), 0)
+            return20 = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-21])
+            return60 = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-61])
+            active20 = return20 - ndx_20
+            securities.append({
+                "symbol": symbol,
+                "name": names[symbol],
+                "return_20d": round(float(return20), 2),
+                "return_60d": round(float(return60), 2),
+                "active_20d": round(float(active20), 2),
+                "beta_to_ndx": round(float(beta), 2),
+                "correlation_to_ndx": round(float(correlation), 2),
+            })
+
+        leaders = sorted(securities, key=lambda item: item["active_20d"], reverse=True)[:3]
+        laggards = sorted(securities, key=lambda item: item["active_20d"])[:3]
+
+        if regime == "同步高波动":
+            summary = "MAG7 内部相关性和离散度同时偏高，说明权重股同步波动且个股振幅扩大。"
+        elif regime == "Beta 主导":
+            summary = "MAG7 同涨同跌特征较强，NDX 更容易被系统性 beta 和资金风险偏好驱动。"
+        elif regime == "个股分化":
+            summary = "MAG7 内部分化明显，指数方向更依赖个股财报、估值和主题轮动。"
+        else:
+            summary = "MAG7 相关性和离散度处于相对均衡区，权重股结构暂未显示极端拥挤。"
+
+        controls = [
+            f"20 日平均成对相关 {corr20:.2f}，若继续升高，单股分散化保护会下降。",
+            f"20 日横截面离散度 {dispersion20:.2f} 个百分点，越高越需要关注个股事件风险。",
+            f"当前 20 日主动贡献领先者为 {', '.join(item['symbol'] for item in leaders)}；拖累者为 {', '.join(item['symbol'] for item in laggards)}。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "avg_corr_20d": round(corr20, 2),
+            "avg_corr_60d": round(corr60, 2),
+            "dispersion_20d": round(dispersion20, 2),
+            "dispersion_60d": round(dispersion60, 2),
+            "ndx_return_20d": round(ndx_20, 2),
+            "leaders": leaders,
+            "laggards": laggards,
+            "securities": sorted(securities, key=lambda item: item["active_20d"], reverse=True),
+            "controls": controls,
+            "methodology": "使用 MAG7 最近 6 个月日收益计算 20/60 日平均成对相关、横截面离散度、相对 NDX beta 与主动收益，用于识别权重股同步风险和个股分化。",
+        }
+        risk_dispersion_cache["data"] = data
+        risk_dispersion_cache["last_update"] = datetime.utcnow()
+        logger.info(f"MAG7 dispersion updated: {regime}")
+    except Exception as e:
+        logger.error(f"MAG7 dispersion refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def build_pillar(key, label, score, comment, metrics):
     normalized_score = round(clamp(score), 1)
     return {
@@ -1749,6 +1873,7 @@ def background_worker():
     last_levels = 0
     last_tail = 0
     last_relative = 0
+    last_dispersion = 0
     while True:
         try:
             update_market_index()
@@ -1780,6 +1905,11 @@ def background_worker():
             if time.time() - last_relative > 1800:
                 refresh_relative_strength_data()
                 last_relative = time.time()
+
+            # MAG7 correlation and dispersion every 30 minutes
+            if time.time() - last_dispersion > 1800:
+                refresh_dispersion_data()
+                last_dispersion = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1901,6 +2031,14 @@ def get_risk_relative():
         refresh_relative_strength_data()
 
     data = risk_relative_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/dispersion', methods=['GET'])
+def get_risk_dispersion():
+    if not cache_is_fresh(risk_dispersion_cache, 15 * 60) and should_refresh_empty_cache(risk_dispersion_cache, 60):
+        refresh_dispersion_data()
+
+    data = risk_dispersion_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
