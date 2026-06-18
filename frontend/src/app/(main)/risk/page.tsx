@@ -6,6 +6,7 @@ import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
+import { NDXFactorAttributionPanel } from "@/components/NDXFactorAttributionPanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
 import { NDXThemeRotationPanel } from "@/components/NDXThemeRotationPanel";
 import { NDXBreadthParticipationPanel } from "@/components/NDXBreadthParticipationPanel";
@@ -144,6 +145,13 @@ export default function RiskPage() {
           <Icon name="lucide:line-chart" className="text-[var(--accent-color)]" /> 宏观因子压力
         </h3>
         <NDXFactorPressurePanel />
+      </section>
+
+      <section className="attribution-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:split" className="text-[var(--accent-color)]" /> NDX 因子归因
+        </h3>
+        <NDXFactorAttributionPanel />
       </section>
 
       <section className="relative-section">

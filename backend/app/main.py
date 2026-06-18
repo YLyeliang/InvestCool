@@ -3,6 +3,7 @@ from flask_sqlalchemy import SQLAlchemy
 import os
 import yfinance as yf
 import pandas as pd
+import numpy as np
 from datetime import datetime, timedelta
 import time
 from functools import wraps
@@ -64,6 +65,7 @@ risk_scenarios_cache = {"data": None, "last_update": None}
 risk_budget_cache = {"data": None, "last_update": None}
 risk_concentration_cache = {"data": None, "last_update": None}
 risk_factors_cache = {"data": None, "last_update": None}
+risk_factor_attribution_cache = {"data": None, "last_update": None}
 risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
@@ -300,6 +302,17 @@ def factor_pressure_color(score):
     if score >= 35:
         return "blue"
     return "green"
+
+def attribution_regime(semis_contribution, macro_contribution, residual, actual_return):
+    if actual_return < -2 and macro_contribution < -1.2:
+        return "宏观拖累", "red"
+    if semis_contribution > 2 and actual_return > 0:
+        return "主题驱动", "green"
+    if residual > 2:
+        return "主动韧性", "blue"
+    if residual < -2:
+        return "内生走弱", "amber"
+    return "均衡归因", "blue"
 
 def correlation_label(value):
     absolute = abs(value)
@@ -1391,6 +1404,183 @@ def refresh_factor_data():
         logger.info(f"NDX factor pressure updated: {aggregate_score:.1f}")
     except Exception as e:
         logger.error(f"NDX factor pressure refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_factor_attribution_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_factor_attribution_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "spy": "SPY",
+            "smh": "SMH",
+            "rates": "^TNX",
+            "dollar": "DX-Y.NYB",
+            "vix": "^VIX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "6mo", min_rows=80, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 90:
+            raise ValueError("Insufficient aligned factor attribution history")
+
+        returns = pd.DataFrame(index=prices.index)
+        returns["qqq"] = prices["qqq"].pct_change() * 100
+        returns["market"] = prices["spy"].pct_change() * 100
+        returns["semis_active"] = (prices["smh"].pct_change() - prices["spy"].pct_change()) * 100
+        returns["rates"] = prices["rates"].diff() * 100
+        returns["dollar"] = prices["dollar"].pct_change() * 100
+        returns["vix"] = prices["vix"].diff()
+        returns = returns.dropna()
+        if len(returns) < 85:
+            raise ValueError("Insufficient returns for factor attribution")
+
+        factor_defs = [
+            {
+                "key": "market",
+                "label": "市场 Beta",
+                "unit": "%",
+                "description": "SPY 日收益，代表美股系统性风险偏好。",
+                "risk_direction": "higher_positive",
+            },
+            {
+                "key": "semis_active",
+                "label": "半导体超额",
+                "unit": "%",
+                "description": "SMH 相对 SPY 的主动收益，代表芯片/算力主题对 NDX 的边际贡献。",
+                "risk_direction": "higher_positive",
+            },
+            {
+                "key": "rates",
+                "label": "10Y 利率",
+                "unit": "bps",
+                "description": "美国 10 年期利率日变化，衡量久期估值压力。",
+                "risk_direction": "higher_negative",
+            },
+            {
+                "key": "dollar",
+                "label": "美元指数",
+                "unit": "%",
+                "description": "美元指数日收益，衡量全球流动性和跨国科技收入折现压力。",
+                "risk_direction": "higher_negative",
+            },
+            {
+                "key": "vix",
+                "label": "VIX 波动",
+                "unit": "pts",
+                "description": "VIX 点数日变化，衡量风险厌恶冲击。",
+                "risk_direction": "higher_negative",
+            },
+        ]
+        factor_keys = [item["key"] for item in factor_defs]
+        train = returns.tail(90)
+        y = train["qqq"].to_numpy(dtype=float)
+        x = train[factor_keys].to_numpy(dtype=float)
+        design = np.column_stack([np.ones(len(x)), x])
+        coeffs, *_ = np.linalg.lstsq(design, y, rcond=None)
+        fitted = design @ coeffs
+        ss_res = float(np.sum((y - fitted) ** 2))
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+
+        window = returns.tail(20)
+        actual_return = float(window["qqq"].sum())
+        intercept_contribution = float(coeffs[0] * len(window))
+        factor_contributions = []
+        for index, factor in enumerate(factor_defs, start=1):
+            factor_sum = float(window[factor["key"]].sum())
+            beta = float(coeffs[index])
+            contribution = beta * factor_sum
+            if contribution > 1:
+                color = "green"
+            elif contribution < -1:
+                color = "red"
+            elif abs(contribution) >= 0.35:
+                color = "amber"
+            else:
+                color = "blue"
+            factor_contributions.append({
+                "key": factor["key"],
+                "label": factor["label"],
+                "unit": factor["unit"],
+                "description": factor["description"],
+                "risk_direction": factor["risk_direction"],
+                "factor_move_20d": round(factor_sum, 2),
+                "beta": round(beta, 3),
+                "contribution": round(contribution, 2),
+                "color": color,
+            })
+
+        factor_total = sum(item["contribution"] for item in factor_contributions)
+        predicted_return = intercept_contribution + factor_total
+        residual = actual_return - predicted_return
+        macro_contribution = sum(
+            item["contribution"]
+            for item in factor_contributions
+            if item["key"] in ("rates", "dollar", "vix")
+        )
+        semis_contribution = next(
+            item["contribution"] for item in factor_contributions if item["key"] == "semis_active"
+        )
+        regime, color = attribution_regime(semis_contribution, macro_contribution, residual, actual_return)
+
+        sorted_contributors = sorted(factor_contributions, key=lambda item: item["contribution"], reverse=True)
+        top_positive = sorted_contributors[0]
+        top_negative = sorted_contributors[-1]
+        if regime == "主题驱动":
+            summary = f"近 20 日 QQQ 表现主要由 {top_positive['label']} 贡献，半导体主动收益对 NDX 形成正向拉动。"
+        elif regime == "宏观拖累":
+            summary = f"近 20 日 QQQ 承压主要来自宏观变量，最大负贡献为 {top_negative['label']}。"
+        elif regime == "主动韧性":
+            summary = "模型解释之外的残差为正，说明 QQQ 仍存在权重股或资金面主动韧性。"
+        elif regime == "内生走弱":
+            summary = "模型解释之外的残差为负，说明 QQQ 内部结构弱于因子应有表现。"
+        else:
+            summary = "QQQ 近 20 日表现由市场 beta、主题和宏观因子共同解释，暂未出现单一极端来源。"
+
+        controls = [
+            f"若 {top_positive['label']} 的正贡献回落，NDX 短线动能需要由更广泛主题接力。",
+            f"当前宏观因子合计贡献 {macro_contribution:+.2f} 个百分点，若转负扩大，应降低估值扩张假设。",
+            f"模型残差 {residual:+.2f} 个百分点，残差连续为负时需要检查权重股内部风险。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "window_days": 20,
+            "regression_days": len(train),
+            "regime": regime,
+            "regime_color": color,
+            "actual_return": round(actual_return, 2),
+            "predicted_return": round(predicted_return, 2),
+            "factor_total": round(factor_total, 2),
+            "intercept_contribution": round(intercept_contribution, 2),
+            "residual": round(residual, 2),
+            "macro_contribution": round(macro_contribution, 2),
+            "semis_contribution": round(semis_contribution, 2),
+            "r_squared": round(float(r_squared), 2),
+            "summary": summary,
+            "top_positive": {
+                "label": top_positive["label"],
+                "contribution": top_positive["contribution"],
+            },
+            "top_negative": {
+                "label": top_negative["label"],
+                "contribution": top_negative["contribution"],
+            },
+            "factors": factor_contributions,
+            "controls": controls,
+            "methodology": "使用最近 90 个交易日 OLS 回归估计 QQQ 对 SPY、SMH 主动收益、10Y 利率、美元指数和 VIX 日变化的敏感度，并将最近 20 日 QQQ 日收益拆分为因子贡献、截距和残差。该模块用于风险归因，不构成收益预测。",
+        }
+        risk_factor_attribution_cache["data"] = data
+        risk_factor_attribution_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX factor attribution updated: {regime}, actual {actual_return:.2f}%")
+    except Exception as e:
+        logger.error(f"NDX factor attribution refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -3079,6 +3269,7 @@ def background_worker():
     last_risk_budget = 0
     last_concentration = 0
     last_factors = 0
+    last_factor_attribution = 0
     last_levels = 0
     last_tail = 0
     last_relative = 0
@@ -3106,6 +3297,11 @@ def background_worker():
             if time.time() - last_factors > 1800:
                 refresh_factor_data()
                 last_factors = time.time()
+
+            # NDX factor attribution every 30 minutes
+            if time.time() - last_factor_attribution > 1800:
+                refresh_factor_attribution_data()
+                last_factor_attribution = time.time()
 
             # Technical levels every 30 minutes
             if time.time() - last_levels > 1800:
@@ -3258,6 +3454,14 @@ def get_risk_factors():
         refresh_factor_data()
 
     data = risk_factors_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/attribution', methods=['GET'])
+def get_risk_attribution():
+    if not cache_is_fresh(risk_factor_attribution_cache, 15 * 60) and should_refresh_empty_cache(risk_factor_attribution_cache, 60):
+        refresh_factor_attribution_data()
+
+    data = risk_factor_attribution_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])

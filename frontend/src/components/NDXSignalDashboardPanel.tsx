@@ -25,6 +25,14 @@ interface FactorPayload {
   main_headwind: string;
 }
 
+interface AttributionPayload {
+  regime: string;
+  actual_return: number;
+  semis_contribution: number;
+  macro_contribution: number;
+  r_squared: number;
+}
+
 interface BreadthPayload {
   breadth_score: number;
   breadth_label: string;
@@ -94,6 +102,7 @@ interface DashboardData {
   latest: LatestPayload | null;
   diagnostics: DiagnosticsPayload | null;
   factors: FactorPayload | null;
+  attribution: AttributionPayload | null;
   breadth: BreadthPayload | null;
   themeRotation: ThemeRotationPayload | null;
   liquidity: LiquidityPayload | null;
@@ -200,6 +209,7 @@ export const NDXSignalDashboardPanel = () => {
           latest,
           diagnostics,
           factors,
+          attribution,
           breadth,
           themeRotation,
           liquidity,
@@ -213,6 +223,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<LatestPayload>("/api/risk/latest"),
           fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
           fetchJson<FactorPayload>("/api/risk/factors"),
+          fetchJson<AttributionPayload>("/api/risk/attribution"),
           fetchJson<BreadthPayload>("/api/risk/breadth"),
           fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
           fetchJson<LiquidityPayload>("/api/risk/liquidity"),
@@ -224,7 +235,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, factors, breadth, themeRotation, liquidity, valuation, earnings, options, volatilityTerm, tail, concentration });
+        setData({ latest, diagnostics, factors, attribution, breadth, themeRotation, liquidity, valuation, earnings, options, volatilityTerm, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -278,6 +289,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.factors ? `主因子 ${data.factors.main_headwind}` : "等待宏观因子",
         color: data.factors ? scoreColor(data.factors.pressure_score, true) : "blue",
         icon: "line-chart",
+      },
+      {
+        label: "因子归因",
+        value: data.attribution ? data.attribution.regime : "--",
+        detail: data.attribution ? `20D ${formatSignedPct(data.attribution.actual_return)} · 半导体 ${data.attribution.semis_contribution.toFixed(2)}pt` : "等待归因模型",
+        color: data.attribution ? labelColor(data.attribution.regime) : "blue",
+        icon: "split",
       },
       {
         label: "广度参与",
@@ -356,7 +374,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 11 }).map((_, index) => (
+          {Array.from({ length: 12 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

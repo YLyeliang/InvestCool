@@ -6,10 +6,11 @@ InvestCool 是一个面向纳斯达克 100 的金融研究与风险分析平台�
 - Flask、SQLAlchemy、SQLite WAL、yfinance
 - 独立 Python 数据 worker
 - NDX 风险引擎，基于 RSI、VIX、价格分位与利率缓冲生成定时简报
-- NDX 机构信号总览，将风险、宏观、广度、主题轮动、流动性、期权、波动曲线、估值、财报催化、尾部和集中度压缩成顶部 scorecard
+- NDX 机构信号总览，将风险、宏观、因子归因、广度、主题轮动、流动性、期权、波动曲线、估值、财报催化、尾部和集中度压缩成顶部 scorecard
 - NDX 投委会摘要，将宏观、内部扩散、流动性、波动定价、估值催化、集中度和预算聚合成执行清单
 - NDX 四支柱风险诊断，覆盖趋势结构、波动压力、回撤压力和 MAG7 广度
 - NDX 宏观因子压力监控，跟踪 VIX、10Y 利率和美元指数的相关性与敏感度
+- NDX 因子归因，用 90 日 OLS 将 QQQ 近 20 日表现拆成市场 beta、半导体超额、利率、美元、VIX 和残差
 - NDX 相对强弱与 Beta，跟踪相对 SPX、SOX、RUT 的超额收益、相关性和 beta
 - NDX 主题轮动，用 SMH、IGV、XLC、XLY、IYW、CIBR 对比 QQQ 判断成长主题是否扩散
 - NDX 市场广度与等权参与，用 QQQ 对比 QQEW/QQQE 判断上涨是否由更广泛成分股扩散
