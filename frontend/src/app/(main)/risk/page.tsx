@@ -7,6 +7,7 @@ import { NDXRiskAlertsPanel } from "@/components/NDXRiskAlertsPanel";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
+import { NDXContributionPanel } from "@/components/NDXContributionPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXConditionMatrixPanel } from "@/components/NDXConditionMatrixPanel";
 import { NDXFundingConditionsPanel } from "@/components/NDXFundingConditionsPanel";
@@ -160,6 +161,13 @@ export default function RiskPage() {
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> 机构式风险诊断
         </h3>
         <NDXRiskDiagnosticsPanel />
+      </section>
+
+      <section className="contribution-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:chart-no-axes-combined" className="text-[var(--accent-color)]" /> NDX 风险贡献拆解
+        </h3>
+        <NDXContributionPanel />
       </section>
 
       <section className="factor-section">

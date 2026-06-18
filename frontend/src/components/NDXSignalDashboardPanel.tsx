@@ -34,6 +34,14 @@ interface AlertsPayload {
   active_count: number;
 }
 
+interface ContributionPayload {
+  risk_contribution_score: number;
+  contribution_regime: string;
+  net_pressure: number;
+  pressure_total: number;
+  support_total: number;
+}
+
 interface FactorPayload {
   pressure_score: number;
   pressure_label: string;
@@ -153,6 +161,7 @@ interface DashboardData {
   diagnostics: DiagnosticsPayload | null;
   regimeCompass: RegimeCompassPayload | null;
   alerts: AlertsPayload | null;
+  contribution: ContributionPayload | null;
   factors: FactorPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
   funding: FundingPayload | null;
@@ -256,6 +265,11 @@ const formatSignedPct = (value?: number | null) => {
   return `${value >= 0 ? "+" : ""}${value.toFixed(2)}%`;
 };
 
+const formatSignedPoint = (value?: number | null) => {
+  if (typeof value !== "number" || Number.isNaN(value)) return "--";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(1)}`;
+};
+
 const formatDateTime = (dateStr?: string) => {
   if (!dateStr) return "--";
   return new Date(dateStr).toLocaleString("zh-CN", {
@@ -279,6 +293,7 @@ export const NDXSignalDashboardPanel = () => {
           diagnostics,
           regimeCompass,
           alerts,
+          contribution,
           factors,
           conditionMatrix,
           funding,
@@ -300,6 +315,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
           fetchJson<RegimeCompassPayload>("/api/risk/regime-compass"),
           fetchJson<AlertsPayload>("/api/risk/alerts"),
+          fetchJson<ContributionPayload>("/api/risk/contribution"),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
           fetchJson<FundingPayload>("/api/risk/funding-conditions"),
@@ -318,7 +334,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -342,6 +358,7 @@ export const NDXSignalDashboardPanel = () => {
     const earningsScore = data.earnings?.event_score ?? 50;
     const hedgeScore = data.hedgeOverlay?.hedge_score ?? 50;
     const alertScore = data.alerts?.alert_score ?? 50;
+    const contributionScore = data.contribution?.risk_contribution_score ?? 50;
     const supportiveScores = [
       data.breadth?.breadth_score ?? 50,
       data.themeRotation?.leadership_score ?? 50,
@@ -351,7 +368,7 @@ export const NDXSignalDashboardPanel = () => {
       data.recoveryPath?.recovery_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
+    const pressureScores = [riskScore, contributionScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -386,6 +403,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.alerts ? `红色 ${data.alerts.critical_count} · 观察 ${data.alerts.watch_count} · 总计 ${data.alerts.active_count}` : "等待预警聚合",
         color: data.alerts ? scoreColor(data.alerts.alert_score, true) : "blue",
         icon: "bell-ring",
+      },
+      {
+        label: "风险贡献",
+        value: data.contribution ? data.contribution.contribution_regime : "--",
+        detail: data.contribution ? `压力 ${data.contribution.pressure_total.toFixed(1)} · 缓冲 ${data.contribution.support_total.toFixed(1)} · 净 ${formatSignedPoint(data.contribution.net_pressure)}` : "等待贡献拆解",
+        color: data.contribution ? scoreColor(data.contribution.risk_contribution_score, true) : "blue",
+        icon: "chart-no-axes-combined",
       },
       {
         label: "宏观压力",
@@ -513,7 +537,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 19 }).map((_, index) => (
+          {Array.from({ length: 20 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

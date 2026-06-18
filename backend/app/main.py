@@ -85,6 +85,7 @@ risk_regime_compass_cache = {"data": None, "last_update": None}
 risk_alerts_cache = {"data": None, "last_update": None}
 risk_scenario_map_cache = {"data": None, "last_update": None}
 risk_recovery_path_cache = {"data": None, "last_update": None}
+risk_contribution_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -234,6 +235,49 @@ def recovery_path_regime(score):
     if score >= 34:
         return "支撑测试", "amber"
     return "破位恢复", "red"
+
+def contribution_regime(net_pressure):
+    if net_pressure >= 18:
+        return "风险主导", "red"
+    if net_pressure >= 7:
+        return "压力偏高", "amber"
+    if net_pressure >= -6:
+        return "均衡拉锯", "blue"
+    return "支撑占优", "green"
+
+def contribution_color(direction, score):
+    if direction == "support":
+        if score >= 68:
+            return "green"
+        if score >= 50:
+            return "blue"
+        if score >= 35:
+            return "amber"
+        return "red"
+    if score >= 72:
+        return "red"
+    if score >= 55:
+        return "amber"
+    if score >= 35:
+        return "blue"
+    return "green"
+
+def build_contribution_driver(key, label, direction, score, weight, evidence, action):
+    normalized_score = round(clamp(score), 1)
+    impact = round(normalized_score * weight / 100, 1)
+    signed_impact = impact if direction == "pressure" else -impact
+    return {
+        "key": key,
+        "label": label,
+        "direction": direction,
+        "score": normalized_score,
+        "weight": weight,
+        "impact": impact,
+        "signed_impact": round(signed_impact, 1),
+        "color": contribution_color(direction, normalized_score),
+        "evidence": evidence,
+        "action": action,
+    }
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -4394,6 +4438,309 @@ def refresh_recovery_path_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_contribution_data(allow_dependency_refresh=True):
+    global risk_contribution_cache
+
+    try:
+        dependencies = [
+            ("diagnostics", risk_diagnostics_cache, refresh_risk_diagnostics, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60),
+            ("factors", risk_factors_cache, refresh_factor_data, 15 * 60),
+            ("funding", risk_funding_conditions_cache, refresh_funding_conditions_data, 15 * 60),
+            ("condition", risk_condition_matrix_cache, refresh_condition_matrix_data, 15 * 60),
+            ("levels", risk_levels_cache, refresh_technical_levels, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60),
+            ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60),
+            ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60),
+            ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60),
+            ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60),
+            ("concentration", risk_concentration_cache, refresh_concentration_data, 15 * 60),
+            ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60),
+        ]
+        light_dependencies = {
+            "diagnostics", "regime", "alerts", "factors", "funding", "condition",
+            "levels", "tail", "breadth", "liquidity", "recovery",
+        }
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key in ("regime", "alerts", "recovery"):
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Risk contribution dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 5:
+            return
+
+        diagnostics = risk_diagnostics_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        factors = risk_factors_cache.get("data") or {}
+        funding = risk_funding_conditions_cache.get("data") or {}
+        condition = risk_condition_matrix_cache.get("data") or {}
+        levels = risk_levels_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        breadth = risk_breadth_cache.get("data") or {}
+        liquidity = risk_liquidity_cache.get("data") or {}
+        valuation = risk_valuation_cache.get("data") or {}
+        quality = risk_quality_cache.get("data") or {}
+        earnings = risk_earnings_cache.get("data") or {}
+        concentration = risk_concentration_cache.get("data") or {}
+        recovery = risk_recovery_path_cache.get("data") or {}
+
+        risk_score = safe_float(diagnostics.get("risk_score"), 50)
+        macro_score = safe_float(factors.get("pressure_score"), 50)
+        funding_score = safe_float(funding.get("funding_score"), 50)
+        condition_score = safe_float(condition.get("condition_score"), 50)
+        tail_score = safe_float(tail.get("tail_score"), 50)
+        alert_score = safe_float(alerts.get("alert_score"), 35)
+        valuation_score = safe_float(valuation.get("valuation_score"), 50)
+        earnings_score = safe_float(earnings.get("event_score"), 50)
+        zone_score = safe_float(levels.get("zone_score"), 50)
+        top3_weight = safe_float(concentration.get("top3_weight"), 55)
+
+        if zone_score >= 76:
+            technical_pressure = clamp(44 + (zone_score - 76) * 1.3)
+            technical_evidence = f"{levels.get('zone_label', '技术延伸')}，新增风险预算需要等待回踩。"
+        else:
+            technical_pressure = clamp(62 - zone_score * 0.75)
+            technical_evidence = f"{levels.get('zone_label', '技术中性')}，下方支撑决定风险预算收缩速度。"
+
+        concentration_pressure = clamp((top3_weight - 45) * 2.0, 18, 90)
+
+        pressure_drivers = [
+            build_contribution_driver(
+                "diagnostics",
+                "综合风险",
+                "pressure",
+                risk_score,
+                12,
+                diagnostics.get("summary", "综合风险诊断处在中性区。"),
+                "先用综合风险分决定总仓位上限，再看单项信号确认执行节奏。",
+            ),
+            build_contribution_driver(
+                "macro",
+                "宏观压力",
+                "pressure",
+                macro_score,
+                12,
+                f"主逆风来自 {factors.get('main_headwind', 'VIX/利率/美元')}，状态为 {factors.get('pressure_label', '中性')}。",
+                "宏观压力未回落前，新增 NDX 暴露应分批并绑定技术触发线。",
+            ),
+            build_contribution_driver(
+                "funding",
+                "融资条件",
+                "pressure",
+                funding_score,
+                10,
+                funding.get("summary", f"融资状态为 {funding.get('regime', '中性')}。"),
+                "若信用和久期代理继续走弱，把反弹视为脆弱修复。",
+            ),
+            build_contribution_driver(
+                "condition",
+                "条件矩阵",
+                "pressure",
+                condition_score,
+                9,
+                condition.get("summary", f"条件矩阵为 {condition.get('regime', '中性')}。"),
+                "条件矩阵偏紧时，仓位应靠近风险预算中枢以下。",
+            ),
+            build_contribution_driver(
+                "technical",
+                "技术位置",
+                "pressure",
+                technical_pressure,
+                9,
+                technical_evidence,
+                "用最近支撑、50 日均线和修复线约束加仓/减仓触发。",
+            ),
+            build_contribution_driver(
+                "tail",
+                "尾部风险",
+                "pressure",
+                tail_score,
+                11,
+                tail.get("summary", f"VaR {tail.get('var95', '--')} / ES {tail.get('expected_shortfall_95', '--')}。"),
+                "尾部风险偏高时，先核算最大单日损失和现金缓冲。",
+            ),
+            build_contribution_driver(
+                "alerts",
+                "预警层",
+                "pressure",
+                alert_score,
+                10,
+                alerts.get("summary", "当前预警层处在常规监控区。"),
+                "优先处理红色和重点观察项，再讨论恢复风险预算。",
+            ),
+            build_contribution_driver(
+                "valuation",
+                "估值压力",
+                "pressure",
+                valuation_score,
+                7,
+                valuation.get("summary", f"估值状态为 {valuation.get('valuation_label', '中性')}。"),
+                "估值压力较高时，只在盈利质量和广度同步确认后上修风险预算。",
+            ),
+            build_contribution_driver(
+                "earnings",
+                "事件窗口",
+                "pressure",
+                earnings_score,
+                5,
+                earnings.get("summary", f"最近事件为 {earnings.get('nearest_symbol', '--')}。"),
+                "财报窗口集中时，给单一权重股跳空预留风险预算。",
+            ),
+            build_contribution_driver(
+                "concentration",
+                "集中度",
+                "pressure",
+                concentration_pressure,
+                6,
+                concentration.get("flags", [f"Top3 权重约 {top3_weight:.1f}%。"])[0],
+                "龙头集中度高时，不要只依赖等权和广度信号判断指数风险。",
+            ),
+        ]
+
+        breadth_score = safe_float(breadth.get("breadth_score"), 50)
+        liquidity_score = safe_float(liquidity.get("flow_score"), 50)
+        quality_score = safe_float(quality.get("quality_score"), 50)
+        regime_score = safe_float(regime.get("regime_score"), 50)
+        recovery_score = safe_float(recovery.get("recovery_score"), 50)
+        support_from_valuation = clamp(100 - valuation_score)
+        support_from_events = clamp(100 - earnings_score)
+
+        support_drivers = [
+            build_contribution_driver(
+                "breadth",
+                "广度支撑",
+                "support",
+                breadth_score,
+                9,
+                breadth.get("summary", f"广度状态为 {breadth.get('breadth_label', '中性')}。"),
+                "广度扩散继续改善时，才允许把观察仓位升级为均衡仓位。",
+            ),
+            build_contribution_driver(
+                "liquidity",
+                "流动性承接",
+                "support",
+                liquidity_score,
+                9,
+                liquidity.get("summary", f"成交确认状态为 {liquidity.get('regime', '中性')}。"),
+                "成交和资金流没有确认前，不把突破视为高置信趋势。",
+            ),
+            build_contribution_driver(
+                "quality",
+                "盈利质量",
+                "support",
+                quality_score,
+                8,
+                quality.get("summary", f"盈利质量为 {quality.get('quality_label', '中性')}。"),
+                "盈利质量是估值溢价的缓冲项，弱化时应降低集中暴露。",
+            ),
+            build_contribution_driver(
+                "regime",
+                "市场状态",
+                "support",
+                regime_score,
+                9,
+                regime.get("summary", f"市场状态为 {regime.get('regime', '中性')}。"),
+                "罗盘支撑不能抵消红色预警，需与压力层共同确认。",
+            ),
+            build_contribution_driver(
+                "recovery",
+                "修复路径",
+                "support",
+                recovery_score,
+                7,
+                recovery.get("summary", f"修复路径为 {recovery.get('recovery_regime', '观察')}。"),
+                "只有站上修复线并降低预警后，才把再入场从防守切到中性。",
+            ),
+            build_contribution_driver(
+                "valuation_buffer",
+                "估值缓冲",
+                "support",
+                support_from_valuation,
+                5,
+                f"估值压力分 {valuation_score:.1f}，越低代表安全边际越高。",
+                "估值缓冲不足时，收益预期应更多来自盈利兑现而非倍数扩张。",
+            ),
+            build_contribution_driver(
+                "event_buffer",
+                "事件缓冲",
+                "support",
+                support_from_events,
+                4,
+                f"财报事件压力分 {earnings_score:.1f}，越低代表短线跳空约束越小。",
+                "事件缓冲不足时，降低财报前后的方向性仓位集中度。",
+            ),
+        ]
+
+        drivers = pressure_drivers + support_drivers
+        pressure_total = round(sum(item["impact"] for item in pressure_drivers), 1)
+        support_total = round(sum(item["impact"] for item in support_drivers), 1)
+        net_pressure = round(pressure_total - support_total, 1)
+        contribution_score = round(clamp(50 + net_pressure * 1.35), 1)
+        regime_label, regime_color = contribution_regime(net_pressure)
+        top_pressures = sorted(pressure_drivers, key=lambda item: item["impact"], reverse=True)[:5]
+        top_supports = sorted(support_drivers, key=lambda item: item["impact"], reverse=True)[:5]
+
+        pressure_names = "、".join(item["label"] for item in top_pressures[:3])
+        support_names = "、".join(item["label"] for item in top_supports[:2])
+        if regime_label == "风险主导":
+            summary = f"当前风险贡献由 {pressure_names} 主导，{support_names} 只能部分缓冲，组合应先压低仓位上限。"
+        elif regime_label == "压力偏高":
+            summary = f"NDX 压力项略强于缓冲项，主要压力来自 {pressure_names}，适合控制追高并等待确认。"
+        elif regime_label == "支撑占优":
+            summary = f"当前 {support_names} 足以抵消多数压力，风险预算可维持中性，但仍需跟踪 {top_pressures[0]['label']}。"
+        else:
+            summary = f"风险贡献处在拉锯区，{pressure_names} 与 {support_names} 相互抵消，执行上应以触发线而非观点加仓。"
+
+        controls = [
+            f"净压力 {net_pressure:+.1f}：高于 +7 时降低追高，低于 -6 时允许中性恢复。",
+            f"最大压力源是 {top_pressures[0]['label']}，应先验证其证据是否继续恶化。",
+            f"最大缓冲项是 {top_supports[0]['label']}，只有持续改善才允许提高风险预算。",
+            "贡献拆解用于解释风险来源，不替代价格触发、仓位纪律和组合约束。",
+        ]
+
+        index_value = safe_float(levels.get("index"), None)
+        if index_value is None:
+            index_value = safe_float(recovery.get("index"), None)
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round_optional(index_value, 2),
+            "risk_contribution_score": contribution_score,
+            "contribution_regime": regime_label,
+            "contribution_color": regime_color,
+            "net_pressure": net_pressure,
+            "pressure_total": pressure_total,
+            "support_total": support_total,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "summary": summary,
+            "top_pressures": top_pressures,
+            "top_supports": top_supports,
+            "drivers": sorted(drivers, key=lambda item: abs(item["signed_impact"]), reverse=True),
+            "controls": controls,
+            "methodology": "把 NDX 风险诊断、市场罗盘、预警、宏观、融资、条件矩阵、技术位、尾部风险、广度、流动性、估值、盈利质量、财报事件、集中度和修复路径统一成压力贡献与缓冲贡献。该模块用于解释风险来源和执行优先级，不构成买卖指令。",
+        }
+        risk_contribution_cache["data"] = data
+        risk_contribution_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX risk contribution updated: {regime_label}, net {net_pressure:+.1f}")
+    except Exception as e:
+        logger.error(f"NDX risk contribution refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_hedge_overlay_data():
     global risk_hedge_overlay_cache
 
@@ -5283,6 +5630,7 @@ def background_worker():
     last_alerts = 0
     last_scenario_map = 0
     last_recovery_path = 0
+    last_contribution = 0
     while True:
         try:
             update_market_index()
@@ -5419,6 +5767,11 @@ def background_worker():
             if time.time() - last_recovery_path > 1800:
                 refresh_recovery_path_data()
                 last_recovery_path = time.time()
+
+            # NDX risk contribution attribution every 30 minutes
+            if time.time() - last_contribution > 1800:
+                refresh_contribution_data()
+                last_contribution = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -5560,6 +5913,14 @@ def get_risk_recovery_path():
         refresh_recovery_path_data(allow_dependency_refresh="light")
 
     data = risk_recovery_path_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/contribution', methods=['GET'])
+def get_risk_contribution():
+    if not cache_is_fresh(risk_contribution_cache, 15 * 60) and should_refresh_empty_cache(risk_contribution_cache, 60):
+        refresh_contribution_data(allow_dependency_refresh="light")
+
+    data = risk_contribution_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
