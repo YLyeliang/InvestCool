@@ -70,6 +70,7 @@ risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
+risk_valuation_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -406,6 +407,25 @@ def signal_color(value, good_threshold, weak_threshold, inverse=False):
         return "blue"
     return "amber"
 
+def valuation_pressure_label(score):
+    if score >= 75:
+        return "极端估值压力", "red"
+    if score >= 58:
+        return "估值偏贵", "amber"
+    if score >= 32:
+        return "成长支撑", "blue"
+    return "估值舒适", "green"
+
+def metric_score(value, low, high, default=50):
+    if value is None or value <= 0:
+        return default
+    return clamp((value - low) / (high - low) * 100)
+
+def growth_value(value):
+    if value is None:
+        return None
+    return safe_float(value, None) * 100
+
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     try:
@@ -671,6 +691,161 @@ def refresh_concentration_data():
         logger.info(f"NDX concentration proxy updated: {level}, top3 {top3_weight:.1f}%")
     except Exception as e:
         logger.error(f"NDX concentration refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_valuation_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_valuation_cache
+
+    try:
+        symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META"]
+        rows = []
+
+        for symbol in symbols:
+            try:
+                info = yf.Ticker(symbol).get_info()
+            except Exception as e:
+                logger.error(f"Valuation info fetch error for {symbol}: {e}")
+                continue
+
+            market_cap = safe_float(info.get("marketCap"), 0)
+            if market_cap <= 0:
+                continue
+
+            trailing_pe = safe_float(info.get("trailingPE"), None)
+            forward_pe = safe_float(info.get("forwardPE"), None)
+            price_sales = safe_float(info.get("priceToSalesTrailing12Months"), None)
+            peg = safe_float(info.get("pegRatio"), None)
+            earnings_growth = growth_value(info.get("earningsGrowth"))
+            revenue_growth = growth_value(info.get("revenueGrowth"))
+            profit_margin = growth_value(info.get("profitMargins"))
+            forward_eps = safe_float(info.get("forwardEps"), None)
+            trailing_eps = safe_float(info.get("trailingEps"), None)
+
+            pe_score = metric_score(forward_pe, 16, 45)
+            ps_score = metric_score(price_sales, 3, 16)
+            peg_score = metric_score(peg, 0.8, 3.2)
+            growth_penalty = 50
+            if revenue_growth is not None and earnings_growth is not None:
+                growth_penalty = clamp(70 - revenue_growth * 1.1 - earnings_growth * 0.45)
+            elif revenue_growth is not None:
+                growth_penalty = clamp(65 - revenue_growth * 1.5)
+
+            valuation_score = round(
+                clamp(pe_score * 0.38 + ps_score * 0.26 + peg_score * 0.24 + growth_penalty * 0.12),
+                1,
+            )
+            label, color = valuation_pressure_label(valuation_score)
+
+            rows.append({
+                "symbol": symbol,
+                "name": info.get("shortName") or info.get("longName") or symbol,
+                "market_cap": market_cap,
+                "trailing_pe": round_optional(trailing_pe, 2),
+                "forward_pe": round_optional(forward_pe, 2),
+                "price_sales": round_optional(price_sales, 2),
+                "peg": round_optional(peg, 2),
+                "earnings_growth": round_optional(earnings_growth, 1),
+                "revenue_growth": round_optional(revenue_growth, 1),
+                "profit_margin": round_optional(profit_margin, 1),
+                "forward_eps": round_optional(forward_eps, 2),
+                "trailing_eps": round_optional(trailing_eps, 2),
+                "valuation_score": valuation_score,
+                "valuation_label": label,
+                "color": color,
+            })
+
+        if len(rows) < 4:
+            raise ValueError("Insufficient MAG7 valuation data")
+
+        total_market_cap = sum(row["market_cap"] for row in rows)
+        for row in rows:
+            row["weight"] = row["market_cap"] / total_market_cap * 100 if total_market_cap else 0
+            row["pressure_contribution"] = row["valuation_score"] * row["weight"] / 100
+
+        def weighted_average(field):
+            valid = [row for row in rows if row.get(field) is not None and row.get(field) > 0]
+            valid_weight = sum(row["weight"] for row in valid)
+            if not valid or valid_weight <= 0:
+                return None
+            return sum(row[field] * row["weight"] for row in valid) / valid_weight
+
+        weighted_forward_pe = weighted_average("forward_pe")
+        weighted_trailing_pe = weighted_average("trailing_pe")
+        weighted_price_sales = weighted_average("price_sales")
+        weighted_peg = weighted_average("peg")
+        weighted_revenue_growth = weighted_average("revenue_growth")
+        weighted_earnings_growth = weighted_average("earnings_growth")
+        weighted_profit_margin = weighted_average("profit_margin")
+        valuation_score = round(sum(row["pressure_contribution"] for row in rows), 1)
+        label, color = valuation_pressure_label(valuation_score)
+
+        top_pressure = max(rows, key=lambda row: row["pressure_contribution"])
+        most_expensive = sorted(rows, key=lambda row: row["valuation_score"], reverse=True)[:3]
+        strongest_growth = sorted(
+            rows,
+            key=lambda row: (row.get("revenue_growth") or 0) + (row.get("earnings_growth") or 0) * 0.5,
+            reverse=True,
+        )[:3]
+
+        if valuation_score >= 75:
+            summary = f"MAG7 估值压力处在高位，主要贡献来自 {top_pressure['symbol']}，新增 NDX 风险预算需要更强盈利兑现支撑。"
+        elif valuation_score >= 58:
+            summary = f"MAG7 估值偏贵，{top_pressure['symbol']} 对估值压力贡献最大，指数上行需要收入和利润增速继续配合。"
+        elif valuation_score >= 32:
+            summary = "MAG7 估值压力处在可解释区间，成长增速仍能部分支撑 NDX 权重股溢价。"
+        else:
+            summary = "MAG7 估值压力温和，当前指数风险更多来自价格波动和宏观因子而非基本面溢价。"
+
+        controls = [
+            f"若加权 Forward PE 继续升至 35x 以上且收入增速未同步上修，需要降低估值扩张假设。",
+            f"若最高压力来源 {top_pressure['symbol']} 出现盈利预期下修，NDX 权重股估值压缩会更集中。",
+            "优先把估值压力与技术位、期权隐含波动和流动性确认一起使用，避免单独用估值判断短线方向。",
+        ]
+
+        public_rows = []
+        for row in sorted(rows, key=lambda item: item["weight"], reverse=True):
+            public_rows.append({
+                key: (round(value, 2) if key in ("weight", "pressure_contribution") else value)
+                for key, value in row.items()
+                if key != "market_cap"
+            })
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "coverage": f"{len(rows)}/7 MAG7",
+            "valuation_score": valuation_score,
+            "valuation_label": label,
+            "valuation_color": color,
+            "weighted_forward_pe": round_optional(weighted_forward_pe, 1),
+            "weighted_trailing_pe": round_optional(weighted_trailing_pe, 1),
+            "weighted_price_sales": round_optional(weighted_price_sales, 1),
+            "weighted_peg": round_optional(weighted_peg, 2),
+            "weighted_revenue_growth": round_optional(weighted_revenue_growth, 1),
+            "weighted_earnings_growth": round_optional(weighted_earnings_growth, 1),
+            "weighted_profit_margin": round_optional(weighted_profit_margin, 1),
+            "top_pressure_symbol": top_pressure["symbol"],
+            "top_pressure_contribution": round(top_pressure["pressure_contribution"], 2),
+            "summary": summary,
+            "controls": controls,
+            "most_expensive": [{"symbol": row["symbol"], "score": row["valuation_score"], "label": row["valuation_label"]} for row in most_expensive],
+            "strongest_growth": [
+                {
+                    "symbol": row["symbol"],
+                    "revenue_growth": row.get("revenue_growth"),
+                    "earnings_growth": row.get("earnings_growth"),
+                }
+                for row in strongest_growth
+            ],
+            "securities": public_rows,
+            "methodology": "使用 MAG7 可得基本面字段和市值权重作为 NDX 权重股估值代理，综合 Forward PE、P/S、PEG、收入增速、盈利增速和利润率生成估值压力分；该模块不是完整 NDX 官方估值，也不构成目标价。",
+        }
+        risk_valuation_cache["data"] = data
+        risk_valuation_cache["last_update"] = datetime.utcnow()
+        logger.info(f"MAG7 valuation proxy updated: {label}, score {valuation_score:.1f}")
+    except Exception as e:
+        logger.error(f"MAG7 valuation proxy refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -2248,6 +2423,7 @@ def background_worker():
     last_dispersion = 0
     last_options = 0
     last_liquidity = 0
+    last_valuation = 0
     while True:
         try:
             update_market_index()
@@ -2294,6 +2470,11 @@ def background_worker():
             if time.time() - last_liquidity > 1800:
                 refresh_liquidity_data()
                 last_liquidity = time.time()
+
+            # MAG7 valuation proxy every 6 hours
+            if time.time() - last_valuation > 21600:
+                refresh_valuation_data()
+                last_valuation = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -2439,6 +2620,14 @@ def get_risk_liquidity():
         refresh_liquidity_data()
 
     data = risk_liquidity_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/valuation', methods=['GET'])
+def get_risk_valuation():
+    if not cache_is_fresh(risk_valuation_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_valuation_cache, 5 * 60):
+        refresh_valuation_data()
+
+    data = risk_valuation_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])

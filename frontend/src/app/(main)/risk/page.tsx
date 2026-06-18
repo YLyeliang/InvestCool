@@ -11,6 +11,7 @@ import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
+import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePanel";
 import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
@@ -173,6 +174,13 @@ export default function RiskPage() {
           <Icon name="lucide:pie-chart" className="text-[var(--accent-color)]" /> 权重股集中度
         </h3>
         <NDXConcentrationPanel />
+      </section>
+
+      <section className="valuation-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> MAG7 估值压力
+        </h3>
+        <NDXValuationPressurePanel />
       </section>
 
       <section className="dispersion-section">
