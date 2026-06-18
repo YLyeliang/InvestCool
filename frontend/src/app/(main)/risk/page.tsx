@@ -108,12 +108,12 @@ export default function RiskPage() {
   };
 
   return (
-    <div className="risk-page space-y-12">
+    <div className="risk-page space-y-11 md:space-y-12">
       <header className="page-header">
-        <h2 className="text-4xl font-black text-[var(--text-primary)] mb-2">
+        <h2 className="text-3xl md:text-4xl font-bold text-[var(--text-primary)] mb-3">
           NDX 风险研究.
         </h2>
-        <p className="text-[var(--text-secondary)] font-semibold max-w-2xl leading-7">
+        <p className="text-[var(--text-secondary)] font-medium max-w-2xl leading-7">
           聚焦纳斯达克 100 的价格位置、波动率、利率压力和权重股结构。
         </p>
       </header>
@@ -315,7 +315,7 @@ export default function RiskPage() {
           {researchArticles.length > 0 ? (
             <div className="articles-grid grid grid-cols-1 md:grid-cols-2 gap-6">
               {researchArticles.map((article) => (
-                <div key={article.slug} className="card p-6 flex flex-col justify-between min-h-[200px] border-t-4 border-[var(--accent-color)] hover:-translate-y-1 transition-transform">
+                <div key={article.slug} className="card p-6 flex flex-col justify-between min-h-[200px] border-t-2 border-[var(--accent-color)] transition-colors">
                   <div>
                     <span className="inline-block px-2 py-0.5 rounded bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase mb-3">
                       NDX Research

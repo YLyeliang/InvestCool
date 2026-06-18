@@ -46,10 +46,10 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
         isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
       )}
     >
-      <nav className="flex-1 px-4 py-6 space-y-7 overflow-y-auto no-scrollbar">
+      <nav className="flex-1 px-4 py-6 space-y-6 overflow-y-auto no-scrollbar">
         {sections.map((section) => (
           <div key={section.label}>
-            <h3 className="px-3 text-[11px] font-black uppercase text-[var(--text-tertiary)] mb-3">
+            <h3 className="px-3 text-[11px] font-bold uppercase text-[var(--text-tertiary)] mb-3">
               {section.label}
             </h3>
             <div className="space-y-1">
@@ -60,9 +60,9 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
                     key={item.path}
                     href={item.path}
                     className={cn(
-                      "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all no-underline group relative",
+                      "flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors no-underline group relative",
                       isActive
-                        ? "bg-[var(--card-bg)] text-[var(--accent-strong)] font-black border border-[var(--border-strong)] shadow-sm"
+                        ? "bg-[var(--card-bg)] text-[var(--accent-strong)] font-bold border border-[var(--border-color)] shadow-sm"
                         : "text-[var(--text-secondary)] hover:bg-[var(--hover-bg)] hover:text-[var(--text-primary)]"
                     )}
                   >
@@ -70,7 +70,7 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
                       name={item.icon}
                       size={16}
                       className={cn(
-                        "transition-transform group-hover:scale-110",
+                        "transition-colors",
                         isActive ? "text-[var(--accent-strong)]" : "text-[var(--text-tertiary)] group-hover:text-[var(--text-primary)]"
                       )}
                     />
@@ -84,16 +84,16 @@ export const Sidebar = ({ isOpen }: SidebarProps) => {
       </nav>
 
       <div className="p-4 border-t border-[var(--border-color)] bg-[var(--section-bg)]">
-        <h4 className="px-2 text-[11px] font-black text-[var(--text-tertiary)] uppercase mb-3">关注我</h4>
+        <h4 className="px-2 text-[11px] font-bold text-[var(--text-tertiary)] uppercase mb-3">关注我</h4>
         <div className="grid grid-cols-2 gap-3">
           <div className="group/qr flex flex-col items-center gap-1.5">
-            <div className="bg-[var(--card-bg)] p-1.5 rounded-lg border border-[var(--border-color)] shadow-sm transition-transform group-hover/qr:scale-105">
+            <div className="bg-[var(--card-bg)] p-1.5 rounded-lg border border-[var(--border-color)] shadow-sm">
               <img src="/images/qrcodes/qr1.jpg" className="size-16 object-cover rounded-md" alt="公众号" />
             </div>
             <span className="text-[10px] font-bold text-[var(--text-secondary)]">公众号</span>
           </div>
           <div className="group/qr flex flex-col items-center gap-1.5">
-            <div className="bg-[var(--card-bg)] p-1.5 rounded-lg border border-[var(--border-color)] shadow-sm transition-transform group-hover/qr:scale-105">
+            <div className="bg-[var(--card-bg)] p-1.5 rounded-lg border border-[var(--border-color)] shadow-sm">
               <img src="/images/qrcodes/qr2.jpg" className="size-16 object-cover rounded-md" alt="小红书" />
             </div>
             <span className="text-[10px] font-bold text-[var(--text-secondary)]">小红书</span>

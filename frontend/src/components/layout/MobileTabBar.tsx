@@ -17,7 +17,7 @@ export const MobileTabBar = () => {
   ];
 
   return (
-    <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[var(--card-bg)]/95 backdrop-blur-lg border-t border-[var(--border-color)] z-[1100] flex items-center justify-around px-2">
+    <nav className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-[var(--card-bg)]/97 backdrop-blur-lg border-t border-[var(--border-color)] z-[1100] flex items-center justify-around px-2">
       {items.map((item) => (
         <Link
           key={item.path}
@@ -28,7 +28,7 @@ export const MobileTabBar = () => {
           )}
         >
           <Icon name={item.icon} className="size-5" />
-          <span className="text-[0.7rem] font-bold uppercase">{item.label}</span>
+          <span className="text-[0.7rem] font-semibold uppercase">{item.label}</span>
         </Link>
       ))}
     </nav>

@@ -25,7 +25,7 @@ export default function MainLayout({
     <div className="app-layout flex flex-col min-h-screen">
       <Header onMenuToggle={toggleMenu} />
       
-      <div className="page-body flex max-w-[1720px] mx-auto w-full pt-[var(--header-height)] pb-16 md:pb-0">
+      <div className="page-body flex max-w-[1680px] mx-auto w-full pt-[var(--header-height)] pb-16 md:pb-0">
         <Sidebar isOpen={isMenuOpen} />
         
         {isMenuOpen && (
@@ -35,7 +35,7 @@ export default function MainLayout({
           />
         )}
 
-        <main className="main-feed flex-1 p-5 md:p-8 xl:p-10 min-w-0">
+        <main className="main-feed flex-1 min-w-0 px-4 py-6 md:px-7 md:py-8 xl:px-10 xl:py-10">
           {children}
         </main>
 

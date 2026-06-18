@@ -198,10 +198,22 @@ const colorMap = {
   },
 };
 
-const fetchJson = async <T,>(path: string): Promise<T | null> => {
-  const response = await fetch(path);
-  const payload = await response.json();
-  return response.ok && !payload.error ? payload as T : null;
+const fetchJson = async <T,>(path: string, timeoutMs = 8000): Promise<T | null> => {
+  const request = (async () => {
+    const response = await fetch(path);
+    const payload = await response.json();
+    return response.ok && !payload.error ? payload as T : null;
+  })();
+
+  const timeout = new Promise<null>((resolve) => {
+    window.setTimeout(() => resolve(null), timeoutMs);
+  });
+
+  try {
+    return await Promise.race([request, timeout]);
+  } catch {
+    return null;
+  }
 };
 
 const scoreColor = (score: number, inverse = false): ColorKey => {

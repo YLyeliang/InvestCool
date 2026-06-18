@@ -3,8 +3,9 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
-const THEME_STORAGE_KEY = "investcool-theme-v2";
+const THEME_STORAGE_KEY = "investcool-theme-reader-v1";
 const LEGACY_THEME_STORAGE_KEY = "investcool-theme";
+const PREVIOUS_THEME_STORAGE_KEY = "investcool-theme-v2";
 
 interface ThemeContextType {
   theme: Theme;
@@ -23,6 +24,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
       document.documentElement.setAttribute("data-theme", savedTheme);
     } else {
       localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      localStorage.removeItem(PREVIOUS_THEME_STORAGE_KEY);
       localStorage.setItem(THEME_STORAGE_KEY, "light");
       document.documentElement.setAttribute("data-theme", "light");
     }
