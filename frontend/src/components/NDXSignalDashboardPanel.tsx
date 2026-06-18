@@ -32,6 +32,15 @@ interface BreadthPayload {
   equal_symbol: string;
 }
 
+interface ThemeRotationPayload {
+  leadership_score: number;
+  regime: string;
+  top_theme: string;
+  top_theme_excess_20d: number;
+  participation_count: number;
+  theme_count: number;
+}
+
 interface LiquidityPayload {
   flow_score: number;
   regime: string;
@@ -86,6 +95,7 @@ interface DashboardData {
   diagnostics: DiagnosticsPayload | null;
   factors: FactorPayload | null;
   breadth: BreadthPayload | null;
+  themeRotation: ThemeRotationPayload | null;
   liquidity: LiquidityPayload | null;
   valuation: ValuationPayload | null;
   earnings: EarningsPayload | null;
@@ -191,6 +201,7 @@ export const NDXSignalDashboardPanel = () => {
           diagnostics,
           factors,
           breadth,
+          themeRotation,
           liquidity,
           valuation,
           earnings,
@@ -203,6 +214,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<BreadthPayload>("/api/risk/breadth"),
+          fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
           fetchJson<LiquidityPayload>("/api/risk/liquidity"),
           fetchJson<ValuationPayload>("/api/risk/valuation"),
           fetchJson<EarningsPayload>("/api/risk/earnings"),
@@ -212,7 +224,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, factors, breadth, liquidity, valuation, earnings, options, volatilityTerm, tail, concentration });
+        setData({ latest, diagnostics, factors, breadth, themeRotation, liquidity, valuation, earnings, options, volatilityTerm, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -234,6 +246,7 @@ export const NDXSignalDashboardPanel = () => {
     const earningsScore = data.earnings?.event_score ?? 50;
     const supportiveScores = [
       data.breadth?.breadth_score ?? 50,
+      data.themeRotation?.leadership_score ?? 50,
       data.liquidity?.flow_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
@@ -272,6 +285,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.breadth ? `${data.breadth.equal_symbol} 差 ${formatSignedPct(data.breadth.participation_gap_20d)}` : "等待等权代理",
         color: data.breadth ? scoreColor(data.breadth.breadth_score) : "blue",
         icon: "network",
+      },
+      {
+        label: "主题轮动",
+        value: data.themeRotation ? data.themeRotation.regime : "--",
+        detail: data.themeRotation ? `${data.themeRotation.top_theme} ${formatSignedPct(data.themeRotation.top_theme_excess_20d)} · ${data.themeRotation.participation_count}/${data.themeRotation.theme_count}` : "等待主题 ETF",
+        color: data.themeRotation ? scoreColor(data.themeRotation.leadership_score) : "blue",
+        icon: "layers-3",
       },
       {
         label: "流动性",
@@ -336,7 +356,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 10 }).map((_, index) => (
+          {Array.from({ length: 11 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

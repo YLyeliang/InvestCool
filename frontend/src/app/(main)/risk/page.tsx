@@ -7,6 +7,7 @@ import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
+import { NDXThemeRotationPanel } from "@/components/NDXThemeRotationPanel";
 import { NDXBreadthParticipationPanel } from "@/components/NDXBreadthParticipationPanel";
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
@@ -150,6 +151,13 @@ export default function RiskPage() {
           <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> 相对强弱与 Beta
         </h3>
         <NDXRelativeStrengthPanel />
+      </section>
+
+      <section className="theme-rotation-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:layers-3" className="text-[var(--accent-color)]" /> NDX 主题轮动
+        </h3>
+        <NDXThemeRotationPanel />
       </section>
 
       <section className="breadth-section">

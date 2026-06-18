@@ -74,6 +74,7 @@ risk_valuation_cache = {"data": None, "last_update": None}
 risk_breadth_cache = {"data": None, "last_update": None}
 risk_volatility_term_cache = {"data": None, "last_update": None}
 risk_earnings_cache = {"data": None, "last_update": None}
+risk_theme_rotation_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -447,6 +448,17 @@ def earnings_catalyst_regime(score, nearest_days, event_weight_45d):
     if score >= 35:
         return "事件观察", "blue"
     return "窗口较远", "green"
+
+def theme_rotation_regime(participation_count, top_excess_20d, qqq_return_20d, dispersion_20d):
+    if participation_count >= 4 and qqq_return_20d > 0:
+        return "成长扩散", "green"
+    if participation_count <= 1 and top_excess_20d > 4:
+        return "窄幅主题", "amber"
+    if qqq_return_20d < -2 and participation_count <= 2:
+        return "主题退潮", "red"
+    if dispersion_20d >= 5:
+        return "高分化轮动", "amber"
+    return "均衡轮动", "blue"
 
 def metric_score(value, low, high, default=50):
     if value is None or value <= 0:
@@ -1769,6 +1781,161 @@ def refresh_relative_strength_data():
         logger.error(traceback.format_exc())
 
 
+def refresh_theme_rotation_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_theme_rotation_cache
+
+    try:
+        themes = [
+            {"key": "semis", "label": "半导体", "symbol": "SMH", "description": "芯片、算力与半导体设备"},
+            {"key": "software", "label": "软件云", "symbol": "IGV", "description": "软件、云服务与应用平台"},
+            {"key": "communication", "label": "通信平台", "symbol": "XLC", "description": "通信服务、广告与内容平台"},
+            {"key": "consumer", "label": "可选消费", "symbol": "XLY", "description": "电商、汽车与消费平台"},
+            {"key": "broad_tech", "label": "广义科技", "symbol": "IYW", "description": "美国科技板块宽基代理"},
+            {"key": "cybersecurity", "label": "网络安全", "symbol": "CIBR", "description": "安全软件与基础设施"},
+        ]
+        qqq_history = fetch_ohlc_history("QQQ", "6mo", min_rows=80, attempts=3)
+        qqq_close = qqq_history["Close"].rename("QQQ")
+        close_map = {"QQQ": qqq_close}
+        for theme in themes:
+            close_map[theme["symbol"]] = fetch_ohlc_history(theme["symbol"], "6mo", min_rows=80, attempts=3)["Close"]
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 80:
+            raise ValueError("Insufficient aligned theme rotation history")
+
+        def native_round(value, digits=2):
+            return round(float(value), digits)
+
+        returns = prices.pct_change().dropna() * 100
+        qqq_return_5d = pct_change(prices["QQQ"].iloc[-1], prices["QQQ"].iloc[-6]) if len(prices) >= 6 else 0
+        qqq_return_20d = pct_change(prices["QQQ"].iloc[-1], prices["QQQ"].iloc[-21]) if len(prices) >= 21 else qqq_return_5d
+        qqq_return_60d = pct_change(prices["QQQ"].iloc[-1], prices["QQQ"].iloc[-61]) if len(prices) >= 61 else qqq_return_20d
+
+        theme_rows = []
+        qqq_returns_60 = returns["QQQ"].tail(60)
+        qqq_var = safe_float(qqq_returns_60.var(), 0)
+
+        for theme in themes:
+            symbol = theme["symbol"]
+            return_5d = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-6]) if len(prices) >= 6 else 0
+            return_20d = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-21]) if len(prices) >= 21 else return_5d
+            return_60d = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-61]) if len(prices) >= 61 else return_20d
+            excess_20d = return_20d - qqq_return_20d
+            excess_60d = return_60d - qqq_return_60d
+            theme_returns_60 = returns[symbol].tail(60)
+            correlation = safe_float(theme_returns_60.corr(qqq_returns_60), 0)
+            beta = safe_float(theme_returns_60.cov(qqq_returns_60) / qqq_var, 0) if qqq_var else 0
+            hit_ratio = safe_float((returns[symbol].tail(20) > returns["QQQ"].tail(20)).mean() * 100, 0)
+            volatility_20d = safe_float(returns[symbol].tail(20).std() * (252 ** 0.5), 0)
+
+            if excess_20d >= 3 and excess_60d >= 3:
+                direction = "持续领先"
+                color = "green"
+            elif excess_20d >= 1:
+                direction = "短线领先"
+                color = "blue"
+            elif excess_20d <= -3 and excess_60d <= -3:
+                direction = "持续落后"
+                color = "red"
+            elif excess_20d <= -1:
+                direction = "短线落后"
+                color = "amber"
+            else:
+                direction = "跟随指数"
+                color = "blue"
+
+            theme_rows.append({
+                "key": theme["key"],
+                "label": theme["label"],
+                "symbol": symbol,
+                "description": theme["description"],
+                "price": native_round(prices[symbol].iloc[-1], 2),
+                "return_5d": native_round(return_5d, 2),
+                "return_20d": native_round(return_20d, 2),
+                "return_60d": native_round(return_60d, 2),
+                "excess_20d": native_round(excess_20d, 2),
+                "excess_60d": native_round(excess_60d, 2),
+                "correlation_to_qqq": native_round(correlation, 2),
+                "beta_to_qqq": native_round(beta, 2),
+                "hit_ratio_20d": native_round(hit_ratio, 1),
+                "volatility_20d": native_round(volatility_20d, 1),
+                "direction": direction,
+                "color": color,
+            })
+
+        sorted_by_excess = sorted(theme_rows, key=lambda row: row["excess_20d"], reverse=True)
+        leaders = sorted_by_excess[:3]
+        laggards = sorted_by_excess[-3:]
+        participation_count = len([row for row in theme_rows if row["excess_20d"] > 0])
+        strong_participation_count = len([row for row in theme_rows if row["excess_20d"] > 1.5])
+        top_theme = leaders[0]
+        weakest_theme = laggards[0]
+        dispersion_20d = safe_float(pd.Series([row["return_20d"] for row in theme_rows]).std(), 0)
+        avg_beta = safe_float(sum(row["beta_to_qqq"] for row in theme_rows) / len(theme_rows), 0)
+        leadership_score = round(clamp(
+            50
+            + participation_count * 6
+            + strong_participation_count * 4
+            + qqq_return_20d * 1.2
+            - max(0, dispersion_20d - 4) * 3
+            - max(0, top_theme["excess_20d"] - 6) * 2
+        ), 1)
+        regime, color = theme_rotation_regime(participation_count, top_theme["excess_20d"], qqq_return_20d, dispersion_20d)
+
+        if regime == "成长扩散":
+            summary = f"NDX 相关主题正在扩散，{participation_count}/{len(theme_rows)} 个主题跑赢 QQQ，领涨来自 {top_theme['label']}。"
+        elif regime == "窄幅主题":
+            summary = f"主题轮动偏窄，{top_theme['label']} 明显跑赢 QQQ，但多数主题未同步扩散。"
+        elif regime == "主题退潮":
+            summary = "NDX 相关主题多数跑输 QQQ，成长风格内部风险偏好正在退潮。"
+        elif regime == "高分化轮动":
+            summary = f"主题间 20 日收益分化较高，领涨 {top_theme['label']}，拖累 {weakest_theme['label']}，指数方向更依赖少数主题。"
+        else:
+            summary = "NDX 相关主题轮动处在均衡区，尚未形成单一主题极端主导。"
+
+        controls = [
+            f"若跑赢 QQQ 的主题少于 2 个，同时指数继续上涨，需要按窄幅行情降低突破确认度。",
+            f"当前领涨主题为 {top_theme['label']}（20日超额 {top_theme['excess_20d']:+.2f}%），若其转弱，NDX 动能可能快速降温。",
+            f"主题收益离散度 {dispersion_20d:.2f} 个百分点，越高越需要关注主题拥挤和轮动踩踏。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "benchmark_symbol": "QQQ",
+            "benchmark_return_5d": native_round(qqq_return_5d, 2),
+            "benchmark_return_20d": native_round(qqq_return_20d, 2),
+            "benchmark_return_60d": native_round(qqq_return_60d, 2),
+            "regime": regime,
+            "regime_color": color,
+            "leadership_score": leadership_score,
+            "summary": summary,
+            "participation_count": participation_count,
+            "strong_participation_count": strong_participation_count,
+            "theme_count": len(theme_rows),
+            "dispersion_20d": native_round(dispersion_20d, 2),
+            "average_beta": native_round(avg_beta, 2),
+            "top_theme": top_theme["label"],
+            "top_theme_symbol": top_theme["symbol"],
+            "top_theme_excess_20d": native_round(top_theme["excess_20d"], 2),
+            "weakest_theme": weakest_theme["label"],
+            "weakest_theme_symbol": weakest_theme["symbol"],
+            "weakest_theme_excess_20d": native_round(weakest_theme["excess_20d"], 2),
+            "leaders": leaders,
+            "laggards": list(reversed(laggards)),
+            "themes": sorted_by_excess,
+            "controls": controls,
+            "methodology": "使用 QQQ 作为 NDX 可交易基准，跟踪 SMH、IGV、XLC、XLY、IYW、CIBR 等主题 ETF 的 5/20/60 日收益、相对 QQQ 超额收益、20 日跑赢率、60 日相关性和 beta，用于判断 NDX 上涨是否由多个成长主题扩散支撑。不等同于官方 Nasdaq 100 行业权重。",
+        }
+        risk_theme_rotation_cache["data"] = data
+        risk_theme_rotation_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX theme rotation updated: {regime}, score {leadership_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX theme rotation refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def average_pairwise_correlation(frame):
     corr = frame.corr()
     values = []
@@ -2915,6 +3082,7 @@ def background_worker():
     last_levels = 0
     last_tail = 0
     last_relative = 0
+    last_theme_rotation = 0
     last_dispersion = 0
     last_options = 0
     last_volatility_term = 0
@@ -2953,6 +3121,11 @@ def background_worker():
             if time.time() - last_relative > 1800:
                 refresh_relative_strength_data()
                 last_relative = time.time()
+
+            # NDX theme rotation every 30 minutes
+            if time.time() - last_theme_rotation > 1800:
+                refresh_theme_rotation_data()
+                last_theme_rotation = time.time()
 
             # MAG7 correlation and dispersion every 30 minutes
             if time.time() - last_dispersion > 1800:
@@ -3109,6 +3282,14 @@ def get_risk_relative():
         refresh_relative_strength_data()
 
     data = risk_relative_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/theme-rotation', methods=['GET'])
+def get_risk_theme_rotation():
+    if not cache_is_fresh(risk_theme_rotation_cache, 15 * 60) and should_refresh_empty_cache(risk_theme_rotation_cache, 60):
+        refresh_theme_rotation_data()
+
+    data = risk_theme_rotation_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/dispersion', methods=['GET'])
