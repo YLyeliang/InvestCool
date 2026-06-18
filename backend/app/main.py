@@ -72,6 +72,7 @@ risk_options_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
 risk_breadth_cache = {"data": None, "last_update": None}
+risk_volatility_term_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -427,6 +428,15 @@ def breadth_regime(score, cap_return_20d, equal_return_20d, participation_gap_20
     if score >= 45:
         return "中性扩散", "blue"
     return "参与不足", "amber"
+
+def volatility_term_regime(front_ratio, vvix_z_score):
+    if front_ratio >= 1.05 or vvix_z_score >= 1.5:
+        return "波动倒挂", "red"
+    if front_ratio >= 0.96 or vvix_z_score >= 0.8:
+        return "曲线趋平", "amber"
+    if front_ratio <= 0.82 and vvix_z_score < 0.5:
+        return "深度 Contango", "green"
+    return "常态 Contango", "blue"
 
 def metric_score(value, low, high, default=50):
     if value is None or value <= 0:
@@ -1819,6 +1829,136 @@ def refresh_options_data():
         logger.error(traceback.format_exc())
 
 
+def refresh_volatility_term_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_volatility_term_cache
+
+    try:
+        symbols = {
+            "vix": "^VIX",
+            "vix3m": "^VIX3M",
+            "vix6m": "^VIX6M",
+            "vvix": "^VVIX",
+        }
+        close_map = {}
+        for key, symbol in symbols.items():
+            close_map[key] = fetch_ohlc_history(symbol, "6mo", min_rows=80, attempts=3)["Close"]
+
+        aligned = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(aligned) < 80:
+            raise ValueError("Insufficient aligned VIX term structure history")
+
+        latest = aligned.iloc[-1]
+        vix = safe_float(latest["vix"], 0)
+        vix3m = safe_float(latest["vix3m"], 0)
+        vix6m = safe_float(latest["vix6m"], 0)
+        vvix = safe_float(latest["vvix"], 0)
+        if min(vix, vix3m, vix6m, vvix) <= 0:
+            raise ValueError("Invalid VIX term structure latest values")
+
+        front_ratio_series = aligned["vix"] / aligned["vix3m"]
+        mid_ratio_series = aligned["vix3m"] / aligned["vix6m"]
+        front_ratio = safe_float(front_ratio_series.iloc[-1], 0)
+        mid_ratio = safe_float(mid_ratio_series.iloc[-1], 0)
+        front_spread = vix3m - vix
+        mid_spread = vix6m - vix3m
+        front_percentile = safe_float((front_ratio_series <= front_ratio).mean() * 100, 50)
+        vvix_mean = safe_float(aligned["vvix"].tail(60).mean(), vvix)
+        vvix_std = safe_float(aligned["vvix"].tail(60).std(), 0)
+        vvix_z_score = (vvix - vvix_mean) / vvix_std if vvix_std else 0
+
+        vix_change_5d = vix - safe_float(aligned["vix"].iloc[-6], vix) if len(aligned) >= 6 else 0
+        vix_change_20d = vix - safe_float(aligned["vix"].iloc[-21], vix) if len(aligned) >= 21 else vix_change_5d
+        vvix_change_20d = vvix - safe_float(aligned["vvix"].iloc[-21], vvix) if len(aligned) >= 21 else 0
+
+        front_pressure = clamp((front_ratio - 0.78) / 0.30 * 62)
+        vvix_pressure = clamp((vvix_z_score + 0.8) / 2.6 * 28)
+        vix_momentum = clamp(max(0, vix_change_5d) * 3.2 + max(0, vix_change_20d) * 1.2, 0, 10)
+        term_score = round(clamp(front_pressure + vvix_pressure + vix_momentum), 1)
+        regime, color = volatility_term_regime(front_ratio, vvix_z_score)
+
+        if regime == "波动倒挂":
+            summary = "VIX 前端已经接近或高于 3M 波动率，曲线进入压力结构，短线风险预算需要优先考虑去杠杆和保护成本。"
+        elif regime == "曲线趋平":
+            summary = "VIX 期限结构正在趋平，现货波动或波动率交易需求上升，NDX 追高需要更强成交与广度确认。"
+        elif regime == "深度 Contango":
+            summary = "VIX 低于中期波动率且曲线较陡，市场仍按常态风险定价，但低波动环境下不宜放松止损纪律。"
+        else:
+            summary = "VIX 期限结构保持 Contango，波动率压力处在常态区，更适合与技术位和期权隐含区间联合观察。"
+
+        indicators = [
+            {
+                "key": "front_curve",
+                "label": "前端曲线",
+                "value": f"{front_ratio:.2f}x",
+                "state": "倒挂" if front_ratio >= 1 else "趋平" if front_ratio >= 0.96 else "Contango",
+                "color": "red" if front_ratio >= 1.03 else "amber" if front_ratio >= 0.96 else "green",
+                "detail": f"VIX/VIX3M 为 {front_ratio:.2f}，3M-VIX 点差 {front_spread:+.2f}。",
+            },
+            {
+                "key": "mid_curve",
+                "label": "中段曲线",
+                "value": f"{mid_ratio:.2f}x",
+                "state": "倒挂" if mid_ratio >= 1 else "平缓" if mid_ratio >= 0.94 else "陡峭",
+                "color": "red" if mid_ratio >= 1 else "amber" if mid_ratio >= 0.94 else "blue",
+                "detail": f"VIX3M/VIX6M 为 {mid_ratio:.2f}，6M-3M 点差 {mid_spread:+.2f}。",
+            },
+            {
+                "key": "vvix",
+                "label": "VVIX",
+                "value": f"{vvix:.1f}",
+                "state": "波动交易升温" if vvix_z_score >= 1 else "偏低" if vvix_z_score <= -0.8 else "常态",
+                "color": "red" if vvix_z_score >= 1.5 else "amber" if vvix_z_score >= 0.8 else "green" if vvix_z_score <= -0.8 else "blue",
+                "detail": f"60日 z-score {vvix_z_score:+.2f}，20日变化 {vvix_change_20d:+.1f} 点。",
+            },
+            {
+                "key": "vix_momentum",
+                "label": "VIX 动量",
+                "value": f"{vix_change_5d:+.1f}",
+                "state": "上行" if vix_change_5d > 1.5 else "回落" if vix_change_5d < -1.5 else "横盘",
+                "color": "red" if vix_change_5d > 3 else "amber" if vix_change_5d > 1.5 else "green" if vix_change_5d < -1.5 else "blue",
+                "detail": f"VIX 5日变化 {vix_change_5d:+.1f} 点，20日变化 {vix_change_20d:+.1f} 点。",
+            },
+        ]
+
+        controls = [
+            f"若 VIX/VIX3M 升破 1.00，应把短线波动倒挂视为风险预算收缩信号。",
+            f"若 VVIX z-score 高于 1.5，保护性期权成本可能快速抬升，避免在恐慌时集中补保险。",
+            "当期限结构维持 Contango 且技术位未破，波动率压力可按背景风险处理，不单独作为追涨理由。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": aligned.index[-1].date().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "term_score": term_score,
+            "summary": summary,
+            "vix": round(vix, 2),
+            "vix3m": round(vix3m, 2),
+            "vix6m": round(vix6m, 2),
+            "vvix": round(vvix, 2),
+            "front_ratio": round(front_ratio, 2),
+            "mid_ratio": round(mid_ratio, 2),
+            "front_spread": round(front_spread, 2),
+            "mid_spread": round(mid_spread, 2),
+            "front_ratio_percentile": round(front_percentile, 1),
+            "vvix_z_score": round(vvix_z_score, 2),
+            "vix_change_5d": round(vix_change_5d, 2),
+            "vix_change_20d": round(vix_change_20d, 2),
+            "vvix_change_20d": round(vvix_change_20d, 2),
+            "indicators": indicators,
+            "controls": controls,
+            "methodology": "使用 VIX、VIX3M、VIX6M 和 VVIX 最近 6 个月日线，计算前端/中段期限结构、点差、百分位、VVIX z-score 与 VIX 动量，用于判断波动率曲线是否趋平或倒挂；该模块衡量风险定价结构，不构成波动率交易建议。",
+        }
+        risk_volatility_term_cache["data"] = data
+        risk_volatility_term_cache["last_update"] = datetime.utcnow()
+        logger.info(f"VIX term structure updated: {regime}, score {term_score:.1f}")
+    except Exception as e:
+        logger.error(f"VIX term structure refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_liquidity_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_liquidity_cache
@@ -2581,6 +2721,7 @@ def background_worker():
     last_relative = 0
     last_dispersion = 0
     last_options = 0
+    last_volatility_term = 0
     last_liquidity = 0
     last_valuation = 0
     last_breadth = 0
@@ -2625,6 +2766,11 @@ def background_worker():
             if time.time() - last_options > 1800:
                 refresh_options_data()
                 last_options = time.time()
+
+            # VIX term structure every 30 minutes
+            if time.time() - last_volatility_term > 1800:
+                refresh_volatility_term_data()
+                last_volatility_term = time.time()
 
             # QQQ liquidity and volume confirmation every 30 minutes
             if time.time() - last_liquidity > 1800:
@@ -2777,6 +2923,14 @@ def get_risk_options():
         refresh_options_data()
 
     data = risk_options_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/volatility-term', methods=['GET'])
+def get_risk_volatility_term():
+    if not cache_is_fresh(risk_volatility_term_cache, 15 * 60) and should_refresh_empty_cache(risk_volatility_term_cache, 60):
+        refresh_volatility_term_data()
+
+    data = risk_volatility_term_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/liquidity', methods=['GET'])

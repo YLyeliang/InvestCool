@@ -53,6 +53,13 @@ interface OptionsPayload {
   expiration: string;
 }
 
+interface VolatilityTermPayload {
+  regime: string;
+  term_score: number;
+  front_ratio: number;
+  vvix_z_score: number;
+}
+
 interface TailPayload {
   tail_score: number;
   tail_label: string;
@@ -74,6 +81,7 @@ interface DashboardData {
   liquidity: LiquidityPayload | null;
   valuation: ValuationPayload | null;
   options: OptionsPayload | null;
+  volatilityTerm: VolatilityTermPayload | null;
   tail: TailPayload | null;
   concentration: ConcentrationPayload | null;
 }
@@ -177,6 +185,7 @@ export const NDXSignalDashboardPanel = () => {
           liquidity,
           valuation,
           options,
+          volatilityTerm,
           tail,
           concentration,
         ] = await Promise.all([
@@ -187,11 +196,12 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<LiquidityPayload>("/api/risk/liquidity"),
           fetchJson<ValuationPayload>("/api/risk/valuation"),
           fetchJson<OptionsPayload>("/api/risk/options"),
+          fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
           fetchJson<TailPayload>("/api/risk/tail"),
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, factors, breadth, liquidity, valuation, options, tail, concentration });
+        setData({ latest, diagnostics, factors, breadth, liquidity, valuation, options, volatilityTerm, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -214,7 +224,8 @@ export const NDXSignalDashboardPanel = () => {
       data.breadth?.breadth_score ?? 50,
       data.liquidity?.flow_score ?? 50,
     ];
-    const pressureScores = [riskScore, macroScore, tailScore, valuationScore];
+    const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
+    const pressureScores = [riskScore, macroScore, tailScore, valuationScore, volatilityTermScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -265,6 +276,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "badge-dollar-sign",
       },
       {
+        label: "波动曲线",
+        value: data.volatilityTerm ? data.volatilityTerm.regime : "--",
+        detail: data.volatilityTerm ? `VIX/3M ${data.volatilityTerm.front_ratio.toFixed(2)}x · VVIX z ${data.volatilityTerm.vvix_z_score.toFixed(2)}` : "等待期限结构",
+        color: data.volatilityTerm ? scoreColor(data.volatilityTerm.term_score, true) : "blue",
+        icon: "waves",
+      },
+      {
         label: "估值压力",
         value: data.valuation ? data.valuation.valuation_label : "--",
         detail: data.valuation ? `FPE ${data.valuation.weighted_forward_pe?.toFixed(1) ?? "--"}x · ${data.valuation.top_pressure_symbol}` : "等待基本面",
@@ -299,7 +317,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 8 }).map((_, index) => (
+          {Array.from({ length: 9 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
