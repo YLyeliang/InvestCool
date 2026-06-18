@@ -72,6 +72,7 @@ risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_vol_premium_cache = {"data": None, "last_update": None}
+risk_intraday_tape_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
 risk_quality_cache = {"data": None, "last_update": None}
@@ -308,6 +309,19 @@ def vol_premium_regime(underpricing_pressure, carry_cost):
     if underpricing_pressure <= 28 and carry_cost <= 42:
         return "保护便宜", "green"
     return "定价均衡", "blue"
+
+def intraday_tape_regime(daily_return, vwap_distance, volume_pace, range_expansion, range_position, opening_gap, balance_break):
+    if daily_return <= -1.15 and vwap_distance <= -0.18 and volume_pace >= 1.1:
+        return "卖压主导", "red"
+    if opening_gap <= -0.8 and balance_break < 0:
+        return "缺口走弱", "red"
+    if range_expansion >= 1.35 and abs(daily_return) >= 0.8:
+        return "波动扩张", "amber"
+    if daily_return >= 0.75 and vwap_distance >= 0.12 and range_position >= 68:
+        return "上行动能", "green"
+    if abs(vwap_distance) <= 0.18 and 35 <= range_position <= 65:
+        return "VWAP 均衡", "blue"
+    return "盘中观察", "blue"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -3600,6 +3614,205 @@ def refresh_vol_premium_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_intraday_tape_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_intraday_tape_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        intraday = yf.Ticker(proxy_symbol).history(period="5d", interval="5m")
+        if intraday is None or intraday.empty or "Close" not in intraday.columns:
+            raise ValueError("No intraday QQQ tape data")
+
+        intraday = intraday.dropna(subset=["Close"]).copy()
+        intraday.index = pd.to_datetime(intraday.index).tz_localize(None)
+        if len(intraday) < 12:
+            raise ValueError("Insufficient intraday QQQ tape rows")
+
+        intraday["session_date"] = intraday.index.date
+        latest_session_date = max(intraday["session_date"])
+        session = intraday[intraday["session_date"] == latest_session_date].copy()
+        if len(session) < 6:
+            raise ValueError("Insufficient latest QQQ session rows")
+
+        daily = fetch_ohlc_history(proxy_symbol, "3mo", min_rows=40, attempts=3)
+        daily_before = daily[daily.index.date < latest_session_date]
+        previous_close = safe_float(daily_before["Close"].iloc[-1], None) if not daily_before.empty else None
+        if previous_close is None or previous_close <= 0:
+            previous_sessions = intraday[intraday["session_date"] < latest_session_date]
+            previous_close = safe_float(previous_sessions["Close"].iloc[-1], None) if not previous_sessions.empty else None
+        if previous_close is None or previous_close <= 0:
+            raise ValueError("Missing previous close for intraday tape")
+
+        open_price = safe_float(session["Open"].iloc[0], previous_close)
+        latest_price = safe_float(session["Close"].iloc[-1], open_price)
+        high_price = safe_float(session["High"].max(), latest_price)
+        low_price = safe_float(session["Low"].min(), latest_price)
+        session_volume = safe_float(session["Volume"].fillna(0).sum(), 0)
+        avg_volume_20 = safe_float(daily["Volume"].fillna(0).tail(20).mean(), session_volume)
+        if avg_volume_20 <= 0:
+            avg_volume_20 = max(session_volume, 1)
+
+        opening_gap = pct_change(open_price, previous_close)
+        intraday_return = pct_change(latest_price, open_price)
+        daily_return = pct_change(latest_price, previous_close)
+        range_pct = (high_price - low_price) / previous_close * 100 if previous_close else 0
+        avg_range_20 = safe_float(((daily["High"] - daily["Low"]) / daily["Close"].shift(1) * 100).dropna().tail(20).mean(), range_pct)
+        range_expansion = range_pct / avg_range_20 if avg_range_20 > 0 else 1
+        range_position = (latest_price - low_price) / (high_price - low_price) * 100 if high_price > low_price else 50
+
+        typical_price = (session["High"] + session["Low"] + session["Close"]) / 3
+        volume_series = session["Volume"].fillna(0)
+        vwap = safe_float((typical_price * volume_series).sum() / volume_series.sum(), latest_price) if volume_series.sum() > 0 else latest_price
+        vwap_distance = pct_change(latest_price, vwap)
+
+        first_hour = session.head(12)
+        first_hour_high = safe_float(first_hour["High"].max(), high_price)
+        first_hour_low = safe_float(first_hour["Low"].min(), low_price)
+        if latest_price > first_hour_high:
+            balance_break = 1
+            balance_state = "上破首小时"
+        elif latest_price < first_hour_low:
+            balance_break = -1
+            balance_state = "下破首小时"
+        else:
+            balance_break = 0
+            balance_state = "首小时区间内"
+
+        elapsed_minutes = max(5, (session.index[-1] - session.index[0]).total_seconds() / 60 + 5)
+        session_fraction = clamp(elapsed_minutes / 390, 0.05, 1)
+        expected_volume = avg_volume_20 * session_fraction
+        volume_pace = session_volume / expected_volume if expected_volume > 0 else 1
+
+        five_min_returns = session["Close"].pct_change().dropna() * 100
+        realized_vol_intraday = safe_float(five_min_returns.std() * (78 ** 0.5), 0)
+        range_pressure = clamp((range_expansion - 0.85) / 0.75 * 28)
+        volume_pressure = clamp((volume_pace - 0.85) / 0.8 * 18) if daily_return < 0 else clamp((volume_pace - 1.35) / 1.0 * 8)
+        vwap_pressure = clamp(max(0, -vwap_distance) * 16 + max(0, abs(vwap_distance) - 0.8) * 8)
+        gap_pressure = clamp(max(0, -opening_gap) * 12 + max(0, abs(opening_gap) - 1.2) * 8)
+        location_pressure = clamp((55 - range_position) / 55 * 20)
+        balance_pressure = 12 if balance_break < 0 else 0
+        tape_pressure_score = round(clamp(
+            22 + range_pressure + volume_pressure + vwap_pressure + gap_pressure + location_pressure + balance_pressure
+        ), 1)
+
+        regime, color = intraday_tape_regime(
+            daily_return,
+            vwap_distance,
+            volume_pace,
+            range_expansion,
+            range_position,
+            opening_gap,
+            balance_break,
+        )
+
+        if regime == "卖压主导":
+            summary = "QQQ 盘中位于 VWAP 下方且放量下行，NDX 交易台应把反弹视为减仓/降低追高的窗口。"
+        elif regime == "缺口走弱":
+            summary = "QQQ 低开后跌破首小时区间，盘中结构转弱，新增风险预算需要等价格重新收复 VWAP。"
+        elif regime == "波动扩张":
+            summary = "QQQ 日内振幅明显高于 20 日均值，盘中执行应降低单笔规模并避免在区间边缘追价。"
+        elif regime == "上行动能":
+            summary = "QQQ 位于 VWAP 上方且靠近日内高位，短线买盘仍有承接，但需要确认成交节奏没有过热。"
+        elif regime == "VWAP 均衡":
+            summary = "QQQ 围绕 VWAP 震荡，盘中多空尚未打开方向，适合等待首小时区间突破后再提高执行强度。"
+        else:
+            summary = "QQQ 盘中结构处在观察区，需结合 VWAP、成交节奏和首小时区间判断 NDX 风险执行方向。"
+
+        indicators = [
+            {
+                "key": "gap",
+                "label": "开盘缺口",
+                "value": f"{opening_gap:+.2f}%",
+                "state": "跳空上行" if opening_gap >= 0.6 else "跳空下行" if opening_gap <= -0.6 else "平开",
+                "color": "green" if opening_gap >= 0.6 else "red" if opening_gap <= -0.8 else "blue",
+                "detail": f"开盘 {open_price:.2f}，前收 {previous_close:.2f}。",
+            },
+            {
+                "key": "vwap",
+                "label": "VWAP 偏离",
+                "value": f"{vwap_distance:+.2f}%",
+                "state": "VWAP 上方" if vwap_distance > 0.15 else "VWAP 下方" if vwap_distance < -0.15 else "贴近 VWAP",
+                "color": "green" if vwap_distance >= 0.25 else "red" if vwap_distance <= -0.25 else "blue",
+                "detail": f"VWAP {vwap:.2f}，现价 {latest_price:.2f}。",
+            },
+            {
+                "key": "range",
+                "label": "日内区间",
+                "value": f"{range_position:.0f}%",
+                "state": "靠近高位" if range_position >= 72 else "靠近低位" if range_position <= 28 else "区间中部",
+                "color": "green" if range_position >= 72 else "red" if range_position <= 28 else "blue",
+                "detail": f"日内 {low_price:.2f}-{high_price:.2f}，振幅 {range_pct:.2f}%。",
+            },
+            {
+                "key": "volume",
+                "label": "成交节奏",
+                "value": f"{volume_pace:.2f}x",
+                "state": "放量" if volume_pace >= 1.25 else "缩量" if volume_pace <= 0.75 else "正常",
+                "color": "amber" if volume_pace >= 1.25 else "blue" if volume_pace > 0.75 else "amber",
+                "detail": f"已成交 {session_volume / 1_000_000:.1f}M，20日均量 {avg_volume_20 / 1_000_000:.1f}M。",
+            },
+            {
+                "key": "first_hour",
+                "label": "首小时区间",
+                "value": balance_state,
+                "state": "突破" if balance_break > 0 else "跌破" if balance_break < 0 else "盘整",
+                "color": "green" if balance_break > 0 else "red" if balance_break < 0 else "blue",
+                "detail": f"首小时区间 {first_hour_low:.2f}-{first_hour_high:.2f}。",
+            },
+        ]
+
+        controls = [
+            f"若价格重新跌破 VWAP {vwap:.2f} 且成交节奏高于 1.20x，应降低追涨执行强度。",
+            f"若收复首小时高点 {first_hour_high:.2f} 并维持在区间上 70%，可把盘中信号从观察升级为确认。",
+            f"当前振幅为 20日均值的 {range_expansion:.2f}x；高于 1.35x 时降低单笔下单规模。",
+            "盘中模块只用于执行节奏和风险预算微调，不替代收盘级别风险模型。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "session_date": latest_session_date.isoformat(),
+            "last_bar_time": session.index[-1].isoformat(),
+            "previous_close": round(previous_close, 2),
+            "open": round(open_price, 2),
+            "last_price": round(latest_price, 2),
+            "high": round(high_price, 2),
+            "low": round(low_price, 2),
+            "opening_gap": round(opening_gap, 2),
+            "intraday_return": round(intraday_return, 2),
+            "daily_return": round(daily_return, 2),
+            "range_pct": round(range_pct, 2),
+            "avg_range_20": round(avg_range_20, 2),
+            "range_expansion": round(range_expansion, 2),
+            "range_position": round(range_position, 1),
+            "vwap": round(vwap, 2),
+            "vwap_distance": round(vwap_distance, 2),
+            "first_hour_high": round(first_hour_high, 2),
+            "first_hour_low": round(first_hour_low, 2),
+            "balance_state": balance_state,
+            "balance_break": balance_break,
+            "volume": round(session_volume),
+            "avg_volume_20": round(avg_volume_20),
+            "volume_pace": round(volume_pace, 2),
+            "elapsed_minutes": round(elapsed_minutes),
+            "realized_vol_intraday": round(realized_vol_intraday, 2),
+            "tape_pressure_score": tape_pressure_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "indicators": indicators,
+            "controls": controls,
+            "methodology": "使用 QQQ 5 分钟线作为 NDX 可交易盘中代理，计算开盘缺口、VWAP 偏离、日内区间位置、首小时区间突破、成交节奏和日内波动扩张。该模块用于交易台执行和风险预算微调，不构成日内交易建议。",
+        }
+        risk_intraday_tape_cache["data"] = data
+        risk_intraday_tape_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX intraday tape updated: {regime}, pressure {tape_pressure_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX intraday tape refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_liquidity_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_liquidity_cache
@@ -6228,6 +6441,7 @@ def background_worker():
     last_options = 0
     last_volatility_term = 0
     last_vol_premium = 0
+    last_intraday_tape = 0
     last_liquidity = 0
     last_valuation = 0
     last_quality = 0
@@ -6312,6 +6526,11 @@ def background_worker():
             if time.time() - last_vol_premium > 1800:
                 refresh_vol_premium_data()
                 last_vol_premium = time.time()
+
+            # QQQ intraday trading-desk tape every 5 minutes
+            if time.time() - last_intraday_tape > 300:
+                refresh_intraday_tape_data()
+                last_intraday_tape = time.time()
 
             # QQQ liquidity and volume confirmation every 30 minutes
             if time.time() - last_liquidity > 1800:
@@ -6626,6 +6845,14 @@ def get_risk_vol_premium():
         refresh_vol_premium_data(allow_dependency_refresh="light")
 
     data = risk_vol_premium_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/intraday-tape', methods=['GET'])
+def get_risk_intraday_tape():
+    if not cache_is_fresh(risk_intraday_tape_cache, 5 * 60) and should_refresh_empty_cache(risk_intraday_tape_cache, 60):
+        refresh_intraday_tape_data()
+
+    data = risk_intraday_tape_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/liquidity', methods=['GET'])
