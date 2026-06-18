@@ -71,6 +71,7 @@ risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
+risk_breadth_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -415,6 +416,17 @@ def valuation_pressure_label(score):
     if score >= 32:
         return "成长支撑", "blue"
     return "估值舒适", "green"
+
+def breadth_regime(score, cap_return_20d, equal_return_20d, participation_gap_20d):
+    if cap_return_20d > 2 and participation_gap_20d < -3:
+        return "窄幅领涨", "amber"
+    if cap_return_20d < -2 and equal_return_20d < cap_return_20d - 1:
+        return "广度走弱", "red"
+    if score >= 68:
+        return "广泛参与", "green"
+    if score >= 45:
+        return "中性扩散", "blue"
+    return "参与不足", "amber"
 
 def metric_score(value, low, high, default=50):
     if value is None or value <= 0:
@@ -846,6 +858,153 @@ def refresh_valuation_data():
         logger.info(f"MAG7 valuation proxy updated: {label}, score {valuation_score:.1f}")
     except Exception as e:
         logger.error(f"MAG7 valuation proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_breadth_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_breadth_cache
+
+    try:
+        cap_symbol = "QQQ"
+        equal_symbol = None
+        cap_history = fetch_ohlc_history(cap_symbol, "6mo", min_rows=80, attempts=3)
+        equal_history = None
+        for candidate in ["QQEW", "QQQE"]:
+            try:
+                equal_history = fetch_ohlc_history(candidate, "6mo", min_rows=80, attempts=3)
+                equal_symbol = candidate
+                break
+            except Exception as e:
+                logger.error(f"Equal-weight breadth proxy fetch error for {candidate}: {e}")
+
+        if equal_history is None or equal_symbol is None:
+            raise ValueError("Equal-weight Nasdaq 100 proxy unavailable")
+
+        cap_close = cap_history["Close"].rename("cap")
+        equal_close = equal_history["Close"].rename("equal")
+        aligned = pd.concat([cap_close, equal_close], axis=1, join="inner").dropna()
+        if len(aligned) < 80:
+            raise ValueError("Insufficient aligned breadth history")
+
+        cap_returns = aligned["cap"].pct_change() * 100
+        equal_returns = aligned["equal"].pct_change() * 100
+        spread_returns = equal_returns - cap_returns
+        ratio = aligned["equal"] / aligned["cap"]
+
+        cap_return_5d = pct_change(aligned["cap"].iloc[-1], aligned["cap"].iloc[-6]) if len(aligned) >= 6 else 0
+        cap_return_20d = pct_change(aligned["cap"].iloc[-1], aligned["cap"].iloc[-21]) if len(aligned) >= 21 else cap_return_5d
+        cap_return_60d = pct_change(aligned["cap"].iloc[-1], aligned["cap"].iloc[-61]) if len(aligned) >= 61 else cap_return_20d
+        equal_return_5d = pct_change(aligned["equal"].iloc[-1], aligned["equal"].iloc[-6]) if len(aligned) >= 6 else 0
+        equal_return_20d = pct_change(aligned["equal"].iloc[-1], aligned["equal"].iloc[-21]) if len(aligned) >= 21 else equal_return_5d
+        equal_return_60d = pct_change(aligned["equal"].iloc[-1], aligned["equal"].iloc[-61]) if len(aligned) >= 61 else equal_return_20d
+        participation_gap_20d = equal_return_20d - cap_return_20d
+        participation_gap_60d = equal_return_60d - cap_return_60d
+        ratio_change_20d = pct_change(ratio.iloc[-1], ratio.iloc[-21]) if len(ratio) >= 21 else 0
+        ratio_change_60d = pct_change(ratio.iloc[-1], ratio.iloc[-61]) if len(ratio) >= 61 else ratio_change_20d
+        participation_days_20d = int((spread_returns.tail(20) > 0).sum())
+        participation_rate_20d = participation_days_20d / 20 * 100
+        up_days_20d = int((equal_returns.tail(20) > 0).sum())
+        down_capture = None
+        cap_down = cap_returns.tail(60)[cap_returns.tail(60) < 0]
+        if len(cap_down) >= 5:
+            equal_down = equal_returns.loc[cap_down.index]
+            down_capture = safe_float(abs(equal_down.mean()) / abs(cap_down.mean()) * 100, None)
+
+        rolling_corr = safe_float(cap_returns.tail(60).corr(equal_returns.tail(60)), 0)
+        spread_vol = safe_float(spread_returns.tail(60).std(), 0)
+        breadth_score = 50 + participation_gap_20d * 5 + participation_gap_60d * 1.8 + (participation_rate_20d - 50) * 0.35 + ratio_change_20d * 4
+        if down_capture is not None and down_capture > 110:
+            breadth_score -= min(12, (down_capture - 100) * 0.25)
+        breadth_score = round(clamp(breadth_score), 1)
+
+        regime, color = breadth_regime(breadth_score, cap_return_20d, equal_return_20d, participation_gap_20d)
+        if regime == "广泛参与":
+            summary = "等权 Nasdaq 100 代理跑赢 QQQ，NDX 上涨质量更接近成分股扩散而非少数龙头拉动。"
+        elif regime == "窄幅领涨":
+            summary = "QQQ 表现明显强于等权代理，NDX 上涨更依赖大权重龙头，追高需要更强确认。"
+        elif regime == "广度走弱":
+            summary = "等权代理在下跌阶段弱于 QQQ，说明内部成分股承压范围扩大。"
+        elif regime == "参与不足":
+            summary = "等权参与度偏弱，NDX 指数信号需要等待更广泛的成分股跟进。"
+        else:
+            summary = "等权代理与 QQQ 表现接近，NDX 内部参与度处在中性扩散区。"
+
+        indicators = [
+            {
+                "key": "gap20",
+                "label": "20日参与差",
+                "value": f"{participation_gap_20d:+.2f}%",
+                "state": "扩散" if participation_gap_20d > 1 else "收窄" if participation_gap_20d < -1 else "均衡",
+                "color": "green" if participation_gap_20d > 1 else "amber" if participation_gap_20d < -1 else "blue",
+                "detail": f"{equal_symbol} 20日 {equal_return_20d:+.2f}%，QQQ 20日 {cap_return_20d:+.2f}%。",
+            },
+            {
+                "key": "ratio",
+                "label": "等权/市值比率",
+                "value": f"{ratio_change_20d:+.2f}%",
+                "state": "改善" if ratio_change_20d > 1 else "恶化" if ratio_change_20d < -1 else "横盘",
+                "color": "green" if ratio_change_20d > 1 else "amber" if ratio_change_20d < -1 else "blue",
+                "detail": "等权代理相对 QQQ 的价格比率变化，用于观察内部扩散。",
+            },
+            {
+                "key": "days",
+                "label": "跑赢天数",
+                "value": f"{participation_days_20d}/20",
+                "state": "占优" if participation_days_20d >= 12 else "不足" if participation_days_20d <= 8 else "均衡",
+                "color": "green" if participation_days_20d >= 12 else "amber" if participation_days_20d <= 8 else "blue",
+                "detail": f"近20日等权代理有 {participation_days_20d} 天跑赢 QQQ。",
+            },
+            {
+                "key": "down_capture",
+                "label": "下跌捕获",
+                "value": "--" if down_capture is None else f"{down_capture:.0f}%",
+                "state": "承压" if down_capture is not None and down_capture > 110 else "抗跌" if down_capture is not None and down_capture < 90 else "常态",
+                "color": "red" if down_capture is not None and down_capture > 115 else "green" if down_capture is not None and down_capture < 90 else "blue",
+                "detail": "最近60日 QQQ 下跌日中，等权代理平均跌幅相对 QQQ 的比例。",
+            },
+        ]
+
+        controls = [
+            f"若 {equal_symbol}/QQQ 比率 20 日继续为负，指数上涨应按窄幅龙头行情处理。",
+            "若等权代理连续跑赢且 QQQ 同步上涨，可提高对趋势延续的确认度。",
+            "若下跌捕获率高于 110%，说明非龙头成分股在回撤日更脆弱，需要收缩进取仓位。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "cap_symbol": cap_symbol,
+            "equal_symbol": equal_symbol,
+            "price_date": str(aligned.index[-1].date()),
+            "breadth_score": breadth_score,
+            "breadth_label": regime,
+            "breadth_color": color,
+            "summary": summary,
+            "cap_return_5d": round(cap_return_5d, 2),
+            "cap_return_20d": round(cap_return_20d, 2),
+            "cap_return_60d": round(cap_return_60d, 2),
+            "equal_return_5d": round(equal_return_5d, 2),
+            "equal_return_20d": round(equal_return_20d, 2),
+            "equal_return_60d": round(equal_return_60d, 2),
+            "participation_gap_20d": round(participation_gap_20d, 2),
+            "participation_gap_60d": round(participation_gap_60d, 2),
+            "ratio_change_20d": round(ratio_change_20d, 2),
+            "ratio_change_60d": round(ratio_change_60d, 2),
+            "participation_days_20d": participation_days_20d,
+            "participation_rate_20d": round(participation_rate_20d, 1),
+            "up_days_20d": up_days_20d,
+            "down_capture": round_optional(down_capture, 1),
+            "rolling_corr": round(rolling_corr, 2),
+            "spread_volatility": round(spread_vol, 2),
+            "indicators": indicators,
+            "controls": controls,
+            "methodology": "使用 QQQ 作为市值加权 NDX 可交易代理，使用 QQEW/QQQE 作为等权 Nasdaq 100 代理，比较 20/60 日收益、等权/市值比率、跑赢天数、下跌捕获和价差波动，判断指数上涨是否由更广泛成分股参与。不等同于完整 Nasdaq 100 成分股逐一广度统计。",
+        }
+        risk_breadth_cache["data"] = data
+        risk_breadth_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX equal-weight breadth updated: {regime}, score {breadth_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX equal-weight breadth refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -2424,6 +2583,7 @@ def background_worker():
     last_options = 0
     last_liquidity = 0
     last_valuation = 0
+    last_breadth = 0
     while True:
         try:
             update_market_index()
@@ -2475,6 +2635,11 @@ def background_worker():
             if time.time() - last_valuation > 21600:
                 refresh_valuation_data()
                 last_valuation = time.time()
+
+            # Equal-weight Nasdaq 100 breadth proxy every 30 minutes
+            if time.time() - last_breadth > 1800:
+                refresh_breadth_data()
+                last_breadth = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -2628,6 +2793,14 @@ def get_risk_valuation():
         refresh_valuation_data()
 
     data = risk_valuation_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/breadth', methods=['GET'])
+def get_risk_breadth():
+    if not cache_is_fresh(risk_breadth_cache, 15 * 60) and should_refresh_empty_cache(risk_breadth_cache, 60):
+        refresh_breadth_data()
+
+    data = risk_breadth_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])

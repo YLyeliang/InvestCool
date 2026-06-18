@@ -6,6 +6,7 @@ import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
+import { NDXBreadthParticipationPanel } from "@/components/NDXBreadthParticipationPanel";
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
@@ -139,6 +140,13 @@ export default function RiskPage() {
           <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> 相对强弱与 Beta
         </h3>
         <NDXRelativeStrengthPanel />
+      </section>
+
+      <section className="breadth-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:network" className="text-[var(--accent-color)]" /> 市场广度与等权参与
+        </h3>
+        <NDXBreadthParticipationPanel />
       </section>
 
       <section className="levels-section">
