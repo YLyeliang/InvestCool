@@ -32,6 +32,13 @@ interface ConditionMatrixPayload {
   semis_active_20d: number;
 }
 
+interface FundingPayload {
+  funding_score: number;
+  regime: string;
+  credit_ratio_20d: number;
+  duration_ratio_20d: number;
+}
+
 interface AttributionPayload {
   regime: string;
   actual_return: number;
@@ -117,6 +124,7 @@ interface DashboardData {
   diagnostics: DiagnosticsPayload | null;
   factors: FactorPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
+  funding: FundingPayload | null;
   attribution: AttributionPayload | null;
   breadth: BreadthPayload | null;
   themeRotation: ThemeRotationPayload | null;
@@ -226,6 +234,7 @@ export const NDXSignalDashboardPanel = () => {
           diagnostics,
           factors,
           conditionMatrix,
+          funding,
           attribution,
           breadth,
           themeRotation,
@@ -242,6 +251,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
+          fetchJson<FundingPayload>("/api/risk/funding-conditions"),
           fetchJson<AttributionPayload>("/api/risk/attribution"),
           fetchJson<BreadthPayload>("/api/risk/breadth"),
           fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
@@ -255,7 +265,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, factors, conditionMatrix, attribution, breadth, themeRotation, liquidity, valuation, earnings, options, volatilityTerm, hedgeOverlay, tail, concentration });
+        setData({ latest, diagnostics, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, earnings, options, volatilityTerm, hedgeOverlay, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -273,6 +283,7 @@ export const NDXSignalDashboardPanel = () => {
     const riskScore = data.diagnostics?.risk_score ?? 50;
     const macroScore = data.factors?.pressure_score ?? 50;
     const conditionScore = data.conditionMatrix?.condition_score ?? 50;
+    const fundingScore = data.funding?.funding_score ?? 50;
     const tailScore = data.tail?.tail_score ?? 50;
     const valuationScore = data.valuation?.valuation_score ?? 50;
     const earningsScore = data.earnings?.event_score ?? 50;
@@ -283,7 +294,7 @@ export const NDXSignalDashboardPanel = () => {
       data.liquidity?.flow_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, macroScore, conditionScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore];
+    const pressureScores = [riskScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -318,6 +329,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.conditionMatrix ? `10Y ${data.conditionMatrix.rates_change_20d_bps.toFixed(0)}bps · 半导体 ${data.conditionMatrix.semis_active_20d.toFixed(2)}pt` : "等待条件矩阵",
         color: data.conditionMatrix ? scoreColor(data.conditionMatrix.condition_score, true) : "blue",
         icon: "grid-3x3",
+      },
+      {
+        label: "融资条件",
+        value: data.funding ? data.funding.regime : "--",
+        detail: data.funding ? `HYG/LQD ${formatSignedPct(data.funding.credit_ratio_20d)} · TLT/SHY ${formatSignedPct(data.funding.duration_ratio_20d)}` : "等待融资条件",
+        color: data.funding ? scoreColor(data.funding.funding_score, true) : "blue",
+        icon: "landmark",
       },
       {
         label: "因子归因",
@@ -410,7 +428,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 14 }).map((_, index) => (
+          {Array.from({ length: 15 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

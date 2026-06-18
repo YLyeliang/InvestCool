@@ -79,6 +79,7 @@ risk_earnings_cache = {"data": None, "last_update": None}
 risk_theme_rotation_cache = {"data": None, "last_update": None}
 risk_hedge_overlay_cache = {"data": None, "last_update": None}
 risk_condition_matrix_cache = {"data": None, "last_update": None}
+risk_funding_conditions_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -237,6 +238,15 @@ def condition_matrix_regime(score):
     if score >= 38:
         return "条件均衡", "blue"
     return "条件友好", "green"
+
+def funding_conditions_regime(score):
+    if score >= 72:
+        return "融资压力高", "red"
+    if score >= 55:
+        return "融资偏紧", "amber"
+    if score >= 38:
+        return "融资均衡", "blue"
+    return "融资友好", "green"
 
 def round_optional(value, digits=2):
     if value is None:
@@ -1862,6 +1872,265 @@ def refresh_condition_matrix_data():
         logger.info(f"NDX condition matrix updated: {regime}, score {condition_score:.1f}")
     except Exception as e:
         logger.error(f"NDX condition matrix refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def build_funding_item(key, label, value, value_label, score, detail):
+    score = round(clamp(score), 1)
+    if score >= 72:
+        color = "red"
+        state = "压力高"
+    elif score >= 55:
+        color = "amber"
+        state = "偏紧"
+    elif score >= 38:
+        color = "blue"
+        state = "中性"
+    else:
+        color = "green"
+        state = "友好"
+
+    return {
+        "key": key,
+        "label": label,
+        "value": value_label,
+        "raw_value": round(value, 2),
+        "score": score,
+        "state": state,
+        "color": color,
+        "detail": detail,
+    }
+
+
+def build_funding_scenario(key, label, mask, returns):
+    valid = pd.concat(
+        {
+            "mask": mask,
+            "qqq_return": returns["qqq"],
+            "forward_5d": returns["forward_5d"],
+        },
+        axis=1,
+    ).dropna()
+    sample = valid[valid["mask"]]
+    sample_count = int(len(sample))
+    if sample_count:
+        same_day = safe_float(sample["qqq_return"].mean(), 0)
+        forward_5d = safe_float(sample["forward_5d"].mean(), 0)
+        positive_rate = safe_float((sample["forward_5d"] > 0).mean() * 100, 0)
+    else:
+        same_day = 0
+        forward_5d = 0
+        positive_rate = 0
+
+    if sample_count < 5:
+        color = "blue"
+        state = "样本少"
+    elif forward_5d <= -1.2 or positive_rate < 40:
+        color = "red"
+        state = "历史偏弱"
+    elif forward_5d < 0.2 or positive_rate < 50:
+        color = "amber"
+        state = "胜率不足"
+    elif forward_5d >= 1.0 and positive_rate >= 58:
+        color = "green"
+        state = "历史偏强"
+    else:
+        color = "blue"
+        state = "中性"
+
+    return {
+        "key": key,
+        "label": label,
+        "sample_count": sample_count,
+        "same_day_return": round(same_day, 2),
+        "forward_5d_return": round(forward_5d, 2),
+        "positive_rate_5d": round(positive_rate, 1),
+        "state": state,
+        "color": color,
+    }
+
+
+def refresh_funding_conditions_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_funding_conditions_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "hyg": "HYG",
+            "lqd": "LQD",
+            "tlt": "TLT",
+            "shy": "SHY",
+            "vix": "^VIX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "6mo", min_rows=90, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+        try:
+            close_map["dollar"] = fetch_ohlc_history("DX-Y.NYB", "6mo", min_rows=90, attempts=3)["Close"]
+            dollar_symbol = "DXY"
+        except Exception as e:
+            logger.error(f"DXY fetch failed for funding conditions, falling back to UUP: {e}")
+            close_map["dollar"] = fetch_ohlc_history("UUP", "6mo", min_rows=90, attempts=3)["Close"]
+            dollar_symbol = "UUP"
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 90:
+            raise ValueError("Insufficient aligned history for funding conditions")
+
+        credit_ratio = prices["hyg"] / prices["lqd"]
+        duration_ratio = prices["tlt"] / prices["shy"]
+        returns = pd.DataFrame(index=prices.index)
+        returns["qqq"] = prices["qqq"].pct_change() * 100
+        returns["hyg"] = prices["hyg"].pct_change() * 100
+        returns["lqd"] = prices["lqd"].pct_change() * 100
+        returns["credit_ratio"] = credit_ratio.pct_change() * 100
+        returns["duration_ratio"] = duration_ratio.pct_change() * 100
+        returns["dollar"] = prices["dollar"].pct_change() * 100
+        returns["vix_pts"] = prices["vix"].diff()
+        returns["forward_5d"] = (prices["qqq"].shift(-5) / prices["qqq"] - 1) * 100
+        returns = returns.dropna()
+        if len(returns) < 80:
+            raise ValueError("Insufficient return rows for funding conditions")
+
+        qqq_return_20d = pct_change(prices["qqq"].iloc[-1], prices["qqq"].iloc[-21]) if len(prices) >= 21 else 0
+        hyg_return_20d = pct_change(prices["hyg"].iloc[-1], prices["hyg"].iloc[-21]) if len(prices) >= 21 else 0
+        lqd_return_20d = pct_change(prices["lqd"].iloc[-1], prices["lqd"].iloc[-21]) if len(prices) >= 21 else 0
+        credit_ratio_20d = pct_change(credit_ratio.iloc[-1], credit_ratio.iloc[-21]) if len(credit_ratio) >= 21 else 0
+        duration_ratio_20d = pct_change(duration_ratio.iloc[-1], duration_ratio.iloc[-21]) if len(duration_ratio) >= 21 else 0
+        dollar_return_20d = pct_change(prices["dollar"].iloc[-1], prices["dollar"].iloc[-21]) if len(prices) >= 21 else 0
+        vix_change_20d = safe_float(prices["vix"].iloc[-1] - prices["vix"].iloc[-21], 0) if len(prices) >= 21 else 0
+
+        credit_score = clamp(48 - credit_ratio_20d * 14 - hyg_return_20d * 2)
+        duration_score = clamp(50 - duration_ratio_20d * 10)
+        dollar_score = clamp(48 + dollar_return_20d * 8)
+        volatility_score = clamp(46 + vix_change_20d * 5.5)
+        carry_score = clamp(48 - qqq_return_20d * 2 + max(0, -credit_ratio_20d) * 9)
+
+        items = [
+            build_funding_item(
+                "credit_risk",
+                "高收益信用",
+                credit_ratio_20d,
+                f"{credit_ratio_20d:+.2f}%",
+                credit_score,
+                f"HYG/LQD 20 日变化 {credit_ratio_20d:+.2f}%，HYG {hyg_return_20d:+.2f}%，用于观察信用风险偏好。",
+            ),
+            build_funding_item(
+                "investment_grade",
+                "投资级信用",
+                lqd_return_20d,
+                f"{lqd_return_20d:+.2f}%",
+                clamp(50 - lqd_return_20d * 4),
+                f"LQD 20 日收益 {lqd_return_20d:+.2f}%，反映投资级信用和久期资产承压程度。",
+            ),
+            build_funding_item(
+                "duration",
+                "久期条件",
+                duration_ratio_20d,
+                f"{duration_ratio_20d:+.2f}%",
+                duration_score,
+                f"TLT/SHY 20 日变化 {duration_ratio_20d:+.2f}%，长久期相对短债走强通常利好成长估值。",
+            ),
+            build_funding_item(
+                "dollar_liquidity",
+                "美元流动性",
+                dollar_return_20d,
+                f"{dollar_return_20d:+.2f}%",
+                dollar_score,
+                f"{dollar_symbol} 20 日收益 {dollar_return_20d:+.2f}%，美元走强通常压制全球风险偏好。",
+            ),
+            build_funding_item(
+                "volatility",
+                "波动融资",
+                vix_change_20d,
+                f"{vix_change_20d:+.1f}pt",
+                volatility_score,
+                f"VIX 20 日变化 {vix_change_20d:+.1f} 点，保护成本上行会提高组合融资压力。",
+            ),
+            build_funding_item(
+                "ndx_carry",
+                "NDX 承载",
+                qqq_return_20d,
+                f"{qqq_return_20d:+.2f}%",
+                carry_score,
+                f"QQQ 20 日收益 {qqq_return_20d:+.2f}%，若价格上行但信用走弱，需警惕脆弱上涨。",
+            ),
+        ]
+
+        funding_score = round(
+            clamp(
+                credit_score * 0.26
+                + duration_score * 0.18
+                + dollar_score * 0.18
+                + volatility_score * 0.20
+                + carry_score * 0.18
+            ),
+            1,
+        )
+        regime, color = funding_conditions_regime(funding_score)
+
+        credit_down = returns["credit_ratio"] < -0.20
+        credit_up = returns["credit_ratio"] > 0.15
+        duration_down = returns["duration_ratio"] < -0.25
+        duration_up = returns["duration_ratio"] > 0.25
+        dollar_up = returns["dollar"] > 0.25
+        vix_up = returns["vix_pts"] > 0.7
+        vix_down = returns["vix_pts"] < -0.7
+        qqq_up = returns["qqq"] > 0.35
+
+        scenarios = [
+            build_funding_scenario("credit_vix_stress", "信用走弱 + VIX 上行", credit_down & vix_up, returns),
+            build_funding_scenario("dollar_credit_tight", "美元走强 + 信用走弱", dollar_up & credit_down, returns),
+            build_funding_scenario("duration_credit_relief", "久期修复 + 信用改善", duration_up & credit_up, returns),
+            build_funding_scenario("fragile_rally", "QQQ 上涨但信用落后", qqq_up & credit_down, returns),
+            build_funding_scenario("vol_relief", "VIX 回落 + 信用改善", vix_down & credit_up, returns),
+            build_funding_scenario("duration_shock", "久期下跌 + VIX 上行", duration_down & vix_up, returns),
+        ]
+
+        main_pressure = max(items, key=lambda item: item["score"])
+        main_support = min(items, key=lambda item: item["score"])
+        if regime == "融资压力高":
+            summary = f"NDX 融资条件压力偏高，主要压力来自 {main_pressure['label']}，追高需要更严格的止损和保护预算。"
+        elif regime == "融资偏紧":
+            summary = f"NDX 融资条件偏紧，{main_pressure['label']} 是当前最需要监控的流动性约束。"
+        elif regime == "融资友好":
+            summary = f"NDX 融资条件友好，主要支持来自 {main_support['label']}，有利于成长股估值承载。"
+        else:
+            summary = "NDX 融资条件处在均衡区，信用、久期、美元和 VIX 暂未形成单边极端压力。"
+
+        controls = [
+            f"若 HYG/LQD 继续下行并伴随 VIX 上行，应把 NDX 上涨视为脆弱反弹而非风险扩散。",
+            f"若 TLT/SHY 修复且 HYG/LQD 同步改善，可提高成长股估值承载的确认度。",
+            "融资条件是宏观流动性代理，不等同于真实融资利差；样本少的历史组合只作为辅助参照。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "funding_score": funding_score,
+            "summary": summary,
+            "qqq_return_20d": round(qqq_return_20d, 2),
+            "hyg_return_20d": round(hyg_return_20d, 2),
+            "lqd_return_20d": round(lqd_return_20d, 2),
+            "credit_ratio_20d": round(credit_ratio_20d, 2),
+            "duration_ratio_20d": round(duration_ratio_20d, 2),
+            "dollar_return_20d": round(dollar_return_20d, 2),
+            "vix_change_20d": round(vix_change_20d, 2),
+            "dollar_symbol": dollar_symbol,
+            "items": items,
+            "scenarios": scenarios,
+            "controls": controls,
+            "methodology": "使用 HYG/LQD 代理信用风险偏好、TLT/SHY 代理久期融资环境，并结合美元指数、VIX 和 QQQ 最近 6 个月日线，评估 NDX 成长股估值承载与融资压力。该模块是流动性风控代理，不构成信用或 ETF 交易建议。",
+        }
+        risk_funding_conditions_cache["data"] = data
+        risk_funding_conditions_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX funding conditions updated: {regime}, score {funding_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX funding conditions refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -3730,6 +3999,7 @@ def background_worker():
     last_factors = 0
     last_factor_attribution = 0
     last_condition_matrix = 0
+    last_funding_conditions = 0
     last_levels = 0
     last_tail = 0
     last_relative = 0
@@ -3768,6 +4038,11 @@ def background_worker():
             if time.time() - last_condition_matrix > 1800:
                 refresh_condition_matrix_data()
                 last_condition_matrix = time.time()
+
+            # NDX funding and credit conditions every 30 minutes
+            if time.time() - last_funding_conditions > 1800:
+                refresh_funding_conditions_data()
+                last_funding_conditions = time.time()
 
             # Technical levels every 30 minutes
             if time.time() - last_levels > 1800:
@@ -3949,6 +4224,14 @@ def get_risk_condition_matrix():
         refresh_condition_matrix_data()
 
     data = risk_condition_matrix_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/funding-conditions', methods=['GET'])
+def get_risk_funding_conditions():
+    if not cache_is_fresh(risk_funding_conditions_cache, 15 * 60) and should_refresh_empty_cache(risk_funding_conditions_cache, 60):
+        refresh_funding_conditions_data()
+
+    data = risk_funding_conditions_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])

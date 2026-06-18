@@ -7,6 +7,7 @@ import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXConditionMatrixPanel } from "@/components/NDXConditionMatrixPanel";
+import { NDXFundingConditionsPanel } from "@/components/NDXFundingConditionsPanel";
 import { NDXFactorAttributionPanel } from "@/components/NDXFactorAttributionPanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
 import { NDXThemeRotationPanel } from "@/components/NDXThemeRotationPanel";
@@ -154,6 +155,13 @@ export default function RiskPage() {
           <Icon name="lucide:grid-3x3" className="text-[var(--accent-color)]" /> NDX 条件风险矩阵
         </h3>
         <NDXConditionMatrixPanel />
+      </section>
+
+      <section className="funding-conditions-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:landmark" className="text-[var(--accent-color)]" /> NDX 信用与融资条件
+        </h3>
+        <NDXFundingConditionsPanel />
       </section>
 
       <section className="attribution-section">
