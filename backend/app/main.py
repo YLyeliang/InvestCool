@@ -87,6 +87,7 @@ risk_scenario_map_cache = {"data": None, "last_update": None}
 risk_recovery_path_cache = {"data": None, "last_update": None}
 risk_contribution_cache = {"data": None, "last_update": None}
 risk_capacity_cache = {"data": None, "last_update": None}
+risk_rate_sensitivity_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -288,6 +289,15 @@ def capacity_regime(score):
     if score >= 36:
         return "承受力收缩", "amber"
     return "防守闸门", "red"
+
+def rate_sensitivity_regime(score):
+    if score >= 72:
+        return "利率高敏", "red"
+    if score >= 55:
+        return "估值承压", "amber"
+    if score >= 36:
+        return "可控敏感", "blue"
+    return "利率缓冲", "green"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -4975,6 +4985,193 @@ def refresh_capacity_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_rate_sensitivity_data(allow_dependency_refresh=True):
+    global risk_rate_sensitivity_cache
+
+    try:
+        dependencies = [
+            ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60),
+            ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60),
+            ("factors", risk_factors_cache, refresh_factor_data, 15 * 60),
+            ("funding", risk_funding_conditions_cache, refresh_funding_conditions_data, 15 * 60),
+            ("condition", risk_condition_matrix_cache, refresh_condition_matrix_data, 15 * 60),
+            ("capacity", risk_capacity_cache, refresh_capacity_data, 15 * 60),
+            ("contribution", risk_contribution_cache, refresh_contribution_data, 15 * 60),
+        ]
+        light_dependencies = {"factors", "funding", "condition", "capacity", "contribution"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key in ("capacity", "contribution"):
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Rate sensitivity dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 4:
+            return
+
+        valuation = risk_valuation_cache.get("data") or {}
+        quality = risk_quality_cache.get("data") or {}
+        factors = risk_factors_cache.get("data") or {}
+        funding = risk_funding_conditions_cache.get("data") or {}
+        condition = risk_condition_matrix_cache.get("data") or {}
+        capacity = risk_capacity_cache.get("data") or {}
+        contribution = risk_contribution_cache.get("data") or {}
+
+        rate_factor = next((item for item in factors.get("factors", []) if item.get("key") == "rates"), {})
+        dollar_factor = next((item for item in factors.get("factors", []) if item.get("key") == "dollar"), {})
+        rate_level = safe_float(str(rate_factor.get("level", "")).replace("%", ""), None)
+        if rate_level is not None and rate_level > 15:
+            rate_level = rate_level / 10
+        rate_change_20d_bps = safe_float(condition.get("rates_change_20d_bps"), 0)
+        if not rate_change_20d_bps:
+            rate_change_20d_bps = safe_float(str(rate_factor.get("change_20d", "0")).replace("点", "").replace("+", ""), 0) * 100
+        rate_pressure = safe_float(rate_factor.get("pressure_score"), 50)
+        rate_sensitivity = safe_float(rate_factor.get("sensitivity"), 0)
+        dollar_pressure = safe_float(dollar_factor.get("pressure_score"), 45)
+
+        weighted_forward_pe = safe_float(valuation.get("weighted_forward_pe"), 28)
+        weighted_peg = safe_float(valuation.get("weighted_peg"), 1.8)
+        weighted_revenue_growth = safe_float(valuation.get("weighted_revenue_growth"), 10)
+        weighted_earnings_growth = safe_float(valuation.get("weighted_earnings_growth"), 10)
+        valuation_score = safe_float(valuation.get("valuation_score"), 50)
+        quality_score = safe_float(quality.get("quality_score"), 50)
+        funding_score = safe_float(funding.get("funding_score"), 50)
+        duration_ratio_20d = safe_float(funding.get("duration_ratio_20d"), 0)
+        capacity_score = safe_float(capacity.get("capacity_score"), 50)
+        net_pressure = safe_float(contribution.get("net_pressure"), 0)
+
+        valuation_duration = clamp(
+            24
+            + max(0, weighted_forward_pe - 22) * 1.35
+            + max(0, weighted_peg - 1.6) * 12
+            - max(0, weighted_earnings_growth - 8) * 0.38
+            - max(0, weighted_revenue_growth - 8) * 0.22,
+        )
+        rate_shock_pressure = clamp(
+            rate_pressure * 0.42
+            + max(0, rate_change_20d_bps) * 0.42
+            + max(0, -duration_ratio_20d) * 9
+            + funding_score * 0.16,
+        )
+        quality_buffer = clamp(
+            quality_score * 0.50
+            + max(0, weighted_revenue_growth) * 0.55
+            + max(0, weighted_earnings_growth) * 0.38
+            + max(0, 100 - valuation_score) * 0.22,
+        )
+        rate_sensitivity_score = round(clamp(
+            valuation_duration * 0.34
+            + rate_shock_pressure * 0.32
+            + valuation_score * 0.18
+            + dollar_pressure * 0.08
+            + max(0, net_pressure) * 0.65
+            - quality_buffer * 0.20
+            - max(0, capacity_score - 55) * 0.14,
+        ), 1)
+        regime_label, regime_color = rate_sensitivity_regime(rate_sensitivity_score)
+
+        valuation_gap = round(max(0, weighted_forward_pe - 24) * 0.8 + max(0, weighted_peg - 1.8) * 4, 1)
+        earnings_required = round(clamp(8 + valuation_gap + max(0, rate_change_20d_bps) * 0.08, 6, 28), 1)
+        pe_compression_50bps = round(clamp(weighted_forward_pe * (0.02 + rate_sensitivity_score / 2200), 0.4, 4.8), 1)
+        ndx_multiple_risk = round(clamp(pe_compression_50bps * 0.85 + max(0, rate_sensitivity_score - 50) * 0.06, 0.4, 8), 1)
+
+        if regime_label == "利率高敏":
+            summary = f"NDX 权重股估值对利率重新上行较敏感，Forward PE {weighted_forward_pe:.1f}x 需要更强盈利兑现才能抵消折现率压力。"
+        elif regime_label == "估值承压":
+            summary = f"估值与利率的组合进入承压区，10Y 变化和 PEG 水平需要与盈利质量同步监控。"
+        elif regime_label == "利率缓冲":
+            summary = "当前估值-利率组合有一定缓冲，盈利质量和成长增速能吸收多数折现率扰动。"
+        else:
+            summary = "当前估值-利率敏感度可控，但新增风险预算仍需绑定利率、美元和久期条件确认。"
+
+        drivers = [
+            {
+                "key": "valuation_duration",
+                "label": "估值久期",
+                "score": round(valuation_duration, 1),
+                "color": contribution_color("pressure", valuation_duration),
+                "value": f"FPE {weighted_forward_pe:.1f}x / PEG {weighted_peg:.2f}x",
+                "detail": "Forward PE 和 PEG 越高，利率上行对估值倍数的压缩越明显。",
+            },
+            {
+                "key": "rate_shock",
+                "label": "利率冲击",
+                "score": round(rate_shock_pressure, 1),
+                "color": contribution_color("pressure", rate_shock_pressure),
+                "value": f"10Y {rate_change_20d_bps:+.0f}bps / 敏感度 {rate_sensitivity:+.2f}%",
+                "detail": rate_factor.get("comment", "10Y 利率变化用于观察成长股折现率压力。"),
+            },
+            {
+                "key": "quality_buffer",
+                "label": "质量缓冲",
+                "score": round(quality_buffer, 1),
+                "color": contribution_color("support", quality_buffer),
+                "value": f"质量 {quality_score:.1f} / 盈利增速 {weighted_earnings_growth:.1f}%",
+                "detail": "盈利质量、收入增速和盈利增速越高，越能支撑估值溢价。",
+            },
+            {
+                "key": "funding_duration",
+                "label": "久期融资",
+                "score": round(funding_score, 1),
+                "color": contribution_color("pressure", funding_score),
+                "value": f"TLT/SHY {duration_ratio_20d:+.2f}%",
+                "detail": funding.get("summary", "久期资产相对短债走弱会压制成长估值承受力。"),
+            },
+        ]
+
+        controls = [
+            f"若 10Y 再上行 50bps，当前代理模型估算 FPE 压缩约 {pe_compression_50bps:.1f}x，NDX 倍数风险约 {ndx_multiple_risk:.1f}%。",
+            f"要维持当前估值区间，MAG7 加权盈利增速最好保持在 {earnings_required:.1f}% 以上。",
+            "当利率压力和美元压力同步上行时，新增 NDX 风险预算应从估值扩张假设切回盈利兑现假设。",
+            "若质量缓冲跌破 50 且估值压力高于 58，应降低集中龙头暴露和远端成长假设。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round_optional(safe_float(factors.get("index_level"), None), 2),
+            "rate_sensitivity_score": rate_sensitivity_score,
+            "rate_sensitivity_regime": regime_label,
+            "rate_sensitivity_color": regime_color,
+            "summary": summary,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "rate_level": round_optional(rate_level, 2),
+            "rate_change_20d_bps": round(rate_change_20d_bps, 1),
+            "rate_factor_pressure": round(rate_pressure, 1),
+            "rate_sensitivity": round(rate_sensitivity, 2),
+            "dollar_pressure": round(dollar_pressure, 1),
+            "weighted_forward_pe": round_optional(weighted_forward_pe, 1),
+            "weighted_peg": round_optional(weighted_peg, 2),
+            "weighted_revenue_growth": round_optional(weighted_revenue_growth, 1),
+            "weighted_earnings_growth": round_optional(weighted_earnings_growth, 1),
+            "valuation_score": round(valuation_score, 1),
+            "quality_score": round(quality_score, 1),
+            "valuation_duration": round(valuation_duration, 1),
+            "rate_shock_pressure": round(rate_shock_pressure, 1),
+            "quality_buffer": round(quality_buffer, 1),
+            "earnings_required": earnings_required,
+            "pe_compression_50bps": pe_compression_50bps,
+            "ndx_multiple_risk": ndx_multiple_risk,
+            "drivers": drivers,
+            "controls": controls,
+            "methodology": "把 MAG7 加权估值、成长增速、盈利质量、10Y 利率因子、美元压力、信用/久期融资条件和风险承受力闸门合成为 NDX 估值-利率敏感度。该模块用于判断估值溢价对折现率变化的承受力，不构成目标价或买卖指令。",
+        }
+        risk_rate_sensitivity_cache["data"] = data
+        risk_rate_sensitivity_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX valuation-rate sensitivity updated: {regime_label}, score {rate_sensitivity_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX valuation-rate sensitivity refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_hedge_overlay_data():
     global risk_hedge_overlay_cache
 
@@ -5866,6 +6063,7 @@ def background_worker():
     last_recovery_path = 0
     last_contribution = 0
     last_capacity = 0
+    last_rate_sensitivity = 0
     while True:
         try:
             update_market_index()
@@ -6012,6 +6210,11 @@ def background_worker():
             if time.time() - last_capacity > 1800:
                 refresh_capacity_data()
                 last_capacity = time.time()
+
+            # NDX valuation-rate sensitivity every 30 minutes
+            if time.time() - last_rate_sensitivity > 1800:
+                refresh_rate_sensitivity_data()
+                last_rate_sensitivity = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -6169,6 +6372,14 @@ def get_risk_capacity():
         refresh_capacity_data(allow_dependency_refresh="light")
 
     data = risk_capacity_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/rate-sensitivity', methods=['GET'])
+def get_risk_rate_sensitivity():
+    if not cache_is_fresh(risk_rate_sensitivity_cache, 15 * 60) and should_refresh_empty_cache(risk_rate_sensitivity_cache, 60):
+        refresh_rate_sensitivity_data(allow_dependency_refresh="light")
+
+    data = risk_rate_sensitivity_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])

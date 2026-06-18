@@ -10,6 +10,7 @@ import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXContributionPanel } from "@/components/NDXContributionPanel";
 import { NDXCapacityGatePanel } from "@/components/NDXCapacityGatePanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
+import { NDXRateSensitivityPanel } from "@/components/NDXRateSensitivityPanel";
 import { NDXConditionMatrixPanel } from "@/components/NDXConditionMatrixPanel";
 import { NDXFundingConditionsPanel } from "@/components/NDXFundingConditionsPanel";
 import { NDXFactorAttributionPanel } from "@/components/NDXFactorAttributionPanel";
@@ -183,6 +184,13 @@ export default function RiskPage() {
           <Icon name="lucide:line-chart" className="text-[var(--accent-color)]" /> 宏观因子压力
         </h3>
         <NDXFactorPressurePanel />
+      </section>
+
+      <section className="rate-sensitivity-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:percent" className="text-[var(--accent-color)]" /> NDX 估值-利率敏感度
+        </h3>
+        <NDXRateSensitivityPanel />
       </section>
 
       <section className="condition-matrix-section">

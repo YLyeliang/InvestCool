@@ -64,6 +64,15 @@ interface FactorPayload {
   main_headwind: string;
 }
 
+interface RateSensitivityPayload {
+  rate_sensitivity_score: number;
+  rate_sensitivity_regime: string;
+  rate_change_20d_bps: number;
+  weighted_forward_pe: number | null;
+  pe_compression_50bps: number;
+  ndx_multiple_risk: number;
+}
+
 interface ConditionMatrixPayload {
   condition_score: number;
   regime: string;
@@ -180,6 +189,7 @@ interface DashboardData {
   contribution: ContributionPayload | null;
   capacity: CapacityPayload | null;
   factors: FactorPayload | null;
+  rateSensitivity: RateSensitivityPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
   funding: FundingPayload | null;
   attribution: AttributionPayload | null;
@@ -313,6 +323,7 @@ export const NDXSignalDashboardPanel = () => {
           contribution,
           capacity,
           factors,
+          rateSensitivity,
           conditionMatrix,
           funding,
           attribution,
@@ -336,6 +347,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ContributionPayload>("/api/risk/contribution"),
           fetchJson<CapacityPayload>("/api/risk/capacity"),
           fetchJson<FactorPayload>("/api/risk/factors"),
+          fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
           fetchJson<FundingPayload>("/api/risk/funding-conditions"),
           fetchJson<AttributionPayload>("/api/risk/attribution"),
@@ -353,7 +365,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -378,6 +390,7 @@ export const NDXSignalDashboardPanel = () => {
     const hedgeScore = data.hedgeOverlay?.hedge_score ?? 50;
     const alertScore = data.alerts?.alert_score ?? 50;
     const contributionScore = data.contribution?.risk_contribution_score ?? 50;
+    const rateSensitivityScore = data.rateSensitivity?.rate_sensitivity_score ?? 50;
     const supportiveScores = [
       data.breadth?.breadth_score ?? 50,
       data.themeRotation?.leadership_score ?? 50,
@@ -388,7 +401,7 @@ export const NDXSignalDashboardPanel = () => {
       data.capacity?.capacity_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, contributionScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
+    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -444,6 +457,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.factors ? `主因子 ${data.factors.main_headwind}` : "等待宏观因子",
         color: data.factors ? scoreColor(data.factors.pressure_score, true) : "blue",
         icon: "line-chart",
+      },
+      {
+        label: "估值利率",
+        value: data.rateSensitivity ? data.rateSensitivity.rate_sensitivity_regime : "--",
+        detail: data.rateSensitivity ? `10Y ${formatSignedPoint(data.rateSensitivity.rate_change_20d_bps)}bps · FPE ${data.rateSensitivity.weighted_forward_pe?.toFixed(1) ?? "--"}x · 50bps ${data.rateSensitivity.ndx_multiple_risk.toFixed(1)}%` : "等待利率敏感度",
+        color: data.rateSensitivity ? scoreColor(data.rateSensitivity.rate_sensitivity_score, true) : "blue",
+        icon: "percent",
       },
       {
         label: "条件矩阵",
@@ -564,7 +584,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 21 }).map((_, index) => (
+          {Array.from({ length: 22 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
