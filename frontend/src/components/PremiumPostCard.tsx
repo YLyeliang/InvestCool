@@ -26,8 +26,7 @@ export const PremiumPostCard = ({ article }: PostCardProps) => {
   
   return (
     <Link href={article.path} className="group no-underline block h-full">
-      <div className="card p-0 overflow-hidden flex flex-col h-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-[var(--radius-lg)] hover:border-[var(--accent-color)] transition-all">
-        {/* Image Wrapper using Next.js Image */}
+      <div className="card p-0 overflow-hidden flex flex-col h-full bg-[var(--card-bg)] border border-[var(--border-color)] rounded-[var(--radius-lg)] hover:border-[var(--border-strong)] transition-all">
         <div className="relative aspect-[16/9] overflow-hidden bg-[var(--section-bg)]">
           <Image 
             src={coverUrl}
@@ -44,7 +43,6 @@ export const PremiumPostCard = ({ article }: PostCardProps) => {
           </div>
         </div>
 
-        {/* Content */}
         <div className="p-6 flex-1 flex flex-col">
           <div className="flex items-center gap-2 text-xs text-[var(--text-tertiary)] font-bold mb-3 uppercase">
             <Icon name="lucide:calendar" className="size-3" />

@@ -23,11 +23,11 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
     <header 
       className={cn(
         "fixed top-0 left-0 right-0 z-[1100] h-[var(--header-height)] transition-all duration-300",
-        "bg-[var(--card-bg)]/95 backdrop-blur-xl border-b border-[var(--border-color)]",
+        "bg-[var(--card-bg)]/92 backdrop-blur-xl border-b border-[var(--border-color)]",
         scrolled && "shadow-sm"
       )}
     >
-      <div className="h-full px-6 flex items-center justify-between max-w-[1600px] mx-auto">
+      <div className="h-full px-5 md:px-6 flex items-center justify-between max-w-[1720px] mx-auto">
         <div className="flex items-center gap-4">
           <button 
             onClick={onMenuToggle}
@@ -38,22 +38,22 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
           
           <Link href="/" className="flex items-center gap-2.5 no-underline group">
             <div className="size-9 bg-[var(--accent-color)] rounded-lg flex items-center justify-center shadow-sm group-hover:scale-105 transition-transform">
-              <Icon name="trending-up" className="text-white size-5" />
+              <Icon name="trending-up" className="text-[var(--bg-color)] size-5" />
             </div>
             <div className="flex flex-col">
               <span className="text-lg font-black text-[var(--text-primary)] leading-tight">
                 InvestCool<span className="text-[var(--accent-color)]">.</span>
               </span>
               <span className="text-[10px] font-bold text-[var(--text-tertiary)] uppercase leading-tight">
-                Intelligence
+                NDX Research
               </span>
             </div>
           </Link>
         </div>
 
         <div className="flex items-center gap-3">
-          <div className="hidden md:flex items-center gap-1 mr-4">
-            <div className="size-2 rounded-full bg-emerald-500 animate-pulse"></div>
+          <div className="hidden md:flex items-center gap-1.5 mr-4 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] px-3 py-1.5">
+            <div className="size-2 rounded-full bg-[var(--success-color)]"></div>
             <span className="text-[11px] font-black text-[var(--text-secondary)] uppercase">Market Live</span>
           </div>
           

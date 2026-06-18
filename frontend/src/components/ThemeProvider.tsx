@@ -16,12 +16,11 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     const savedTheme = localStorage.getItem("investcool-theme") as Theme;
-    if (savedTheme) {
+    if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
       document.documentElement.setAttribute("data-theme", savedTheme);
-    } else if (window.matchMedia("(prefers-color-scheme: dark)").matches) {
-      setTheme("dark");
-      document.documentElement.setAttribute("data-theme", "dark");
+    } else {
+      document.documentElement.setAttribute("data-theme", "light");
     }
   }, []);
 

@@ -68,6 +68,7 @@ risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
+risk_options_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -368,6 +369,15 @@ def dispersion_regime(avg_corr, dispersion):
     if dispersion >= 3.2:
         return "个股分化", "blue"
     return "结构平衡", "green"
+
+def options_risk_label(implied_move, put_call_oi_ratio):
+    if implied_move >= 4.2 or put_call_oi_ratio >= 1.35:
+        return "波动警戒", "red"
+    if implied_move >= 2.8 or put_call_oi_ratio >= 1.05:
+        return "波动偏高", "amber"
+    if implied_move <= 1.4 and put_call_oi_ratio < 0.75:
+        return "定价平静", "green"
+    return "常态定价", "blue"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -1306,6 +1316,148 @@ def refresh_dispersion_data():
         logger.error(traceback.format_exc())
 
 
+def option_mid(row):
+    bid = safe_float(row.get("bid"), 0)
+    ask = safe_float(row.get("ask"), 0)
+    last = safe_float(row.get("lastPrice"), 0)
+    if bid > 0 and ask > 0 and ask >= bid:
+        return (bid + ask) / 2
+    return last if last > 0 else 0
+
+
+def clean_option_rows(frame):
+    rows = []
+    for _, row in frame.iterrows():
+        strike = safe_float(row.get("strike"), None)
+        mid = option_mid(row)
+        if strike is None or strike <= 0 or mid <= 0:
+            continue
+        rows.append({
+            "strike": strike,
+            "mid": mid,
+            "volume": safe_float(row.get("volume"), 0),
+            "open_interest": safe_float(row.get("openInterest"), 0),
+            "iv": safe_float(row.get("impliedVolatility"), 0),
+        })
+    return rows
+
+
+def refresh_options_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_options_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        ticker = yf.Ticker(proxy_symbol)
+        price = safe_float(ticker.fast_info.last_price, 0)
+        if price <= 0:
+            raise ValueError("QQQ price unavailable for options analysis")
+
+        today = datetime.utcnow().date()
+        expirations = [
+            exp for exp in ticker.options
+            if datetime.strptime(exp, "%Y-%m-%d").date() > today
+        ]
+        if not expirations:
+            raise ValueError("No future QQQ option expirations available")
+
+        selected_expiration = expirations[0]
+        expiry_date = datetime.strptime(selected_expiration, "%Y-%m-%d").date()
+        dte = max((expiry_date - today).days, 1)
+        chain = ticker.option_chain(selected_expiration)
+        calls = clean_option_rows(chain.calls)
+        puts = clean_option_rows(chain.puts)
+        if not calls or not puts:
+            raise ValueError("QQQ option chain unavailable or illiquid")
+
+        call_atm = min(calls, key=lambda row: abs(row["strike"] - price))
+        put_atm = min(puts, key=lambda row: abs(row["strike"] - price))
+        atm_strike = (call_atm["strike"] + put_atm["strike"]) / 2
+        straddle_mid = call_atm["mid"] + put_atm["mid"]
+        implied_move = straddle_mid / price * 100
+        annualized_iv_proxy = implied_move / ((dte / 365) ** 0.5)
+        atm_iv = (call_atm["iv"] + put_atm["iv"]) / 2 * 100
+
+        call_oi = sum(row["open_interest"] for row in calls)
+        put_oi = sum(row["open_interest"] for row in puts)
+        call_volume = sum(row["volume"] for row in calls)
+        put_volume = sum(row["volume"] for row in puts)
+        put_call_oi_ratio = put_oi / call_oi if call_oi else 0
+        put_call_volume_ratio = put_volume / call_volume if call_volume else 0
+
+        strikes = sorted(set([row["strike"] for row in calls] + [row["strike"] for row in puts]))
+        call_oi_by_strike = {row["strike"]: row["open_interest"] for row in calls}
+        put_oi_by_strike = {row["strike"]: row["open_interest"] for row in puts}
+        max_pain = None
+        min_payout = None
+        for strike in strikes:
+            payout = sum(max(0, strike - k) * oi for k, oi in call_oi_by_strike.items())
+            payout += sum(max(0, k - strike) * oi for k, oi in put_oi_by_strike.items())
+            if min_payout is None or payout < min_payout:
+                min_payout = payout
+                max_pain = strike
+
+        high_interest = sorted(
+            [
+                {
+                    "strike": strike,
+                    "call_oi": round(call_oi_by_strike.get(strike, 0)),
+                    "put_oi": round(put_oi_by_strike.get(strike, 0)),
+                    "total_oi": round(call_oi_by_strike.get(strike, 0) + put_oi_by_strike.get(strike, 0)),
+                }
+                for strike in strikes
+            ],
+            key=lambda row: row["total_oi"],
+            reverse=True,
+        )[:6]
+
+        label, color = options_risk_label(implied_move, put_call_oi_ratio)
+        low = price * (1 - implied_move / 100)
+        high = price * (1 + implied_move / 100)
+        summary = (
+            f"QQQ 最近到期期权定价约 {implied_move:.2f}% 的到期波动区间，"
+            f"Put/Call 未平仓比 {put_call_oi_ratio:.2f}。"
+        )
+
+        controls = [
+            f"若 QQQ 跌破隐含下沿 {low:.2f}，说明现货波动超过期权定价，需要收缩短线风险预算。",
+            f"若 Put/Call 未平仓比继续升至 1.35 以上，保护性需求可能上升。",
+            f"最大痛点代理在 {max_pain:.2f}，可作为到期附近仓位拥挤观察位，不作为目标价。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "proxy_price": round(price, 2),
+            "expiration": selected_expiration,
+            "days_to_expiration": dte,
+            "regime": label,
+            "regime_color": color,
+            "summary": summary,
+            "atm_strike": round(atm_strike, 2),
+            "call_mid": round(call_atm["mid"], 2),
+            "put_mid": round(put_atm["mid"], 2),
+            "straddle_mid": round(straddle_mid, 2),
+            "implied_move": round(implied_move, 2),
+            "implied_range_low": round(low, 2),
+            "implied_range_high": round(high, 2),
+            "annualized_iv_proxy": round(annualized_iv_proxy, 1),
+            "atm_iv": round(atm_iv, 1),
+            "put_call_oi_ratio": round(put_call_oi_ratio, 2),
+            "put_call_volume_ratio": round(put_call_volume_ratio, 2),
+            "max_pain": round(max_pain, 2) if max_pain is not None else None,
+            "high_interest": high_interest,
+            "controls": controls,
+            "methodology": "使用 QQQ 作为 NDX 可交易期权代理，选择最近未来到期日，基于 ATM call+put 跨式中价估算到期隐含波动区间；该指标反映期权市场定价，不代表预测。",
+        }
+        risk_options_cache["data"] = data
+        risk_options_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX options proxy updated: {label}, move {implied_move:.2f}%")
+    except Exception as e:
+        logger.error(f"NDX options proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def build_pillar(key, label, score, comment, metrics):
     normalized_score = round(clamp(score), 1)
     return {
@@ -1874,6 +2026,7 @@ def background_worker():
     last_tail = 0
     last_relative = 0
     last_dispersion = 0
+    last_options = 0
     while True:
         try:
             update_market_index()
@@ -1910,6 +2063,11 @@ def background_worker():
             if time.time() - last_dispersion > 1800:
                 refresh_dispersion_data()
                 last_dispersion = time.time()
+
+            # QQQ options-implied move every 30 minutes
+            if time.time() - last_options > 1800:
+                refresh_options_data()
+                last_options = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -2039,6 +2197,14 @@ def get_risk_dispersion():
         refresh_dispersion_data()
 
     data = risk_dispersion_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/options', methods=['GET'])
+def get_risk_options():
+    if not cache_is_fresh(risk_options_cache, 15 * 60) and should_refresh_empty_cache(risk_options_cache, 60):
+        refresh_options_data()
+
+    data = risk_options_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])

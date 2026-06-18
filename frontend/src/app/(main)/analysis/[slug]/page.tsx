@@ -26,8 +26,8 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
     <div className="article-container relative pb-24">
       <ReadingProgress />
       
-      <div className="max-w-[820px] mx-auto px-6">
-        <header className="pt-12 pb-10 text-left">
+      <div className="max-w-[900px] mx-auto px-4 md:px-6">
+        <header className="pt-10 md:pt-12 pb-10 text-left">
           <Link href="/analysis" className="inline-flex items-center gap-2 text-[var(--text-tertiary)] hover:text-[var(--accent-strong)] transition-colors no-underline font-bold text-sm uppercase mb-10 group">
             <Icon name="arrow-left" className="size-3.5 transition-transform group-hover:-translate-x-1" />
             Back to Research
@@ -37,7 +37,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
             <span className="px-3 py-1.5 rounded-lg bg-[var(--accent-soft)] text-[var(--accent-strong)] text-xs font-black uppercase">
               {article.category || "深度投研"}
             </span>
-            <h1 className="text-4xl md:text-5xl font-black text-[var(--text-primary)] leading-tight max-w-3xl">
+            <h1 className="text-3xl md:text-5xl font-black text-[var(--text-primary)] leading-tight max-w-4xl">
               {article.title}
             </h1>
             <div className="flex items-center gap-4 text-sm text-[var(--text-tertiary)] font-bold uppercase">
@@ -51,9 +51,9 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
           </div>
 
           {article.summary && (
-            <div className="mt-10 p-7 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg text-left relative overflow-hidden">
+            <div className="mt-10 p-6 md:p-7 bg-[var(--card-bg)] border border-[var(--border-color)] rounded-lg text-left relative overflow-hidden shadow-sm">
               <h4 className="text-xs font-black text-[var(--accent-strong)] uppercase mb-4">Executive Summary</h4>
-              <p className="text-xl font-semibold text-[var(--text-primary)] leading-8 m-0">
+              <p className="text-lg md:text-xl font-semibold text-[var(--text-primary)] leading-8 m-0">
                 {article.summary}
               </p>
             </div>

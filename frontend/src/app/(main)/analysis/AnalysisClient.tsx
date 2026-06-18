@@ -40,7 +40,7 @@ export default function AnalysisPageClient({ initialArticles }: AnalysisPageClie
       </header>
 
       {/* 分类导航 - 现代化胶囊设计 */}
-      <nav className="category-nav flex items-center gap-2 overflow-x-auto pb-4 no-scrollbar sticky top-[var(--header-height)] z-20 bg-[var(--bg-color)]/95 backdrop-blur-md -mx-4 px-4 py-2">
+      <nav className="category-nav flex items-center gap-2 overflow-x-auto no-scrollbar sticky top-[var(--header-height)] z-20 bg-[var(--card-bg)]/95 backdrop-blur-md -mx-4 px-4 py-3 border-y border-[var(--border-color)]">
         {categories.map((cat) => (
           <button
             key={cat}
@@ -49,7 +49,7 @@ export default function AnalysisPageClient({ initialArticles }: AnalysisPageClie
               "px-4 py-2 rounded-lg text-sm font-black transition-all whitespace-nowrap border uppercase",
               activeCategory === cat
                 ? "bg-[var(--text-primary)] text-[var(--card-bg)] border-transparent shadow-sm"
-                : "bg-[var(--card-bg)] text-[var(--text-secondary)] border-[var(--border-color)] hover:border-[var(--accent-color)] hover:text-[var(--accent-strong)]"
+                : "bg-transparent text-[var(--text-secondary)] border-[var(--border-color)] hover:border-[var(--border-strong)] hover:text-[var(--text-primary)]"
             )}
           >
             {cat}
