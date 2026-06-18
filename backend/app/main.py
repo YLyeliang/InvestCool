@@ -78,6 +78,7 @@ risk_volatility_term_cache = {"data": None, "last_update": None}
 risk_earnings_cache = {"data": None, "last_update": None}
 risk_theme_rotation_cache = {"data": None, "last_update": None}
 risk_hedge_overlay_cache = {"data": None, "last_update": None}
+risk_condition_matrix_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -227,6 +228,15 @@ def hedge_overlay_regime(score):
     if score >= 38:
         return "保留保护", "blue"
     return "低保护", "green"
+
+def condition_matrix_regime(score):
+    if score >= 72:
+        return "条件转弱", "red"
+    if score >= 55:
+        return "条件偏紧", "amber"
+    if score >= 38:
+        return "条件均衡", "blue"
+    return "条件友好", "green"
 
 def round_optional(value, digits=2):
     if value is None:
@@ -1591,6 +1601,267 @@ def refresh_factor_attribution_data():
         logger.info(f"NDX factor attribution updated: {regime}, actual {actual_return:.2f}%")
     except Exception as e:
         logger.error(f"NDX factor attribution refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def build_condition_item(key, label, value, value_label, score, favorable_when, detail):
+    score = round(clamp(score), 1)
+    if score >= 72:
+        color = "red"
+        state = "压力高"
+    elif score >= 55:
+        color = "amber"
+        state = "偏紧"
+    elif score >= 38:
+        color = "blue"
+        state = "中性"
+    else:
+        color = "green"
+        state = "友好"
+
+    return {
+        "key": key,
+        "label": label,
+        "value": value_label,
+        "raw_value": round(value, 2),
+        "score": score,
+        "state": state,
+        "color": color,
+        "favorable_when": favorable_when,
+        "detail": detail,
+    }
+
+
+def build_condition_scenario(key, label, mask, returns):
+    valid = pd.concat(
+        {
+            "mask": mask,
+            "qqq_return": returns["qqq"],
+            "forward_5d": returns["forward_5d"],
+        },
+        axis=1,
+    ).dropna()
+    sample = valid[valid["mask"]]
+    sample_count = int(len(sample))
+    if sample_count:
+        same_day = safe_float(sample["qqq_return"].mean(), 0)
+        forward_5d = safe_float(sample["forward_5d"].mean(), 0)
+        positive_rate = safe_float((sample["forward_5d"] > 0).mean() * 100, 0)
+    else:
+        same_day = 0
+        forward_5d = 0
+        positive_rate = 0
+
+    if sample_count < 5:
+        color = "blue"
+        state = "样本少"
+    elif forward_5d <= -1.2 or positive_rate < 40:
+        color = "red"
+        state = "历史偏弱"
+    elif forward_5d < 0.2 or positive_rate < 50:
+        color = "amber"
+        state = "胜率不足"
+    elif forward_5d >= 1.0 and positive_rate >= 58:
+        color = "green"
+        state = "历史偏强"
+    else:
+        color = "blue"
+        state = "中性"
+
+    return {
+        "key": key,
+        "label": label,
+        "sample_count": sample_count,
+        "same_day_return": round(same_day, 2),
+        "forward_5d_return": round(forward_5d, 2),
+        "positive_rate_5d": round(positive_rate, 1),
+        "state": state,
+        "color": color,
+    }
+
+
+def refresh_condition_matrix_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_condition_matrix_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "spy": "SPY",
+            "smh": "SMH",
+            "rates": "^TNX",
+            "dollar": "DX-Y.NYB",
+            "vix": "^VIX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "6mo", min_rows=90, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+
+        equal_symbol = None
+        for candidate in ["QQEW", "QQQE"]:
+            try:
+                close_map["equal"] = fetch_ohlc_history(candidate, "6mo", min_rows=90, attempts=3)["Close"]
+                equal_symbol = candidate
+                break
+            except Exception as e:
+                logger.error(f"Condition matrix equal-weight proxy fetch error for {candidate}: {e}")
+        if not equal_symbol:
+            raise ValueError("Equal-weight Nasdaq 100 proxy unavailable for condition matrix")
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 90:
+            raise ValueError("Insufficient aligned history for condition matrix")
+
+        returns = pd.DataFrame(index=prices.index)
+        returns["qqq"] = prices["qqq"].pct_change() * 100
+        returns["spy"] = prices["spy"].pct_change() * 100
+        returns["smh_active"] = (prices["smh"].pct_change() - prices["spy"].pct_change()) * 100
+        returns["rates_bps"] = prices["rates"].diff() * 100
+        returns["dollar"] = prices["dollar"].pct_change() * 100
+        returns["vix_pts"] = prices["vix"].diff()
+        returns["breadth_spread"] = (prices["equal"].pct_change() - prices["qqq"].pct_change()) * 100
+        returns["forward_5d"] = (prices["qqq"].shift(-5) / prices["qqq"] - 1) * 100
+        returns = returns.dropna()
+        if len(returns) < 80:
+            raise ValueError("Insufficient return rows for condition matrix")
+
+        qqq_return_5d = pct_change(prices["qqq"].iloc[-1], prices["qqq"].iloc[-6]) if len(prices) >= 6 else 0
+        qqq_return_20d = pct_change(prices["qqq"].iloc[-1], prices["qqq"].iloc[-21]) if len(prices) >= 21 else qqq_return_5d
+        rates_change_20d = safe_float((prices["rates"].iloc[-1] - prices["rates"].iloc[-21]) * 100, 0) if len(prices) >= 21 else 0
+        dollar_return_20d = pct_change(prices["dollar"].iloc[-1], prices["dollar"].iloc[-21]) if len(prices) >= 21 else 0
+        vix_change_20d = safe_float(prices["vix"].iloc[-1] - prices["vix"].iloc[-21], 0) if len(prices) >= 21 else 0
+        semis_active_20d = safe_float(((prices["smh"].iloc[-1] / prices["smh"].iloc[-21]) - (prices["spy"].iloc[-1] / prices["spy"].iloc[-21])) * 100, 0) if len(prices) >= 21 else 0
+        breadth_gap_20d = safe_float(((prices["equal"].iloc[-1] / prices["equal"].iloc[-21]) - (prices["qqq"].iloc[-1] / prices["qqq"].iloc[-21])) * 100, 0) if len(prices) >= 21 else 0
+
+        rates_score = clamp(48 + rates_change_20d * 0.75)
+        dollar_score = clamp(48 + dollar_return_20d * 9)
+        vix_score = clamp(44 + vix_change_20d * 6)
+        semis_score = clamp(48 - semis_active_20d * 8)
+        breadth_score = clamp(50 - breadth_gap_20d * 10)
+        trend_score = clamp(48 - qqq_return_20d * 4)
+
+        conditions = [
+            build_condition_item(
+                "rates",
+                "利率条件",
+                rates_change_20d,
+                f"{rates_change_20d:+.0f}bps",
+                rates_score,
+                "20 日利率变化稳定或回落",
+                f"美国 10Y 利率 20 日变化 {rates_change_20d:+.0f}bps，成长股久期估值对其敏感。",
+            ),
+            build_condition_item(
+                "dollar",
+                "美元条件",
+                dollar_return_20d,
+                f"{dollar_return_20d:+.2f}%",
+                dollar_score,
+                "美元指数横盘或走弱",
+                f"美元指数 20 日收益 {dollar_return_20d:+.2f}%，走强通常压制全球风险偏好和跨国科技收入折现。",
+            ),
+            build_condition_item(
+                "volatility",
+                "波动条件",
+                vix_change_20d,
+                f"{vix_change_20d:+.1f}pt",
+                vix_score,
+                "VIX 回落或低位横盘",
+                f"VIX 20 日变化 {vix_change_20d:+.1f} 点，反映保护需求和风险厌恶变化。",
+            ),
+            build_condition_item(
+                "semis",
+                "半导体条件",
+                semis_active_20d,
+                f"{semis_active_20d:+.2f}pt",
+                semis_score,
+                "SMH 相对 SPY 保持主动收益",
+                f"SMH 相对 SPY 20 日主动收益 {semis_active_20d:+.2f} 个百分点，是 NDX 主题动能的核心确认项。",
+            ),
+            build_condition_item(
+                "breadth",
+                "广度条件",
+                breadth_gap_20d,
+                f"{breadth_gap_20d:+.2f}pt",
+                breadth_score,
+                f"{equal_symbol} 相对 QQQ 改善",
+                f"{equal_symbol} 相对 QQQ 20 日收益差 {breadth_gap_20d:+.2f} 个百分点，用于判断上涨是否扩散。",
+            ),
+            build_condition_item(
+                "trend",
+                "价格条件",
+                qqq_return_20d,
+                f"{qqq_return_20d:+.2f}%",
+                trend_score,
+                "QQQ 20 日趋势为正且不远离支撑",
+                f"QQQ 20 日收益 {qqq_return_20d:+.2f}%，用于约束当前条件是否已经被价格充分反映。",
+            ),
+        ]
+
+        condition_score = round(sum(item["score"] for item in conditions) / len(conditions), 1)
+        regime, color = condition_matrix_regime(condition_score)
+
+        rates_up = returns["rates_bps"] > 3
+        rates_stable = returns["rates_bps"].abs() < 3
+        dollar_up = returns["dollar"] > 0.25
+        vix_up = returns["vix_pts"] > 0.7
+        vix_down = returns["vix_pts"] < -0.7
+        semis_down = returns["smh_active"] < -0.35
+        semis_up = returns["smh_active"] > 0.35
+        breadth_down = returns["breadth_spread"] < -0.25
+        breadth_up = returns["breadth_spread"] > 0.15
+        qqq_up = returns["qqq"] > 0.35
+
+        scenarios = [
+            build_condition_scenario("rates_vol_up", "利率 + VIX 同步上行", rates_up & vix_up, returns),
+            build_condition_scenario("dollar_semis_down", "美元走强 + 半导体失速", dollar_up & semis_down, returns),
+            build_condition_scenario("narrow_rally", "QQQ 上涨但广度落后", qqq_up & breadth_down, returns),
+            build_condition_scenario("semis_breadth_up", "半导体领涨 + 广度扩散", semis_up & breadth_up, returns),
+            build_condition_scenario("vix_down_rates_stable", "VIX 回落 + 利率稳定", vix_down & rates_stable, returns),
+        ]
+
+        strongest_condition = max(conditions, key=lambda item: item["score"])
+        weakest_condition = min(conditions, key=lambda item: item["score"])
+        if regime == "条件转弱":
+            summary = f"NDX 条件矩阵转弱，主要压力来自 {strongest_condition['label']}，上涨更需要成交和广度确认。"
+        elif regime == "条件偏紧":
+            summary = f"NDX 条件偏紧，{strongest_condition['label']} 是当前最需要监控的风险源。"
+        elif regime == "条件友好":
+            summary = f"NDX 条件相对友好，最有利的确认项是 {weakest_condition['label']}。"
+        else:
+            summary = "NDX 条件矩阵处在均衡区，宏观压力和内部扩散信号需要联合观察。"
+
+        controls = [
+            f"若 {strongest_condition['label']} 继续恶化，应降低对 QQQ 20 日趋势 {qqq_return_20d:+.2f}% 的外推权重。",
+            f"若半导体主动收益和 {equal_symbol}/QQQ 同时改善，可提高对 NDX 上涨质量的确认度。",
+            "条件组合样本用于历史参照，不是预测模型；样本少的组合只作为提示，不应直接驱动仓位。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "condition_score": condition_score,
+            "summary": summary,
+            "qqq_return_5d": round(qqq_return_5d, 2),
+            "qqq_return_20d": round(qqq_return_20d, 2),
+            "rates_change_20d_bps": round(rates_change_20d, 1),
+            "dollar_return_20d": round(dollar_return_20d, 2),
+            "vix_change_20d": round(vix_change_20d, 2),
+            "semis_active_20d": round(semis_active_20d, 2),
+            "breadth_gap_20d": round(breadth_gap_20d, 2),
+            "equal_symbol": equal_symbol,
+            "conditions": conditions,
+            "scenarios": scenarios,
+            "controls": controls,
+            "methodology": "使用 QQQ、SPY、SMH、10Y 利率、美元指数、VIX 和等权 Nasdaq 100 代理最近 6 个月日线，计算当前 20 日条件读数，并统计若干条件组合出现后的历史 5 日 QQQ 平均表现和胜率。该模块用于条件风险参照，不构成预测或交易指令。",
+        }
+        risk_condition_matrix_cache["data"] = data
+        risk_condition_matrix_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX condition matrix updated: {regime}, score {condition_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX condition matrix refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -3458,6 +3729,7 @@ def background_worker():
     last_concentration = 0
     last_factors = 0
     last_factor_attribution = 0
+    last_condition_matrix = 0
     last_levels = 0
     last_tail = 0
     last_relative = 0
@@ -3491,6 +3763,11 @@ def background_worker():
             if time.time() - last_factor_attribution > 1800:
                 refresh_factor_attribution_data()
                 last_factor_attribution = time.time()
+
+            # NDX condition matrix every 30 minutes
+            if time.time() - last_condition_matrix > 1800:
+                refresh_condition_matrix_data()
+                last_condition_matrix = time.time()
 
             # Technical levels every 30 minutes
             if time.time() - last_levels > 1800:
@@ -3664,6 +3941,14 @@ def get_risk_attribution():
         refresh_factor_attribution_data()
 
     data = risk_factor_attribution_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/condition-matrix', methods=['GET'])
+def get_risk_condition_matrix():
+    if not cache_is_fresh(risk_condition_matrix_cache, 15 * 60) and should_refresh_empty_cache(risk_condition_matrix_cache, 60):
+        refresh_condition_matrix_data()
+
+    data = risk_condition_matrix_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
