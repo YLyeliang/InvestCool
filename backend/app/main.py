@@ -83,6 +83,7 @@ risk_condition_matrix_cache = {"data": None, "last_update": None}
 risk_funding_conditions_cache = {"data": None, "last_update": None}
 risk_regime_compass_cache = {"data": None, "last_update": None}
 risk_alerts_cache = {"data": None, "last_update": None}
+risk_scenario_map_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -3991,6 +3992,159 @@ def refresh_risk_budget():
         logger.error(traceback.format_exc())
 
 
+def refresh_scenario_map_data(allow_dependency_refresh=True):
+    global risk_scenario_map_cache
+
+    try:
+        dependencies = [
+            ("scenarios", risk_scenarios_cache, refresh_risk_scenarios, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60),
+            ("budget", risk_budget_cache, refresh_risk_budget, 15 * 60),
+        ]
+        light_dependencies = {"scenarios", "regime", "alerts"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key == "regime":
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    elif key == "alerts":
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Scenario map dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        scenarios = risk_scenarios_cache.get("data") or {}
+        scenario_items = scenarios.get("scenarios") or []
+        if not scenario_items:
+            return
+
+        regime = risk_regime_compass_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        budget = risk_budget_cache.get("data") or {}
+
+        regime_score = safe_float(regime.get("regime_score"), 50)
+        pressure_score = safe_float(regime.get("pressure_score"), 50)
+        support_score = safe_float(regime.get("support_score"), 50)
+        alert_score = safe_float(alerts.get("alert_score"), 45)
+        stress_downside = safe_float(budget.get("stress_downside"), None)
+
+        base_weights = {
+            "base_case": 34,
+            "rate_shock": 14,
+            "volatility_spike": 18,
+            "breadth_repair": 20,
+            "trend_break": 14,
+        }
+        pressure_adjustment = max(0, pressure_score - 50) * 0.28 + max(0, alert_score - 50) * 0.22
+        support_adjustment = max(0, support_score - 50) * 0.22 + max(0, regime_score - 55) * 0.18
+
+        weights = dict(base_weights)
+        weights["volatility_spike"] += pressure_adjustment * 0.9
+        weights["trend_break"] += pressure_adjustment * 0.75
+        weights["rate_shock"] += pressure_adjustment * 0.55
+        weights["base_case"] += max(0, 64 - alert_score) * 0.18
+        weights["breadth_repair"] += support_adjustment
+        if regime.get("regime") in ("扩张顺风", "趋势持有", "修复观察"):
+            weights["base_case"] += 4
+            weights["breadth_repair"] += 3
+        if regime.get("regime") in ("高位脆弱", "风险收缩"):
+            weights["volatility_spike"] += 5
+            weights["trend_break"] += 5
+            weights["base_case"] -= 5
+
+        total_weight = sum(max(1, value) for value in weights.values())
+        probability_map = {key: max(1, value) / total_weight * 100 for key, value in weights.items()}
+
+        mapped = []
+        for item in scenario_items:
+            key = item.get("key")
+            probability = probability_map.get(key, 100 / len(scenario_items))
+            midpoint = safe_float(item.get("midpoint_move"), 0)
+            low = safe_float(item.get("ndx_range", {}).get("low"), 0)
+            high = safe_float(item.get("ndx_range", {}).get("high"), 0)
+            contribution = midpoint * probability / 100
+            mapped.append({
+                "key": key,
+                "name": item.get("name"),
+                "category": item.get("category"),
+                "color": item.get("color", "blue"),
+                "probability_pct": round(probability, 1),
+                "midpoint_move": round(midpoint, 1),
+                "expected_contribution": round(contribution, 2),
+                "ndx_range": item.get("ndx_range"),
+                "range_low": round(low, 2),
+                "range_high": round(high, 2),
+                "trigger_count": len(item.get("triggers") or []),
+                "response": item.get("response"),
+                "rationale": item.get("rationale"),
+            })
+
+        expected_move = sum(item["expected_contribution"] for item in mapped)
+        downside_probability = sum(item["probability_pct"] for item in mapped if item["midpoint_move"] < 0)
+        upside_probability = sum(item["probability_pct"] for item in mapped if item["midpoint_move"] > 0)
+        worst = min(mapped, key=lambda item: item["range_low"])
+        best = max(mapped, key=lambda item: item["range_high"])
+        dominant = max(mapped, key=lambda item: item["probability_pct"])
+        stress_downside = stress_downside if stress_downside is not None else abs(min(safe_float(worst["midpoint_move"], 0), 0))
+        probability_weighted_low = sum(item["range_low"] * item["probability_pct"] / 100 for item in mapped)
+        probability_weighted_high = sum(item["range_high"] * item["probability_pct"] / 100 for item in mapped)
+
+        if expected_move >= 1.2 and upside_probability > downside_probability:
+            posture = "上行偏斜"
+            color = "green"
+            summary = f"概率加权路径偏上行，主导情景为 {dominant['name']}，但仍需要用 {worst['name']} 的下沿约束风险预算。"
+        elif expected_move <= -1.2 or downside_probability >= 58:
+            posture = "下行偏斜"
+            color = "red" if downside_probability >= 65 else "amber"
+            summary = f"概率加权路径偏下行，{worst['name']} 是主要尾部压力，新增风险预算应等待触发线改善。"
+        else:
+            posture = "双向拉锯"
+            color = "blue"
+            summary = f"情景概率处在拉锯区，{dominant['name']} 权重最高，但上下行情景仍相互抵消。"
+
+        controls = [
+            f"若 {worst['name']} 的触发条件出现，应按压力回撤 -{stress_downside:.1f}% 重新约束仓位。",
+            f"若 {best['name']} 的确认项出现，可把新增风险预算从观察仓位升级为均衡仓位。",
+            "概率权重来自当前风险模块状态，不是统计预测；需要与收盘价、成交确认和风险预算一起使用。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": scenarios.get("index"),
+            "risk_score": scenarios.get("risk_score"),
+            "posture": posture,
+            "posture_color": color,
+            "expected_move": round(expected_move, 2),
+            "downside_probability": round(downside_probability, 1),
+            "upside_probability": round(upside_probability, 1),
+            "probability_weighted_low": round(probability_weighted_low, 2),
+            "probability_weighted_high": round(probability_weighted_high, 2),
+            "dominant_scenario": dominant["name"],
+            "worst_scenario": worst["name"],
+            "best_scenario": best["name"],
+            "stress_downside": round(stress_downside, 1),
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "summary": summary,
+            "scenarios": sorted(mapped, key=lambda item: item["probability_pct"], reverse=True),
+            "controls": controls,
+            "methodology": "基于现有 NDX 压力情景，结合市场状态罗盘、风险预警和风险预算，对 5 个情景重新分配概率权重，计算概率加权涨跌、上下行概率和尾部下沿。该模块用于组合情景管理，不构成预测或交易建议。",
+        }
+        risk_scenario_map_cache["data"] = data
+        risk_scenario_map_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX scenario probability map updated: {posture}, expected {expected_move:.2f}%")
+    except Exception as e:
+        logger.error(f"NDX scenario probability map refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_hedge_overlay_data():
     global risk_hedge_overlay_cache
 
@@ -4878,6 +5032,7 @@ def background_worker():
     last_hedge_overlay = 0
     last_regime_compass = 0
     last_alerts = 0
+    last_scenario_map = 0
     while True:
         try:
             update_market_index()
@@ -5005,6 +5160,11 @@ def background_worker():
                 refresh_alerts_data()
                 last_alerts = time.time()
 
+            # NDX scenario probability map every 30 minutes
+            if time.time() - last_scenario_map > 1800:
+                refresh_scenario_map_data()
+                last_scenario_map = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -5129,6 +5289,14 @@ def get_risk_alerts():
         refresh_alerts_data(allow_dependency_refresh="light")
 
     data = risk_alerts_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/scenario-map', methods=['GET'])
+def get_risk_scenario_map():
+    if not cache_is_fresh(risk_scenario_map_cache, 15 * 60) and should_refresh_empty_cache(risk_scenario_map_cache, 60):
+        refresh_scenario_map_data(allow_dependency_refresh="light")
+
+    data = risk_scenario_map_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
