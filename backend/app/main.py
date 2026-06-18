@@ -62,6 +62,7 @@ ai_latest_cache = {"data": None, "last_update": None}
 risk_diagnostics_cache = {"data": None, "last_update": None}
 risk_scenarios_cache = {"data": None, "last_update": None}
 risk_budget_cache = {"data": None, "last_update": None}
+risk_concentration_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -256,6 +257,20 @@ def exposure_profile(name, key, lower, upper, cash_buffer, max_loss_budget, reba
         "suitable_for": suitable_for,
     }
 
+def concentration_level(top3_weight, hhi):
+    if top3_weight >= 72 or hhi >= 1900:
+        return "高度集中"
+    if top3_weight >= 60 or hhi >= 1500:
+        return "偏集中"
+    return "分散"
+
+def concentration_color(level):
+    if level == "高度集中":
+        return "red"
+    if level == "偏集中":
+        return "amber"
+    return "green"
+
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     try:
@@ -404,6 +419,124 @@ def refresh_macro_data():
         macro_cache["data"] = new_data
         macro_cache["last_update"] = datetime.utcnow()
         logger.info("Macro updated")
+
+
+def refresh_concentration_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_concentration_cache
+
+    try:
+        if not watchlist_cache.get("data"):
+            refresh_watchlist_data()
+
+        watchlist = watchlist_cache.get("data", [])
+        if not watchlist:
+            raise ValueError("Watchlist unavailable for concentration analysis")
+
+        rows = []
+        for item in watchlist:
+            symbol = item.get("symbol")
+            if not symbol:
+                continue
+
+            market_cap = None
+            try:
+                market_cap = safe_float(yf.Ticker(symbol).fast_info.market_cap, None)
+            except Exception as e:
+                logger.error(f"Market cap fetch error for {symbol}: {e}")
+
+            if not market_cap or market_cap <= 0:
+                continue
+
+            rows.append({
+                "symbol": symbol,
+                "price": safe_float(item.get("price"), 0),
+                "percent": safe_float(item.get("percent"), 0),
+                "market_cap": market_cap,
+            })
+
+        if len(rows) < 3:
+            raise ValueError("Insufficient market cap data for concentration analysis")
+
+        total_cap = sum(row["market_cap"] for row in rows)
+        for row in rows:
+            weight = row["market_cap"] / total_cap * 100 if total_cap else 0
+            row["weight"] = weight
+            row["contribution"] = weight * row["percent"] / 100
+
+        rows = sorted(rows, key=lambda row: row["weight"], reverse=True)
+        top3_weight = sum(row["weight"] for row in rows[:3])
+        top1 = rows[0]
+        hhi = sum(row["weight"] ** 2 for row in rows)
+        market_weighted_return = sum(row["contribution"] for row in rows)
+        equal_weight_return = sum(row["percent"] for row in rows) / len(rows)
+        leadership_gap = market_weighted_return - equal_weight_return
+        level = concentration_level(top3_weight, hhi)
+
+        contributors = sorted(rows, key=lambda row: row["contribution"], reverse=True)
+        detractors = sorted(rows, key=lambda row: row["contribution"])
+
+        names = {
+            "AAPL": "Apple",
+            "MSFT": "Microsoft",
+            "GOOGL": "Alphabet",
+            "AMZN": "Amazon",
+            "NVDA": "NVIDIA",
+            "TSLA": "Tesla",
+            "META": "Meta",
+        }
+
+        securities = [{
+            "symbol": row["symbol"],
+            "name": names.get(row["symbol"], row["symbol"]),
+            "weight": round(row["weight"], 1),
+            "percent": round(row["percent"], 2),
+            "contribution": round(row["contribution"], 2),
+            "market_cap": round(row["market_cap"]),
+        } for row in rows]
+
+        flags = []
+        if top3_weight >= 65:
+            flags.append("前三大权重股决定了大部分 MAG7 代理波动，单一龙头回撤会放大指数压力。")
+        if leadership_gap < -0.5:
+            flags.append("市值加权表现弱于等权表现，说明大权重股票正在拖累指数质量。")
+        elif leadership_gap > 0.5:
+            flags.append("市值加权表现强于等权表现，指数上涨更依赖大权重龙头。")
+        if top1["weight"] >= 28:
+            flags.append(f"{top1['symbol']} 权重接近单一主导区，需要观察其财报和估值波动。")
+        if not flags:
+            flags.append("当前 MAG7 代理未显示极端集中度，但仍需跟踪龙头间轮动。")
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "coverage": f"{len(rows)}/7 MAG7",
+            "methodology": "使用 MAG7 可得市值归一化作为 NDX 权重股集中度代理，不等同于完整 NDX 官方权重。",
+            "concentration_level": level,
+            "concentration_color": concentration_color(level),
+            "top3_weight": round(top3_weight, 1),
+            "top1_symbol": top1["symbol"],
+            "top1_weight": round(top1["weight"], 1),
+            "hhi": round(hhi),
+            "market_weighted_return": round(market_weighted_return, 2),
+            "equal_weight_return": round(equal_weight_return, 2),
+            "leadership_gap": round(leadership_gap, 2),
+            "top_contributors": [
+                {"symbol": row["symbol"], "contribution": round(row["contribution"], 2)}
+                for row in contributors[:3]
+            ],
+            "top_detractors": [
+                {"symbol": row["symbol"], "contribution": round(row["contribution"], 2)}
+                for row in detractors[:3]
+            ],
+            "securities": securities,
+            "flags": flags,
+        }
+        risk_concentration_cache["data"] = data
+        risk_concentration_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX concentration proxy updated: {level}, top3 {top3_weight:.1f}%")
+    except Exception as e:
+        logger.error(f"NDX concentration refresh failed: {e}")
+        logger.error(traceback.format_exc())
 
 
 def build_pillar(key, label, score, comment, metrics):
@@ -968,12 +1101,18 @@ def background_worker():
     last_risk_diagnostics = 0
     last_risk_scenarios = 0
     last_risk_budget = 0
+    last_concentration = 0
     while True:
         try:
             update_market_index()
             refresh_watchlist_data()
             refresh_nasdaq_data()
             refresh_macro_data()
+
+            # MAG7 concentration proxy every 30 minutes
+            if time.time() - last_concentration > 1800:
+                refresh_concentration_data()
+                last_concentration = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1055,6 +1194,14 @@ def get_risk_budget():
         refresh_risk_budget()
 
     data = risk_budget_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/concentration', methods=['GET'])
+def get_risk_concentration():
+    if not cache_is_fresh(risk_concentration_cache, 15 * 60) and should_refresh_empty_cache(risk_concentration_cache, 60):
+        refresh_concentration_data()
+
+    data = risk_concentration_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])

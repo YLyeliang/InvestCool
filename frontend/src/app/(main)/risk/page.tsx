@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
+import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
 import { Icon } from "@/components/ui/Icon";
@@ -108,6 +109,13 @@ export default function RiskPage() {
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> 机构式风险诊断
         </h3>
         <NDXRiskDiagnosticsPanel />
+      </section>
+
+      <section className="concentration-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:pie-chart" className="text-[var(--accent-color)]" /> 权重股集中度
+        </h3>
+        <NDXConcentrationPanel />
       </section>
 
       <section className="scenario-section">
