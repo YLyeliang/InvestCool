@@ -42,6 +42,22 @@ interface ContributionPayload {
   support_total: number;
 }
 
+interface CapacityPayload {
+  capacity_score: number;
+  capacity_regime: string;
+  target_exposure: {
+    lower: number;
+    upper: number;
+    label: string;
+  };
+  cash_buffer_min: number;
+  hedge_coverage: {
+    lower: number;
+    upper: number;
+    label: string;
+  };
+}
+
 interface FactorPayload {
   pressure_score: number;
   pressure_label: string;
@@ -162,6 +178,7 @@ interface DashboardData {
   regimeCompass: RegimeCompassPayload | null;
   alerts: AlertsPayload | null;
   contribution: ContributionPayload | null;
+  capacity: CapacityPayload | null;
   factors: FactorPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
   funding: FundingPayload | null;
@@ -294,6 +311,7 @@ export const NDXSignalDashboardPanel = () => {
           regimeCompass,
           alerts,
           contribution,
+          capacity,
           factors,
           conditionMatrix,
           funding,
@@ -316,6 +334,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<RegimeCompassPayload>("/api/risk/regime-compass"),
           fetchJson<AlertsPayload>("/api/risk/alerts"),
           fetchJson<ContributionPayload>("/api/risk/contribution"),
+          fetchJson<CapacityPayload>("/api/risk/capacity"),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
           fetchJson<FundingPayload>("/api/risk/funding-conditions"),
@@ -334,7 +353,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -366,6 +385,7 @@ export const NDXSignalDashboardPanel = () => {
       data.quality?.quality_score ?? 50,
       data.regimeCompass?.regime_score ?? 50,
       data.recoveryPath?.recovery_score ?? 50,
+      data.capacity?.capacity_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
     const pressureScores = [riskScore, contributionScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
@@ -410,6 +430,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.contribution ? `压力 ${data.contribution.pressure_total.toFixed(1)} · 缓冲 ${data.contribution.support_total.toFixed(1)} · 净 ${formatSignedPoint(data.contribution.net_pressure)}` : "等待贡献拆解",
         color: data.contribution ? scoreColor(data.contribution.risk_contribution_score, true) : "blue",
         icon: "chart-no-axes-combined",
+      },
+      {
+        label: "承受力闸门",
+        value: data.capacity ? data.capacity.capacity_regime : "--",
+        detail: data.capacity ? `暴露 ${data.capacity.target_exposure.label} · 现金 ${data.capacity.cash_buffer_min.toFixed(0)}%+ · 保护 ${data.capacity.hedge_coverage.label}` : "等待承受力闸门",
+        color: data.capacity ? scoreColor(data.capacity.capacity_score) : "blue",
+        icon: "gauge",
       },
       {
         label: "宏观压力",
@@ -537,7 +564,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 20 }).map((_, index) => (
+          {Array.from({ length: 21 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

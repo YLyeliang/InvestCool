@@ -86,6 +86,7 @@ risk_alerts_cache = {"data": None, "last_update": None}
 risk_scenario_map_cache = {"data": None, "last_update": None}
 risk_recovery_path_cache = {"data": None, "last_update": None}
 risk_contribution_cache = {"data": None, "last_update": None}
+risk_capacity_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -278,6 +279,15 @@ def build_contribution_driver(key, label, direction, score, weight, evidence, ac
         "evidence": evidence,
         "action": action,
     }
+
+def capacity_regime(score):
+    if score >= 70:
+        return "预算可用", "green"
+    if score >= 52:
+        return "中性承受", "blue"
+    if score >= 36:
+        return "承受力收缩", "amber"
+    return "防守闸门", "red"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -4741,6 +4751,230 @@ def refresh_contribution_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_capacity_data(allow_dependency_refresh=True):
+    global risk_capacity_cache
+
+    try:
+        dependencies = [
+            ("budget", risk_budget_cache, refresh_risk_budget, 15 * 60),
+            ("contribution", risk_contribution_cache, refresh_contribution_data, 15 * 60),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60),
+            ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60),
+            ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+            ("levels", risk_levels_cache, refresh_technical_levels, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60),
+            ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60),
+        ]
+        light_dependencies = {"budget", "contribution", "alerts", "recovery", "regime", "levels", "tail", "breadth", "liquidity"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key in ("contribution", "alerts", "recovery", "regime"):
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Risk capacity dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 5:
+            return
+
+        budget = risk_budget_cache.get("data") or {}
+        contribution = risk_contribution_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        recovery = risk_recovery_path_cache.get("data") or {}
+        hedge = risk_hedge_overlay_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+        levels = risk_levels_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        breadth = risk_breadth_cache.get("data") or {}
+        liquidity = risk_liquidity_cache.get("data") or {}
+
+        profiles = budget.get("profiles") or []
+        profile_map = {profile.get("key"): profile for profile in profiles}
+
+        def exposure_value(profile_key, field, fallback):
+            exposure = profile_map.get(profile_key, {}).get("exposure", {})
+            return safe_float(exposure.get(field), fallback)
+
+        defensive_lower = exposure_value("defensive", "lower", 10)
+        defensive_upper = exposure_value("defensive", "upper", 35)
+        balanced_lower = exposure_value("balanced", "lower", 30)
+        balanced_upper = exposure_value("balanced", "upper", 58)
+        growth_upper = exposure_value("growth", "upper", 78)
+
+        pressure_total = safe_float(contribution.get("pressure_total"), 32)
+        support_total = safe_float(contribution.get("support_total"), 30)
+        net_pressure = safe_float(contribution.get("net_pressure"), pressure_total - support_total)
+        alert_score = safe_float(alerts.get("alert_score"), 45)
+        recovery_score = safe_float(recovery.get("recovery_score"), 50)
+        regime_score = safe_float(regime.get("regime_score"), 50)
+        hedge_score = safe_float(hedge.get("hedge_score"), 45)
+        tail_score = safe_float(tail.get("tail_score"), 45)
+        breadth_score = safe_float(breadth.get("breadth_score"), 50)
+        liquidity_score = safe_float(liquidity.get("flow_score"), 50)
+        stress_downside = safe_float(budget.get("stress_downside"), 8)
+        risk_score = safe_float(budget.get("risk_score"), 50)
+
+        capacity_score = round(clamp(
+            46
+            + support_total * 0.85
+            - pressure_total * 0.75
+            + regime_score * 0.18
+            + recovery_score * 0.14
+            + liquidity_score * 0.08
+            + breadth_score * 0.08
+            - alert_score * 0.16
+            - hedge_score * 0.08
+            - max(0, tail_score - 45) * 0.10
+            - max(0, stress_downside - 7) * 1.10
+        ), 1)
+        regime_label, regime_color = capacity_regime(capacity_score)
+
+        if capacity_score >= 72:
+            recommended_key = "growth"
+            recommended_profile = "进取型"
+            base_lower = balanced_upper
+            base_upper = growth_upper
+        elif capacity_score >= 52:
+            recommended_key = "balanced"
+            recommended_profile = "均衡型"
+            base_lower = balanced_lower
+            base_upper = balanced_upper
+        else:
+            recommended_key = "defensive"
+            recommended_profile = "防守型"
+            base_lower = defensive_lower
+            base_upper = defensive_upper
+
+        capacity_adjustment = (capacity_score - 55) * 0.45 - max(0, alert_score - 62) * 0.22 - max(0, net_pressure) * 0.18
+        target_upper = round(clamp(base_upper + capacity_adjustment, defensive_upper if recommended_key != "defensive" else defensive_lower, growth_upper), 0)
+        if recommended_key == "defensive":
+            target_upper = round(clamp(min(target_upper, defensive_upper), defensive_lower, defensive_upper), 0)
+        target_lower = round(clamp(min(base_lower, target_upper - 8), 0, target_upper), 0)
+        if target_upper - target_lower > 24:
+            target_lower = round(target_upper - 24, 0)
+        if target_upper < target_lower:
+            target_lower = target_upper
+
+        protection_lower = safe_float(hedge.get("protection_lower"), 8)
+        protection_upper = safe_float(hedge.get("protection_upper"), 25)
+        cash_buffer_min = round(clamp(100 - target_upper + protection_upper * 0.12 + stress_downside * 0.55, 12, 68), 0)
+        max_loss_budget = round(stress_downside * target_upper / 100, 1)
+
+        allow_increase = capacity_score >= 64 and alert_score < 58 and recovery_score >= 52 and net_pressure < 7
+        allow_maintain = capacity_score >= 46 and alert_score < 78
+        reduce_active = capacity_score < 52 or alert_score >= 58 or net_pressure >= 7
+        pause_active = capacity_score < 36 or alert_score >= 78 or recovery_score < 34
+
+        gates = [
+            {
+                "key": "increase",
+                "label": "上调风险预算",
+                "status": "open" if allow_increase else "blocked",
+                "color": "green" if allow_increase else "amber",
+                "trigger": "承受力分 >= 64，预警 < 58，修复路径 >= 52，净压力 < +7。",
+                "readout": f"承受力 {capacity_score:.1f} / 预警 {alert_score:.1f} / 修复 {recovery_score:.1f} / 净压力 {net_pressure:+.1f}",
+                "action": "允许把 NDX 暴露靠近目标区间上沿，但仍需分批执行。" if allow_increase else "暂不提高仓位上限，先等待预警、净压力或修复路径改善。",
+            },
+            {
+                "key": "maintain",
+                "label": "维持核心暴露",
+                "status": "open" if allow_maintain else "conditional",
+                "color": "blue" if allow_maintain else "amber",
+                "trigger": "承受力分 >= 46，且没有红色预警。",
+                "readout": f"推荐档位 {recommended_profile}，目标暴露 {target_lower:.0f}% - {target_upper:.0f}%。",
+                "action": "保留核心暴露，新增资金等待回踩或确认。" if allow_maintain else "核心暴露也应降到目标区间下沿，并提高现金缓冲。",
+            },
+            {
+                "key": "reduce",
+                "label": "降档再平衡",
+                "status": "active" if reduce_active else "standby",
+                "color": "amber" if reduce_active else "blue",
+                "trigger": "承受力 < 52，预警 >= 58，或净压力 >= +7。",
+                "readout": f"压力贡献 {pressure_total:.1f} / 缓冲贡献 {support_total:.1f}。",
+                "action": "把超过目标上沿的 NDX 暴露降回区间内。" if reduce_active else "暂不需要主动降档，但保留再平衡触发线。",
+            },
+            {
+                "key": "pause",
+                "label": "暂停进攻性加仓",
+                "status": "active" if pause_active else "standby",
+                "color": "red" if pause_active else "green",
+                "trigger": "承受力 < 36，红色预警，或修复路径跌破 34。",
+                "readout": f"保护覆盖 {protection_lower:.0f}% - {protection_upper:.0f}%，现金下限 {cash_buffer_min:.0f}%+。",
+                "action": "暂停进攻性加仓，优先确认最大回撤、保护覆盖和失效线。" if pause_active else "没有触发暂停闸门，但进攻仓位仍需服从目标上限。",
+            },
+        ]
+
+        if regime_label == "预算可用":
+            summary = f"NDX 风险承受力处在可用区，目标暴露可放在 {target_lower:.0f}% - {target_upper:.0f}%，但保护覆盖仍需保留。"
+        elif regime_label == "中性承受":
+            summary = f"NDX 风险承受力处在中性区，适合维持 {recommended_profile} 预算，把新增资金放在确认后执行。"
+        elif regime_label == "承受力收缩":
+            summary = f"NDX 风险承受力正在收缩，目标暴露应压到 {target_lower:.0f}% - {target_upper:.0f}%，优先处理预警和净压力。"
+        else:
+            summary = "NDX 触发防守闸门，组合应暂停进攻性加仓，先确认现金缓冲、保护覆盖和技术失效线。"
+
+        constraints = [
+            f"目标 NDX 暴露：{target_lower:.0f}% - {target_upper:.0f}%，超过上沿应再平衡。",
+            f"现金缓冲下限：{cash_buffer_min:.0f}%+，用于承接 -{stress_downside:.1f}% 压力回撤。",
+            f"保护覆盖参考：{protection_lower:.0f}% - {protection_upper:.0f}%，与当前对冲覆盖模块同步。",
+            f"目标上沿对应压力损失预算约 {max_loss_budget:.1f}%。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round_optional(safe_float(budget.get("index"), safe_float(levels.get("index"), None)), 2),
+            "capacity_score": capacity_score,
+            "capacity_regime": regime_label,
+            "capacity_color": regime_color,
+            "recommended_profile": recommended_profile,
+            "recommended_key": recommended_key,
+            "target_exposure": {
+                "lower": target_lower,
+                "upper": target_upper,
+                "label": f"{target_lower:.0f}% - {target_upper:.0f}%",
+            },
+            "cash_buffer_min": cash_buffer_min,
+            "hedge_coverage": {
+                "lower": round(protection_lower, 0),
+                "upper": round(protection_upper, 0),
+                "label": f"{protection_lower:.0f}% - {protection_upper:.0f}%",
+            },
+            "max_loss_budget": max_loss_budget,
+            "stress_downside": round(stress_downside, 1),
+            "risk_score": round(risk_score, 1),
+            "net_pressure": round(net_pressure, 1),
+            "alert_score": round(alert_score, 1),
+            "alert_level": alerts.get("alert_level"),
+            "recovery_score": round(recovery_score, 1),
+            "recovery_regime": recovery.get("recovery_regime"),
+            "regime": regime.get("regime"),
+            "hedge_label": hedge.get("hedge_label"),
+            "pressure_total": round(pressure_total, 1),
+            "support_total": round(support_total, 1),
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "summary": summary,
+            "gates": gates,
+            "constraints": constraints,
+            "methodology": "把风险预算矩阵、风险贡献、风险预警、回撤修复路径、对冲覆盖、市场状态、尾部风险、广度和流动性压成一个组合层面的风险承受力闸门。该模块用于仓位上限、现金缓冲和保护覆盖纪律管理，不构成买卖指令。",
+        }
+        risk_capacity_cache["data"] = data
+        risk_capacity_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX risk capacity updated: {regime_label}, score {capacity_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX risk capacity refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_hedge_overlay_data():
     global risk_hedge_overlay_cache
 
@@ -5631,6 +5865,7 @@ def background_worker():
     last_scenario_map = 0
     last_recovery_path = 0
     last_contribution = 0
+    last_capacity = 0
     while True:
         try:
             update_market_index()
@@ -5772,6 +6007,11 @@ def background_worker():
             if time.time() - last_contribution > 1800:
                 refresh_contribution_data()
                 last_contribution = time.time()
+
+            # NDX risk capacity gate every 30 minutes
+            if time.time() - last_capacity > 1800:
+                refresh_capacity_data()
+                last_capacity = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -5921,6 +6161,14 @@ def get_risk_contribution():
         refresh_contribution_data(allow_dependency_refresh="light")
 
     data = risk_contribution_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/capacity', methods=['GET'])
+def get_risk_capacity():
+    if not cache_is_fresh(risk_capacity_cache, 15 * 60) and should_refresh_empty_cache(risk_capacity_cache, 60):
+        refresh_capacity_data(allow_dependency_refresh="light")
+
+    data = risk_capacity_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
