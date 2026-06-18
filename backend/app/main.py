@@ -73,6 +73,7 @@ risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
+risk_quality_cache = {"data": None, "last_update": None}
 risk_breadth_cache = {"data": None, "last_update": None}
 risk_volatility_term_cache = {"data": None, "last_update": None}
 risk_earnings_cache = {"data": None, "last_update": None}
@@ -462,6 +463,15 @@ def valuation_pressure_label(score):
     if score >= 32:
         return "成长支撑", "blue"
     return "估值舒适", "green"
+
+def quality_regime(score):
+    if score >= 75:
+        return "质量支撑强", "green"
+    if score >= 58:
+        return "质量稳健", "blue"
+    if score >= 36:
+        return "质量分化", "amber"
+    return "质量承压", "red"
 
 def breadth_regime(score, cap_return_20d, equal_return_20d, participation_gap_20d):
     if cap_return_20d > 2 and participation_gap_20d < -3:
@@ -933,6 +943,209 @@ def refresh_valuation_data():
         logger.info(f"MAG7 valuation proxy updated: {label}, score {valuation_score:.1f}")
     except Exception as e:
         logger.error(f"MAG7 valuation proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_quality_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_quality_cache
+
+    try:
+        symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META"]
+        names = {
+            "AAPL": "Apple",
+            "MSFT": "Microsoft",
+            "GOOGL": "Alphabet",
+            "AMZN": "Amazon",
+            "NVDA": "NVIDIA",
+            "TSLA": "Tesla",
+            "META": "Meta",
+        }
+        rows = []
+
+        def score_margin(operating_margin, profit_margin):
+            base = operating_margin if operating_margin is not None else profit_margin
+            return 50 if base is None else clamp(base * 1.7)
+
+        def score_cashflow(fcf_margin, conversion):
+            if fcf_margin is None and conversion is None:
+                return 50
+            return clamp((fcf_margin or 0) * 2.3 + (conversion or 0) * 0.2)
+
+        def score_balance(net_cash_ratio):
+            return 50 if net_cash_ratio is None else clamp(50 + net_cash_ratio * 2.2)
+
+        def score_growth(revenue_growth, earnings_growth):
+            if revenue_growth is None and earnings_growth is None:
+                return 50
+            revenue_component = max(revenue_growth or 0, -20) * 1.2
+            earnings_component = max(earnings_growth or 0, -30) * 0.35
+            return clamp(45 + revenue_component + earnings_component)
+
+        def score_return(roe, roa):
+            if roe is None and roa is None:
+                return 50
+            return clamp((roe or 0) * 1.1 + (roa or 0) * 2.2)
+
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                info = ticker.get_info()
+            except Exception as e:
+                logger.error(f"Quality info fetch error for {symbol}: {e}")
+                continue
+
+            market_cap = safe_float(info.get("marketCap"), None)
+            if not market_cap or market_cap <= 0:
+                try:
+                    market_cap = safe_float(ticker.fast_info.market_cap, None)
+                except Exception as e:
+                    logger.error(f"Quality market cap fetch error for {symbol}: {e}")
+
+            if not market_cap or market_cap <= 0:
+                continue
+
+            gross_margin = growth_value(info.get("grossMargins"))
+            operating_margin = growth_value(info.get("operatingMargins"))
+            profit_margin = growth_value(info.get("profitMargins"))
+            roe = growth_value(info.get("returnOnEquity"))
+            roa = growth_value(info.get("returnOnAssets"))
+            revenue_growth = growth_value(info.get("revenueGrowth"))
+            earnings_growth = growth_value(info.get("earningsGrowth"))
+            free_cashflow = safe_float(info.get("freeCashflow"), None)
+            operating_cashflow = safe_float(info.get("operatingCashflow"), None)
+            total_revenue = safe_float(info.get("totalRevenue"), None)
+            total_cash = safe_float(info.get("totalCash"), None)
+            total_debt = safe_float(info.get("totalDebt"), None)
+
+            fcf_margin = None
+            if free_cashflow is not None and total_revenue and total_revenue > 0:
+                fcf_margin = free_cashflow / total_revenue * 100
+
+            cashflow_conversion = None
+            if free_cashflow is not None and operating_cashflow and operating_cashflow > 0:
+                cashflow_conversion = free_cashflow / operating_cashflow * 100
+
+            net_cash_ratio = None
+            if total_cash is not None and total_debt is not None and market_cap > 0:
+                net_cash_ratio = (total_cash - total_debt) / market_cap * 100
+
+            margin_score = score_margin(operating_margin, profit_margin)
+            fcf_score = score_cashflow(fcf_margin, cashflow_conversion)
+            balance_score = score_balance(net_cash_ratio)
+            growth_score = score_growth(revenue_growth, earnings_growth)
+            return_score = score_return(roe, roa)
+            quality_score = round(
+                clamp(
+                    margin_score * 0.26
+                    + fcf_score * 0.24
+                    + balance_score * 0.18
+                    + growth_score * 0.18
+                    + return_score * 0.14
+                ),
+                1,
+            )
+            label, color = quality_regime(quality_score)
+
+            rows.append({
+                "symbol": symbol,
+                "name": info.get("shortName") or info.get("longName") or names.get(symbol, symbol),
+                "market_cap": market_cap,
+                "gross_margin": round_optional(gross_margin, 1),
+                "operating_margin": round_optional(operating_margin, 1),
+                "profit_margin": round_optional(profit_margin, 1),
+                "fcf_margin": round_optional(fcf_margin, 1),
+                "cashflow_conversion": round_optional(cashflow_conversion, 1),
+                "net_cash_ratio": round_optional(net_cash_ratio, 1),
+                "revenue_growth": round_optional(revenue_growth, 1),
+                "earnings_growth": round_optional(earnings_growth, 1),
+                "roe": round_optional(roe, 1),
+                "roa": round_optional(roa, 1),
+                "quality_score": quality_score,
+                "quality_label": label,
+                "color": color,
+            })
+
+        if len(rows) < 4:
+            raise ValueError("Insufficient MAG7 quality data")
+
+        total_market_cap = sum(row["market_cap"] for row in rows)
+        for row in rows:
+            row["weight"] = row["market_cap"] / total_market_cap * 100 if total_market_cap else 0
+            row["quality_contribution"] = row["quality_score"] * row["weight"] / 100
+
+        def weighted_average(field):
+            valid = [row for row in rows if row.get(field) is not None]
+            valid_weight = sum(row["weight"] for row in valid)
+            if not valid or valid_weight <= 0:
+                return None
+            return sum(row[field] * row["weight"] for row in valid) / valid_weight
+
+        quality_score = round(sum(row["quality_contribution"] for row in rows), 1)
+        label, color = quality_regime(quality_score)
+        top_quality = sorted(rows, key=lambda row: row["quality_score"], reverse=True)[:3]
+        weak_quality = sorted(rows, key=lambda row: row["quality_score"])[:3]
+        top_contributor = max(rows, key=lambda row: row["quality_contribution"])
+
+        if quality_score >= 75:
+            summary = f"MAG7 盈利质量对 NDX 估值形成较强支撑，现金流、利润率和资产回报仍以 {top_contributor['symbol']} 等龙头为主要贡献。"
+        elif quality_score >= 58:
+            summary = f"MAG7 盈利质量整体稳健，{top_contributor['symbol']} 对质量支撑贡献最大，但仍需观察自由现金流和增长兑现。"
+        elif quality_score >= 36:
+            summary = "MAG7 盈利质量出现分化，部分权重股现金流或利润率不足以完全解释当前估值溢价。"
+        else:
+            summary = "MAG7 盈利质量承压，若估值压力同步抬升，NDX 权重股需要更严格的风险预算约束。"
+
+        weighted_fcf_margin = weighted_average("fcf_margin")
+        weighted_net_cash_ratio = weighted_average("net_cash_ratio")
+        controls = [
+            "若估值压力偏高但质量分仍强，溢价有基本面支撑，但不能替代价格止损和对冲纪律。",
+            "若加权自由现金流率或净现金率连续走弱，需要降低多重估值扩张假设。",
+            "把该质量分与估值压力、财报催化和融资条件联合使用，优先识别“高估值且质量转弱”的脆弱组合。",
+        ]
+        if weighted_fcf_margin is not None and weighted_fcf_margin < 12:
+            controls.insert(1, f"加权 FCF Margin 仅 {weighted_fcf_margin:.1f}%，需要关注盈利向现金流转换是否弱化。")
+        if weighted_net_cash_ratio is not None and weighted_net_cash_ratio < -5:
+            controls.insert(1, f"加权净现金率 {weighted_net_cash_ratio:.1f}%，资产负债表安全垫低于理想区间。")
+
+        public_rows = []
+        for row in sorted(rows, key=lambda item: item["weight"], reverse=True):
+            public_rows.append({
+                key: (round(value, 2) if key in ("weight", "quality_contribution") else value)
+                for key, value in row.items()
+                if key != "market_cap"
+            })
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "coverage": f"{len(rows)}/7 MAG7",
+            "quality_score": quality_score,
+            "quality_label": label,
+            "quality_color": color,
+            "weighted_gross_margin": round_optional(weighted_average("gross_margin"), 1),
+            "weighted_operating_margin": round_optional(weighted_average("operating_margin"), 1),
+            "weighted_profit_margin": round_optional(weighted_average("profit_margin"), 1),
+            "weighted_fcf_margin": round_optional(weighted_fcf_margin, 1),
+            "weighted_cashflow_conversion": round_optional(weighted_average("cashflow_conversion"), 1),
+            "weighted_net_cash_ratio": round_optional(weighted_net_cash_ratio, 1),
+            "weighted_revenue_growth": round_optional(weighted_average("revenue_growth"), 1),
+            "weighted_earnings_growth": round_optional(weighted_average("earnings_growth"), 1),
+            "weighted_roe": round_optional(weighted_average("roe"), 1),
+            "top_quality_symbol": top_quality[0]["symbol"],
+            "top_contributor_symbol": top_contributor["symbol"],
+            "top_contributor_score": round(top_contributor["quality_contribution"], 2),
+            "summary": summary,
+            "controls": controls,
+            "top_quality": [{"symbol": row["symbol"], "score": row["quality_score"], "fcf_margin": row.get("fcf_margin")} for row in top_quality],
+            "weak_quality": [{"symbol": row["symbol"], "score": row["quality_score"], "fcf_margin": row.get("fcf_margin")} for row in weak_quality],
+            "securities": public_rows,
+            "methodology": "使用 MAG7 可得基本面字段和市值权重作为 NDX 权重股盈利质量代理，综合毛利率、经营利润率、净利率、自由现金流率、现金流转换、净现金率、收入/盈利增速、ROE/ROA 生成正向质量分。该模块是质量代理，不等同于完整 NDX 官方基本面模型，也不构成单股评级。",
+        }
+        risk_quality_cache["data"] = data
+        risk_quality_cache["last_update"] = datetime.utcnow()
+        logger.info(f"MAG7 quality proxy updated: {label}, score {quality_score:.1f}")
+    except Exception as e:
+        logger.error(f"MAG7 quality proxy refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -4009,6 +4222,7 @@ def background_worker():
     last_volatility_term = 0
     last_liquidity = 0
     last_valuation = 0
+    last_quality = 0
     last_earnings = 0
     last_breadth = 0
     last_hedge_overlay = 0
@@ -4088,6 +4302,11 @@ def background_worker():
             if time.time() - last_valuation > 21600:
                 refresh_valuation_data()
                 last_valuation = time.time()
+
+            # MAG7 earnings and cash flow quality proxy every 6 hours
+            if time.time() - last_quality > 21600:
+                refresh_quality_data()
+                last_quality = time.time()
 
             # MAG7 earnings catalyst calendar every 6 hours
             if time.time() - last_earnings > 21600:
@@ -4304,6 +4523,14 @@ def get_risk_valuation():
         refresh_valuation_data()
 
     data = risk_valuation_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/quality', methods=['GET'])
+def get_risk_quality():
+    if not cache_is_fresh(risk_quality_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_quality_cache, 5 * 60):
+        refresh_quality_data()
+
+    data = risk_quality_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/earnings', methods=['GET'])

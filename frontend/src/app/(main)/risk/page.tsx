@@ -20,6 +20,7 @@ import { NDXHedgeOverlayPanel } from "@/components/NDXHedgeOverlayPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePanel";
+import { MAG7QualityPanel } from "@/components/MAG7QualityPanel";
 import { NDXEarningsCatalystPanel } from "@/components/NDXEarningsCatalystPanel";
 import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
@@ -246,6 +247,13 @@ export default function RiskPage() {
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> MAG7 估值压力
         </h3>
         <NDXValuationPressurePanel />
+      </section>
+
+      <section className="quality-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:badge-check" className="text-[var(--accent-color)]" /> MAG7 盈利质量
+        </h3>
+        <MAG7QualityPanel />
       </section>
 
       <section className="earnings-section">
