@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
+import { NDXRegimeCompassPanel } from "@/components/NDXRegimeCompassPanel";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
@@ -120,6 +121,13 @@ export default function RiskPage() {
           <Icon name="lucide:layout-dashboard" className="text-[var(--accent-color)]" /> 机构信号总览
         </h3>
         <NDXSignalDashboardPanel />
+      </section>
+
+      <section className="regime-compass-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:compass" className="text-[var(--accent-color)]" /> NDX 市场状态罗盘
+        </h3>
+        <NDXRegimeCompassPanel />
       </section>
 
       {/* Real-time NDX risk brief */}

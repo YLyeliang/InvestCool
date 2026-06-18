@@ -81,6 +81,7 @@ risk_theme_rotation_cache = {"data": None, "last_update": None}
 risk_hedge_overlay_cache = {"data": None, "last_update": None}
 risk_condition_matrix_cache = {"data": None, "last_update": None}
 risk_funding_conditions_cache = {"data": None, "last_update": None}
+risk_regime_compass_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -248,6 +249,42 @@ def funding_conditions_regime(score):
     if score >= 38:
         return "融资均衡", "blue"
     return "融资友好", "green"
+
+def regime_compass_label(regime_score, pressure_score, support_score, axes):
+    axis_map = {axis["key"]: axis for axis in axes}
+    trend_score = axis_map.get("trend", {}).get("score", 50)
+    internal_score = axis_map.get("internals", {}).get("score", 50)
+    fundamental_score = axis_map.get("fundamentals", {}).get("score", 50)
+
+    if regime_score >= 68 and pressure_score <= 52 and min(trend_score, internal_score) >= 55:
+        return "扩张顺风", "green"
+    if trend_score >= 62 and fundamental_score >= 58 and pressure_score <= 62:
+        return "趋势持有", "blue"
+    if pressure_score >= 68 and support_score < 52:
+        return "风险收缩", "red"
+    if pressure_score >= 58 and support_score >= 54:
+        return "高位脆弱", "amber"
+    if support_score >= 58 and trend_score < 55:
+        return "修复观察", "blue"
+    return "均衡震荡", "blue"
+
+def constructive_color(score):
+    if score >= 70:
+        return "green"
+    if score >= 50:
+        return "blue"
+    if score >= 35:
+        return "amber"
+    return "red"
+
+def constructive_state(score):
+    if score >= 70:
+        return "强支撑"
+    if score >= 50:
+        return "可用"
+    if score >= 35:
+        return "偏弱"
+    return "拖累"
 
 def round_optional(value, digits=2):
     if value is None:
@@ -4095,6 +4132,241 @@ def refresh_hedge_overlay_data():
         logger.error(traceback.format_exc())
 
 
+def refresh_regime_compass_data(allow_dependency_refresh=True):
+    global risk_regime_compass_cache
+
+    try:
+        dependency_refreshers = [
+            ("diagnostics", risk_diagnostics_cache, refresh_risk_diagnostics, 15 * 60),
+            ("factors", risk_factors_cache, refresh_factor_data, 15 * 60),
+            ("funding", risk_funding_conditions_cache, refresh_funding_conditions_data, 15 * 60),
+            ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60),
+            ("theme_rotation", risk_theme_rotation_cache, refresh_theme_rotation_data, 15 * 60),
+            ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60),
+            ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60),
+            ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60),
+            ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+        ]
+        light_dependencies = {"diagnostics", "factors", "funding", "breadth", "theme_rotation", "liquidity", "tail"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependency_refreshers:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Regime compass dependency refresh error: {e}")
+                dependency_status.append("missing")
+
+        if allow_dependency_refresh is False and dependency_status.count("ok") < 4:
+            return
+
+        diagnostics = risk_diagnostics_cache.get("data") or {}
+        factors = risk_factors_cache.get("data") or {}
+        funding = risk_funding_conditions_cache.get("data") or {}
+        breadth = risk_breadth_cache.get("data") or {}
+        theme_rotation = risk_theme_rotation_cache.get("data") or {}
+        liquidity = risk_liquidity_cache.get("data") or {}
+        valuation = risk_valuation_cache.get("data") or {}
+        quality = risk_quality_cache.get("data") or {}
+        earnings = risk_earnings_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+
+        trend_pillar = get_diagnostic_pillar(diagnostics, "trend")
+        volatility_pillar = get_diagnostic_pillar(diagnostics, "volatility")
+        drawdown_pillar = get_diagnostic_pillar(diagnostics, "drawdown")
+        trend_health = clamp(100 - safe_float(trend_pillar.get("score"), 50))
+
+        macro_health = clamp(100 - (
+            safe_float(factors.get("pressure_score"), 50) * 0.45
+            + safe_float(funding.get("funding_score"), 50) * 0.35
+            + safe_float(volatility_pillar.get("score"), 50) * 0.20
+        ))
+        internal_health = clamp(
+            safe_float(breadth.get("breadth_score"), 50) * 0.36
+            + safe_float(theme_rotation.get("leadership_score"), 50) * 0.32
+            + safe_float(liquidity.get("flow_score"), 50) * 0.32
+        )
+        fundamental_health = clamp(
+            safe_float(quality.get("quality_score"), 50) * 0.45
+            + (100 - safe_float(valuation.get("valuation_score"), 50)) * 0.35
+            + (100 - safe_float(earnings.get("event_score"), 50)) * 0.20
+        )
+
+        axes = [
+            {
+                "key": "trend",
+                "label": "趋势结构",
+                "score": round(trend_health, 1),
+                "state": constructive_state(trend_health),
+                "color": constructive_color(trend_health),
+                "detail": trend_pillar.get("comment", "趋势诊断处在中性区。"),
+                "inputs": [
+                    {"label": "趋势风险", "value": f"{safe_float(trend_pillar.get('score'), 50):.1f}"},
+                    {"label": "回撤风险", "value": f"{safe_float(drawdown_pillar.get('score'), 50):.1f}"},
+                    {"label": "综合风险", "value": f"{safe_float(diagnostics.get('risk_score'), 50):.1f}"},
+                ],
+            },
+            {
+                "key": "macro",
+                "label": "宏观流动性",
+                "score": round(macro_health, 1),
+                "state": constructive_state(macro_health),
+                "color": constructive_color(macro_health),
+                "detail": f"宏观压力来自 {factors.get('main_headwind', 'VIX/利率/美元')}，融资状态为 {funding.get('regime', '中性')}。",
+                "inputs": [
+                    {"label": "宏观压力", "value": f"{safe_float(factors.get('pressure_score'), 50):.1f}"},
+                    {"label": "融资压力", "value": f"{safe_float(funding.get('funding_score'), 50):.1f}"},
+                    {"label": "波动风险", "value": f"{safe_float(volatility_pillar.get('score'), 50):.1f}"},
+                ],
+            },
+            {
+                "key": "internals",
+                "label": "内部结构",
+                "score": round(internal_health, 1),
+                "state": constructive_state(internal_health),
+                "color": constructive_color(internal_health),
+                "detail": f"广度为 {breadth.get('breadth_label', '中性')}，主题轮动为 {theme_rotation.get('regime', '中性')}，流动性为 {liquidity.get('regime', '中性')}。",
+                "inputs": [
+                    {"label": "广度", "value": f"{safe_float(breadth.get('breadth_score'), 50):.1f}"},
+                    {"label": "主题", "value": f"{safe_float(theme_rotation.get('leadership_score'), 50):.1f}"},
+                    {"label": "流动性", "value": f"{safe_float(liquidity.get('flow_score'), 50):.1f}"},
+                ],
+            },
+            {
+                "key": "fundamentals",
+                "label": "基本面支撑",
+                "score": round(fundamental_health, 1),
+                "state": constructive_state(fundamental_health),
+                "color": constructive_color(fundamental_health),
+                "detail": f"估值为 {valuation.get('valuation_label', '中性')}，盈利质量为 {quality.get('quality_label', '中性')}，财报窗口为 {earnings.get('event_label', '中性')}。",
+                "inputs": [
+                    {"label": "质量", "value": f"{safe_float(quality.get('quality_score'), 50):.1f}"},
+                    {"label": "估值压力", "value": f"{safe_float(valuation.get('valuation_score'), 50):.1f}"},
+                    {"label": "财报压力", "value": f"{safe_float(earnings.get('event_score'), 50):.1f}"},
+                ],
+            },
+        ]
+
+        support_score = round(sum(axis["score"] for axis in axes) / len(axes), 1)
+        pressure_score = round(
+            safe_float(diagnostics.get("risk_score"), 50) * 0.24
+            + safe_float(factors.get("pressure_score"), 50) * 0.18
+            + safe_float(funding.get("funding_score"), 50) * 0.14
+            + safe_float(tail.get("tail_score"), 50) * 0.16
+            + safe_float(valuation.get("valuation_score"), 50) * 0.16
+            + safe_float(earnings.get("event_score"), 50) * 0.12,
+            1,
+        )
+        regime_score = round(clamp(50 + support_score * 0.42 - pressure_score * 0.34), 1)
+        regime, color = regime_compass_label(regime_score, pressure_score, support_score, axes)
+
+        weakest_axes = sorted(axes, key=lambda axis: axis["score"])[:2]
+        strongest_axes = sorted(axes, key=lambda axis: axis["score"], reverse=True)[:2]
+        weakest_labels = "、".join(axis["label"] for axis in weakest_axes)
+        strongest_labels = "、".join(axis["label"] for axis in strongest_axes)
+
+        if regime == "扩张顺风":
+            summary = f"NDX 市场状态偏顺风，{strongest_labels} 提供主要支撑，新增风险预算仍需用估值和尾部风险约束节奏。"
+        elif regime == "趋势持有":
+            summary = f"NDX 趋势仍可持有，{weakest_labels} 是最需要监控的短板，适合保留核心暴露并等待确认。"
+        elif regime == "风险收缩":
+            summary = f"NDX 罗盘进入风险收缩，{weakest_labels} 拖累状态，优先降低追高和集中暴露。"
+        elif regime == "高位脆弱":
+            summary = f"NDX 支撑和压力同时偏高，{weakest_labels} 决定回撤敏感度，适合把仓位靠近风险预算中枢以下。"
+        elif regime == "修复观察":
+            summary = f"NDX 支撑项正在修复，但趋势确认不足，{strongest_labels} 可作为后续加仓确认线索。"
+        else:
+            summary = f"NDX 处在均衡震荡区，{strongest_labels} 与 {weakest_labels} 信号相互抵消，需要等待罗盘方向进一步打开。"
+
+        action_map = {
+            "扩张顺风": [
+                "核心 NDX 暴露可维持在预算中上沿，但避免在单日大涨后追增。",
+                "若广度和流动性继续改善，可优先增加分批暴露而非一次性提高仓位。",
+                "保留基础保护，防止估值和财报窗口突然压缩风险承受力。",
+            ],
+            "趋势持有": [
+                "保留已有核心暴露，把新增资金放在回踩和广度确认后执行。",
+                "若宏观流动性轴跌破 45，应把仓位从中上沿降回中枢。",
+                "若基本面支撑继续改善，可允许趋势持仓延长，但不扩大单一主题集中度。",
+            ],
+            "高位脆弱": [
+                "仓位应靠近风险预算中枢以下，避免把上涨外推成新的基准情景。",
+                "优先监控最弱轴，一旦继续恶化，降低净暴露或提高对冲覆盖。",
+                "若趋势仍强但内部结构走弱，不应追逐窄幅龙头行情。",
+            ],
+            "风险收缩": [
+                "暂停新增进攻性暴露，先确认止损位、现金缓冲和保护覆盖。",
+                "若尾部风险和融资压力同步升高，组合应从收益目标切换到回撤控制。",
+                "只有当趋势和内部结构重新回到 50 以上，才考虑恢复中性预算。",
+            ],
+            "修复观察": [
+                "允许小幅试探性恢复风险预算，但需要趋势确认和成交质量配合。",
+                "若内部结构继续改善，可把观察仓位升级为均衡仓位。",
+                "若修复只来自少数龙头，保持现金缓冲，不追高扩大净暴露。",
+            ],
+            "均衡震荡": [
+                "维持中性风险预算，优先做再平衡而非方向性加仓。",
+                "上破需要趋势和内部结构同时确认，下破则优先执行减仓纪律。",
+                "把估值、财报和尾部风险作为仓位上沿约束。",
+            ],
+        }
+
+        decision_ladder = [
+            {
+                "label": "提高风险预算",
+                "trigger": "罗盘分 > 68，压力分 < 52，趋势与内部结构均高于 55。",
+                "action": "分批把 NDX 暴露推向预算中上沿。",
+                "color": "green",
+            },
+            {
+                "label": "维持核心仓位",
+                "trigger": "罗盘分 52-68，且至少两条支撑轴处于可用区。",
+                "action": "保留核心暴露，新增资金等待回踩或广度确认。",
+                "color": "blue",
+            },
+            {
+                "label": "降低追高冲动",
+                "trigger": "压力分 > 58，或任一关键轴跌破 40。",
+                "action": "把仓位压回中枢以下，并提高对冲或现金缓冲。",
+                "color": "amber",
+            },
+            {
+                "label": "防守优先",
+                "trigger": "罗盘分 < 38，压力分 > 68，支撑分 < 52。",
+                "action": "暂停新增进攻性暴露，优先控制最大回撤。",
+                "color": "red",
+            },
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "regime_score": regime_score,
+            "support_score": support_score,
+            "pressure_score": pressure_score,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "summary": summary,
+            "axes": axes,
+            "strongest_axes": [{"key": axis["key"], "label": axis["label"], "score": axis["score"]} for axis in strongest_axes],
+            "weakest_axes": [{"key": axis["key"], "label": axis["label"], "score": axis["score"]} for axis in weakest_axes],
+            "actions": action_map.get(regime, action_map["均衡震荡"]),
+            "decision_ladder": decision_ladder,
+            "methodology": "把现有 NDX 风险诊断、宏观压力、融资条件、广度、主题轮动、流动性、MAG7 估值、盈利质量、财报窗口和尾部风险聚合成四条正向状态轴。罗盘用于把分散指标转化为投委会状态判断，不构成买卖指令。",
+        }
+        risk_regime_compass_cache["data"] = data
+        risk_regime_compass_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX regime compass updated: {regime}, score {regime_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX regime compass refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -4226,6 +4498,7 @@ def background_worker():
     last_earnings = 0
     last_breadth = 0
     last_hedge_overlay = 0
+    last_regime_compass = 0
     while True:
         try:
             update_market_index()
@@ -4343,6 +4616,11 @@ def background_worker():
                 refresh_hedge_overlay_data()
                 last_hedge_overlay = time.time()
 
+            # NDX market regime compass every 30 minutes
+            if time.time() - last_regime_compass > 1800:
+                refresh_regime_compass_data()
+                last_regime_compass = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -4451,6 +4729,14 @@ def get_risk_funding_conditions():
         refresh_funding_conditions_data()
 
     data = risk_funding_conditions_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/regime-compass', methods=['GET'])
+def get_risk_regime_compass():
+    if not cache_is_fresh(risk_regime_compass_cache, 15 * 60) and should_refresh_empty_cache(risk_regime_compass_cache, 60):
+        refresh_regime_compass_data(allow_dependency_refresh="light")
+
+    data = risk_regime_compass_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])
