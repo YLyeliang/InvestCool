@@ -46,6 +46,14 @@ interface ValuationPayload {
   top_pressure_symbol: string;
 }
 
+interface EarningsPayload {
+  event_score: number;
+  event_label: string;
+  nearest_symbol: string;
+  nearest_days: number;
+  event_weight_45d: number;
+}
+
 interface OptionsPayload {
   regime: string;
   implied_move: number;
@@ -80,6 +88,7 @@ interface DashboardData {
   breadth: BreadthPayload | null;
   liquidity: LiquidityPayload | null;
   valuation: ValuationPayload | null;
+  earnings: EarningsPayload | null;
   options: OptionsPayload | null;
   volatilityTerm: VolatilityTermPayload | null;
   tail: TailPayload | null;
@@ -184,6 +193,7 @@ export const NDXSignalDashboardPanel = () => {
           breadth,
           liquidity,
           valuation,
+          earnings,
           options,
           volatilityTerm,
           tail,
@@ -195,13 +205,14 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<BreadthPayload>("/api/risk/breadth"),
           fetchJson<LiquidityPayload>("/api/risk/liquidity"),
           fetchJson<ValuationPayload>("/api/risk/valuation"),
+          fetchJson<EarningsPayload>("/api/risk/earnings"),
           fetchJson<OptionsPayload>("/api/risk/options"),
           fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
           fetchJson<TailPayload>("/api/risk/tail"),
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, factors, breadth, liquidity, valuation, options, volatilityTerm, tail, concentration });
+        setData({ latest, diagnostics, factors, breadth, liquidity, valuation, earnings, options, volatilityTerm, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -220,12 +231,13 @@ export const NDXSignalDashboardPanel = () => {
     const macroScore = data.factors?.pressure_score ?? 50;
     const tailScore = data.tail?.tail_score ?? 50;
     const valuationScore = data.valuation?.valuation_score ?? 50;
+    const earningsScore = data.earnings?.event_score ?? 50;
     const supportiveScores = [
       data.breadth?.breadth_score ?? 50,
       data.liquidity?.flow_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, macroScore, tailScore, valuationScore, volatilityTermScore];
+    const pressureScores = [riskScore, macroScore, tailScore, valuationScore, earningsScore, volatilityTermScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -290,6 +302,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "scale",
       },
       {
+        label: "财报催化",
+        value: data.earnings ? data.earnings.event_label : "--",
+        detail: data.earnings ? `${data.earnings.nearest_symbol} ${data.earnings.nearest_days}天 · 45天 ${data.earnings.event_weight_45d.toFixed(1)}%` : "等待财报日历",
+        color: data.earnings ? scoreColor(data.earnings.event_score, true) : "blue",
+        icon: "calendar-clock",
+      },
+      {
         label: "尾部风险",
         value: data.tail ? data.tail.tail_label : "--",
         detail: data.tail ? `VaR ${formatSignedPct(data.tail.var95)} · ES ${formatSignedPct(data.tail.expected_shortfall_95)}` : "等待损失分布",
@@ -317,7 +336,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 9 }).map((_, index) => (
+          {Array.from({ length: 10 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

@@ -15,6 +15,7 @@ import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePanel";
+import { NDXEarningsCatalystPanel } from "@/components/NDXEarningsCatalystPanel";
 import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
@@ -205,6 +206,13 @@ export default function RiskPage() {
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> MAG7 估值压力
         </h3>
         <NDXValuationPressurePanel />
+      </section>
+
+      <section className="earnings-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:calendar-clock" className="text-[var(--accent-color)]" /> MAG7 财报催化风险
+        </h3>
+        <NDXEarningsCatalystPanel />
       </section>
 
       <section className="dispersion-section">

@@ -58,7 +58,7 @@ with app.app_context():
 watchlist_cache = {"data": [], "last_update": None}
 nasdaq_cache = {"data": None, "last_update": None}
 macro_cache = {"data": [], "last_update": None}
-ai_latest_cache = {"data": None, "last_update": None}
+risk_latest_cache = {"data": None, "last_update": None}
 risk_diagnostics_cache = {"data": None, "last_update": None}
 risk_scenarios_cache = {"data": None, "last_update": None}
 risk_budget_cache = {"data": None, "last_update": None}
@@ -73,6 +73,7 @@ risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
 risk_breadth_cache = {"data": None, "last_update": None}
 risk_volatility_term_cache = {"data": None, "last_update": None}
+risk_earnings_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -437,6 +438,15 @@ def volatility_term_regime(front_ratio, vvix_z_score):
     if front_ratio <= 0.82 and vvix_z_score < 0.5:
         return "深度 Contango", "green"
     return "常态 Contango", "blue"
+
+def earnings_catalyst_regime(score, nearest_days, event_weight_45d):
+    if nearest_days <= 14 or score >= 72:
+        return "催化临近", "red"
+    if event_weight_45d >= 50 or score >= 55:
+        return "财报季预热", "amber"
+    if score >= 35:
+        return "事件观察", "blue"
+    return "窗口较远", "green"
 
 def metric_score(value, low, high, default=50):
     if value is None or value <= 0:
@@ -868,6 +878,192 @@ def refresh_valuation_data():
         logger.info(f"MAG7 valuation proxy updated: {label}, score {valuation_score:.1f}")
     except Exception as e:
         logger.error(f"MAG7 valuation proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_earnings_catalyst_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_earnings_cache
+
+    try:
+        symbols = ["AAPL", "MSFT", "GOOGL", "AMZN", "NVDA", "TSLA", "META"]
+        names = {
+            "AAPL": "Apple",
+            "MSFT": "Microsoft",
+            "GOOGL": "Alphabet",
+            "AMZN": "Amazon",
+            "NVDA": "NVIDIA",
+            "TSLA": "Tesla",
+            "META": "Meta",
+        }
+        rows = []
+        today = datetime.utcnow().date()
+
+        for symbol in symbols:
+            try:
+                ticker = yf.Ticker(symbol)
+                calendar = ticker.calendar or {}
+            except Exception as e:
+                logger.error(f"Earnings calendar fetch error for {symbol}: {e}")
+                continue
+
+            raw_dates = calendar.get("Earnings Date") or []
+            if not isinstance(raw_dates, (list, tuple)):
+                raw_dates = [raw_dates]
+
+            earnings_dates = []
+            for raw_date in raw_dates:
+                if raw_date is None:
+                    continue
+                event_date = raw_date.date() if hasattr(raw_date, "date") else raw_date
+                if hasattr(event_date, "isoformat") and event_date >= today:
+                    earnings_dates.append(event_date)
+
+            if not earnings_dates:
+                continue
+
+            earnings_date = min(earnings_dates)
+            days_to_event = (earnings_date - today).days
+            eps_avg = safe_float(calendar.get("Earnings Average"), None)
+            eps_high = safe_float(calendar.get("Earnings High"), None)
+            eps_low = safe_float(calendar.get("Earnings Low"), None)
+            revenue_avg = safe_float(calendar.get("Revenue Average"), None)
+            revenue_high = safe_float(calendar.get("Revenue High"), None)
+            revenue_low = safe_float(calendar.get("Revenue Low"), None)
+
+            eps_dispersion = None
+            if eps_avg and eps_high is not None and eps_low is not None:
+                eps_dispersion = abs(eps_high - eps_low) / max(abs(eps_avg), 0.01) * 100
+
+            revenue_dispersion = None
+            if revenue_avg and revenue_high is not None and revenue_low is not None:
+                revenue_dispersion = abs(revenue_high - revenue_low) / max(abs(revenue_avg), 1) * 100
+
+            market_cap = None
+            try:
+                market_cap = safe_float(ticker.fast_info.market_cap, None)
+            except Exception as e:
+                logger.error(f"Earnings market cap fetch error for {symbol}: {e}")
+
+            if days_to_event <= 7:
+                window_pressure = 88
+            elif days_to_event <= 14:
+                window_pressure = 74
+            elif days_to_event <= 30:
+                window_pressure = 56
+            elif days_to_event <= 45:
+                window_pressure = 42
+            elif days_to_event <= 75:
+                window_pressure = 24
+            else:
+                window_pressure = 10
+
+            dispersion_pressure = 0
+            if eps_dispersion is not None:
+                dispersion_pressure += min(18, eps_dispersion * 0.45)
+            if revenue_dispersion is not None:
+                dispersion_pressure += min(10, revenue_dispersion * 0.7)
+
+            event_score = round(clamp(window_pressure + dispersion_pressure), 1)
+            rows.append({
+                "symbol": symbol,
+                "name": names.get(symbol, symbol),
+                "earnings_date": earnings_date.isoformat(),
+                "days_to_event": days_to_event,
+                "market_cap": market_cap or 0,
+                "eps_average": round_optional(eps_avg, 2),
+                "eps_low": round_optional(eps_low, 2),
+                "eps_high": round_optional(eps_high, 2),
+                "eps_dispersion": round_optional(eps_dispersion, 1),
+                "revenue_average_bn": round_optional(revenue_avg / 1_000_000_000, 1) if revenue_avg else None,
+                "revenue_dispersion": round_optional(revenue_dispersion, 1),
+                "event_score": event_score,
+            })
+
+        if len(rows) < 4:
+            raise ValueError("Insufficient MAG7 earnings calendar data")
+
+        total_cap = sum(row["market_cap"] for row in rows)
+        equal_weight = 100 / len(rows)
+        for row in rows:
+            row["weight"] = row["market_cap"] / total_cap * 100 if total_cap else equal_weight
+            row["weighted_event_score"] = row["event_score"] * row["weight"] / 100
+
+        event_weight_14d = sum(row["weight"] for row in rows if row["days_to_event"] <= 14)
+        event_weight_30d = sum(row["weight"] for row in rows if row["days_to_event"] <= 30)
+        event_weight_45d = sum(row["weight"] for row in rows if row["days_to_event"] <= 45)
+        event_score = round(sum(row["weighted_event_score"] for row in rows), 1)
+        nearest = min(rows, key=lambda row: row["days_to_event"])
+        label, color = earnings_catalyst_regime(event_score, nearest["days_to_event"], event_weight_45d)
+
+        valid_eps = [row for row in rows if row.get("eps_dispersion") is not None]
+        weighted_eps_dispersion = None
+        if valid_eps:
+            valid_weight = sum(row["weight"] for row in valid_eps)
+            weighted_eps_dispersion = sum(row["eps_dispersion"] * row["weight"] for row in valid_eps) / valid_weight if valid_weight else None
+
+        if label == "催化临近":
+            summary = f"{nearest['symbol']} 将在 {nearest['days_to_event']} 天后进入财报窗口，MAG7 事件风险已经临近，短线 NDX 风险预算需要预留跳空波动。"
+        elif label == "财报季预热":
+            summary = f"未来 45 天内 MAG7 财报权重暴露约 {event_weight_45d:.1f}%，NDX 将进入财报季预热阶段。"
+        elif label == "事件观察":
+            summary = "MAG7 财报窗口尚未集中到近端，但预期分歧已经值得与估值压力和期权定价联合跟踪。"
+        else:
+            summary = "MAG7 财报催化窗口相对较远，当前 NDX 风险更多来自价格、宏观和波动率结构。"
+
+        sorted_rows = sorted(rows, key=lambda row: row["days_to_event"])
+        top_weight_events = sorted(rows, key=lambda row: row["weight"], reverse=True)[:3]
+        highest_uncertainty = sorted(
+            [row for row in rows if row.get("eps_dispersion") is not None],
+            key=lambda row: row["eps_dispersion"],
+            reverse=True,
+        )[:3]
+
+        controls = [
+            f"最近财报为 {nearest['symbol']}，距离 {nearest['days_to_event']} 天；若进入 14 天窗口，避免把风险预算集中在单一权重股方向。",
+            f"未来 30 天财报权重暴露 {event_weight_30d:.1f}%，未来 45 天暴露 {event_weight_45d:.1f}%。",
+            "若 EPS 预期分歧扩大且估值压力偏高，财报前后应把跳空风险纳入 NDX 情景测试。",
+        ]
+
+        public_rows = []
+        for row in sorted_rows:
+            public_rows.append({
+                key: (round(value, 2) if key in ("weight", "weighted_event_score") else value)
+                for key, value in row.items()
+                if key != "market_cap"
+            })
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "coverage": f"{len(rows)}/7 MAG7",
+            "event_score": event_score,
+            "event_label": label,
+            "event_color": color,
+            "summary": summary,
+            "nearest_symbol": nearest["symbol"],
+            "nearest_date": nearest["earnings_date"],
+            "nearest_days": nearest["days_to_event"],
+            "event_weight_14d": round(event_weight_14d, 1),
+            "event_weight_30d": round(event_weight_30d, 1),
+            "event_weight_45d": round(event_weight_45d, 1),
+            "weighted_eps_dispersion": round_optional(weighted_eps_dispersion, 1),
+            "top_weight_events": [
+                {"symbol": row["symbol"], "weight": round(row["weight"], 1), "days_to_event": row["days_to_event"]}
+                for row in top_weight_events
+            ],
+            "highest_uncertainty": [
+                {"symbol": row["symbol"], "eps_dispersion": row["eps_dispersion"], "days_to_event": row["days_to_event"]}
+                for row in highest_uncertainty
+            ],
+            "securities": public_rows,
+            "controls": controls,
+            "methodology": "使用 yfinance calendar 中 MAG7 下一次 Earnings Date、EPS/Revenue 预期高低值与市值权重，估算 14/30/45 天财报事件权重暴露和预期分歧。该模块用于识别 NDX 财报季催化窗口，不构成单股财报预测。",
+        }
+        risk_earnings_cache["data"] = data
+        risk_earnings_cache["last_update"] = datetime.utcnow()
+        logger.info(f"MAG7 earnings catalyst updated: {label}, score {event_score:.1f}")
+    except Exception as e:
+        logger.error(f"MAG7 earnings catalyst refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -2681,9 +2877,9 @@ def run_ndx_risk_analysis():
             new_rec = RiskBrief(status=status[:20], summary=summary, index_position=float(index_pos))
             db.session.add(new_rec)
             db.session.commit()
-            global ai_latest_cache
-            ai_latest_cache["data"] = new_rec.to_dict()
-            ai_latest_cache["last_update"] = datetime.utcnow()
+            global risk_latest_cache
+            risk_latest_cache["data"] = new_rec.to_dict()
+            risk_latest_cache["last_update"] = datetime.utcnow()
             logger.info(f"NDX risk brief updated and cached: {status}")
             
     except Exception as e:
@@ -2703,9 +2899,9 @@ def run_rule_based_ndx_analysis(index_pos):
         new_rec = RiskBrief(status=status, summary=summary, index_position=float(index_pos))
         db.session.add(new_rec)
         db.session.commit()
-        global ai_latest_cache
-        ai_latest_cache["data"] = new_rec.to_dict()
-        ai_latest_cache["last_update"] = datetime.utcnow()
+        global risk_latest_cache
+        risk_latest_cache["data"] = new_rec.to_dict()
+        risk_latest_cache["last_update"] = datetime.utcnow()
         logger.info(f"Rule-based NDX risk brief generated: {status}")
 
 def background_worker():
@@ -2724,6 +2920,7 @@ def background_worker():
     last_volatility_term = 0
     last_liquidity = 0
     last_valuation = 0
+    last_earnings = 0
     last_breadth = 0
     while True:
         try:
@@ -2782,6 +2979,11 @@ def background_worker():
                 refresh_valuation_data()
                 last_valuation = time.time()
 
+            # MAG7 earnings catalyst calendar every 6 hours
+            if time.time() - last_earnings > 21600:
+                refresh_earnings_catalyst_data()
+                last_earnings = time.time()
+
             # Equal-weight Nasdaq 100 breadth proxy every 30 minutes
             if time.time() - last_breadth > 1800:
                 refresh_breadth_data()
@@ -2819,17 +3021,17 @@ def background_worker():
 # Routes
 @app.route('/api/risk/latest', methods=['GET'])
 def get_risk_latest():
-    global ai_latest_cache
+    global risk_latest_cache
     # Serve from memory cache for maximum concurrency
-    if ai_latest_cache["data"] and ai_latest_cache["data"].get("status") in RISK_BRIEF_STATUSES:
-        return jsonify(ai_latest_cache["data"])
+    if risk_latest_cache["data"] and risk_latest_cache["data"].get("status") in RISK_BRIEF_STATUSES:
+        return jsonify(risk_latest_cache["data"])
     
     # Lazy init cache from DB if memory is empty
     rec = RiskBrief.query.filter(RiskBrief.status.in_(RISK_BRIEF_STATUSES)).order_by(RiskBrief.created_at.desc()).first()
     if rec:
-        ai_latest_cache["data"] = rec.to_dict()
-        ai_latest_cache["last_update"] = datetime.utcnow()
-        return jsonify(ai_latest_cache["data"])
+        risk_latest_cache["data"] = rec.to_dict()
+        risk_latest_cache["last_update"] = datetime.utcnow()
+        return jsonify(risk_latest_cache["data"])
         
     return jsonify({"error": "No recommendations yet"}), 202
 
@@ -2947,6 +3149,14 @@ def get_risk_valuation():
         refresh_valuation_data()
 
     data = risk_valuation_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/earnings', methods=['GET'])
+def get_risk_earnings():
+    if not cache_is_fresh(risk_earnings_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_earnings_cache, 5 * 60):
+        refresh_earnings_catalyst_data()
+
+    data = risk_earnings_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/breadth', methods=['GET'])
