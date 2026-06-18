@@ -3,6 +3,8 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 
 type Theme = "light" | "dark";
+const THEME_STORAGE_KEY = "investcool-theme-v2";
+const LEGACY_THEME_STORAGE_KEY = "investcool-theme";
 
 interface ThemeContextType {
   theme: Theme;
@@ -15,11 +17,13 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const [theme, setTheme] = useState<Theme>("light");
 
   useEffect(() => {
-    const savedTheme = localStorage.getItem("investcool-theme") as Theme;
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY) as Theme;
     if (savedTheme === "light" || savedTheme === "dark") {
       setTheme(savedTheme);
       document.documentElement.setAttribute("data-theme", savedTheme);
     } else {
+      localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+      localStorage.setItem(THEME_STORAGE_KEY, "light");
       document.documentElement.setAttribute("data-theme", "light");
     }
   }, []);
@@ -27,7 +31,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }) {
   const toggleTheme = () => {
     const newTheme = theme === "light" ? "dark" : "light";
     setTheme(newTheme);
-    localStorage.setItem("investcool-theme", newTheme);
+    localStorage.setItem(THEME_STORAGE_KEY, newTheme);
     document.documentElement.setAttribute("data-theme", newTheme);
   };
 
