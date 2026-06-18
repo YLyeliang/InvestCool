@@ -6,6 +6,7 @@ InvestCool 是一个面向纳斯达克 100 的金融研究与风险分析平台�
 - Flask、SQLAlchemy、SQLite WAL、yfinance
 - 独立 Python 数据 worker
 - NDX 风险引擎，基于 RSI、VIX、价格分位与利率缓冲生成定时简报
+- NDX 投委会摘要，将风险诊断、宏观、相对强弱、技术位、尾部风险、集中度和预算聚合成执行清单
 - NDX 四支柱风险诊断，覆盖趋势结构、波动压力、回撤压力和 MAG7 广度
 - NDX 宏观因子压力监控，跟踪 VIX、10Y 利率和美元指数的相关性与敏感度
 - NDX 相对强弱与 Beta，跟踪相对 SPX、SOX、RUT 的超额收益、相关性和 beta

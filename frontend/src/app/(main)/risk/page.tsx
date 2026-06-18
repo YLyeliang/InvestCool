@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
+import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
@@ -106,6 +107,13 @@ export default function RiskPage() {
           <Icon name="lucide:radar" className="text-[var(--accent-color)]" /> 实时 NDX 风险简报
         </h3>
         <NDXRiskBriefCard />
+      </section>
+
+      <section className="committee-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:clipboard-list" className="text-[var(--accent-color)]" /> 投委会摘要
+        </h3>
+        <NDXCommitteeMemoPanel />
       </section>
 
       <section className="diagnostics-section">
