@@ -63,6 +63,7 @@ risk_diagnostics_cache = {"data": None, "last_update": None}
 risk_scenarios_cache = {"data": None, "last_update": None}
 risk_budget_cache = {"data": None, "last_update": None}
 risk_concentration_cache = {"data": None, "last_update": None}
+risk_factors_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -270,6 +271,34 @@ def concentration_color(level):
     if level == "偏集中":
         return "amber"
     return "green"
+
+def factor_pressure_label(score):
+    if score >= 75:
+        return "强逆风"
+    if score >= 55:
+        return "偏逆风"
+    if score >= 35:
+        return "中性扰动"
+    return "顺风"
+
+def factor_pressure_color(score):
+    if score >= 75:
+        return "red"
+    if score >= 55:
+        return "amber"
+    if score >= 35:
+        return "blue"
+    return "green"
+
+def correlation_label(value):
+    absolute = abs(value)
+    if absolute >= 0.65:
+        return "强相关"
+    if absolute >= 0.35:
+        return "中等相关"
+    if absolute >= 0.15:
+        return "弱相关"
+    return "低相关"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -536,6 +565,155 @@ def refresh_concentration_data():
         logger.info(f"NDX concentration proxy updated: {level}, top3 {top3_weight:.1f}%")
     except Exception as e:
         logger.error(f"NDX concentration refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def fetch_close_history(symbols, period="6mo"):
+    if isinstance(symbols, str):
+        symbols = [symbols]
+
+    last_error = None
+    for symbol in symbols:
+        try:
+            history = yf.Ticker(symbol).history(period=period)
+            if history is not None and not history.empty and "Close" in history.columns:
+                closes = history["Close"].dropna()
+                closes.index = pd.to_datetime(closes.index).tz_localize(None).normalize()
+                if len(closes) >= 45:
+                    return symbol, closes
+        except Exception as e:
+            last_error = e
+            logger.error(f"Factor history fetch error for {symbol}: {e}")
+
+    raise ValueError(f"No usable history for {symbols}: {last_error}")
+
+
+def factor_metric(key, label, symbols, change_mode, higher_is_risk, ndx_returns):
+    symbol, closes = fetch_close_history(symbols)
+
+    if change_mode == "bps":
+        factor_changes = closes.diff() * 100
+        latest_level = f"{closes.iloc[-1]:.2f}%"
+        change_5 = (closes.iloc[-1] - closes.iloc[-6]) * 100 if len(closes) >= 6 else 0
+        change_20 = (closes.iloc[-1] - closes.iloc[-21]) * 100 if len(closes) >= 21 else change_5
+        change_5_label = f"{change_5:+.0f} bps"
+        change_20_label = f"{change_20:+.0f} bps"
+        threshold = 5
+    elif change_mode == "percent":
+        factor_changes = closes.pct_change() * 100
+        latest_level = f"{closes.iloc[-1]:.2f}"
+        change_5 = pct_change(closes.iloc[-1], closes.iloc[-6]) if len(closes) >= 6 else 0
+        change_20 = pct_change(closes.iloc[-1], closes.iloc[-21]) if len(closes) >= 21 else change_5
+        change_5_label = f"{change_5:+.2f}%"
+        change_20_label = f"{change_20:+.2f}%"
+        threshold = 0.5
+    else:
+        factor_changes = closes.diff()
+        latest_level = f"{closes.iloc[-1]:.2f}"
+        change_5 = closes.iloc[-1] - closes.iloc[-6] if len(closes) >= 6 else 0
+        change_20 = closes.iloc[-1] - closes.iloc[-21] if len(closes) >= 21 else change_5
+        change_5_label = f"{change_5:+.2f} 点"
+        change_20_label = f"{change_20:+.2f} 点"
+        threshold = 1
+
+    aligned = pd.concat(
+        {"ndx": ndx_returns, "factor": factor_changes},
+        axis=1,
+        join="inner",
+    ).dropna().tail(60)
+
+    if len(aligned) < 30:
+        raise ValueError(f"Insufficient aligned factor history for {key}")
+
+    correlation = safe_float(aligned["ndx"].corr(aligned["factor"]), 0)
+    ndx_std = safe_float(aligned["ndx"].std(), 0)
+    sensitivity = correlation * ndx_std
+
+    if higher_is_risk:
+        directional_pressure = change_5 if correlation < 0 else -change_5
+    else:
+        directional_pressure = -change_5 if correlation < 0 else change_5
+
+    pressure_score = clamp(abs(correlation) * 45 + max(0, directional_pressure / threshold) * 25)
+    direction = "中性"
+    if pressure_score >= 55 and directional_pressure > 0:
+        direction = "逆风"
+    elif directional_pressure < -threshold * 0.6:
+        direction = "顺风"
+
+    if direction == "逆风":
+        comment = f"{label} 的近期变化与 NDX 的历史相关结构形成压力，需要控制追高和久期暴露。"
+    elif direction == "顺风":
+        comment = f"{label} 近期变化对 NDX 风险偏好形成缓冲，但仍需观察相关性是否稳定。"
+    else:
+        comment = f"{label} 对 NDX 的近期压力不突出，当前更适合作为背景变量监控。"
+
+    return {
+        "key": key,
+        "label": label,
+        "symbol": symbol,
+        "level": latest_level,
+        "change_5d": change_5_label,
+        "change_20d": change_20_label,
+        "correlation": round(correlation, 2),
+        "correlation_label": correlation_label(correlation),
+        "sensitivity": round(sensitivity, 2),
+        "sensitivity_label": f"{sensitivity:+.2f}%",
+        "pressure_score": round(pressure_score, 1),
+        "pressure_label": factor_pressure_label(pressure_score),
+        "color": factor_pressure_color(pressure_score),
+        "direction": direction,
+        "comment": comment,
+        "sample_days": len(aligned),
+    }
+
+
+def refresh_factor_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_factors_cache
+
+    try:
+        ndx_symbol, ndx_closes = fetch_close_history("^NDX", "6mo")
+        ndx_returns = ndx_closes.pct_change() * 100
+
+        factors = [
+            factor_metric("volatility", "VIX 波动率", "^VIX", "points", True, ndx_returns),
+            factor_metric("rates", "美国 10Y 利率", "^TNX", "bps", True, ndx_returns),
+            factor_metric("dollar", "美元指数", ["DX-Y.NYB", "UUP"], "percent", True, ndx_returns),
+        ]
+
+        aggregate_score = round(sum(item["pressure_score"] for item in factors) / len(factors), 1)
+        main_headwind = max(factors, key=lambda item: item["pressure_score"])
+        main_sensitivity = max(factors, key=lambda item: abs(item["correlation"]))
+        ndx_20d_return = pct_change(ndx_closes.iloc[-1], ndx_closes.iloc[-21]) if len(ndx_closes) >= 21 else 0
+
+        if aggregate_score >= 65:
+            summary = f"宏观因子压力偏高，主要逆风来自 {main_headwind['label']}。"
+        elif aggregate_score >= 40:
+            summary = f"宏观因子处在中性扰动区，NDX 对 {main_sensitivity['label']} 的相关性最值得跟踪。"
+        else:
+            summary = "宏观因子压力温和，当前风险更多来自指数内部结构和估值预期。"
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index_symbol": ndx_symbol,
+            "index_level": round(ndx_closes.iloc[-1], 2),
+            "index_20d_return": round(ndx_20d_return, 2),
+            "lookback_days": 60,
+            "pressure_score": aggregate_score,
+            "pressure_label": factor_pressure_label(aggregate_score),
+            "pressure_color": factor_pressure_color(aggregate_score),
+            "main_headwind": main_headwind["label"],
+            "main_sensitivity": main_sensitivity["label"],
+            "summary": summary,
+            "methodology": "使用最近 60 个交易日的 NDX 日收益与宏观因子日变化计算相关性；敏感度表示因子上行一标准差时 NDX 的历史对应变动，不代表预测。",
+            "factors": factors,
+        }
+        risk_factors_cache["data"] = data
+        risk_factors_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX factor pressure updated: {aggregate_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX factor pressure refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -1102,6 +1280,7 @@ def background_worker():
     last_risk_scenarios = 0
     last_risk_budget = 0
     last_concentration = 0
+    last_factors = 0
     while True:
         try:
             update_market_index()
@@ -1113,6 +1292,11 @@ def background_worker():
             if time.time() - last_concentration > 1800:
                 refresh_concentration_data()
                 last_concentration = time.time()
+
+            # Macro factor pressure every 30 minutes
+            if time.time() - last_factors > 1800:
+                refresh_factor_data()
+                last_factors = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1202,6 +1386,14 @@ def get_risk_concentration():
         refresh_concentration_data()
 
     data = risk_concentration_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/factors', methods=['GET'])
+def get_risk_factors():
+    if not cache_is_fresh(risk_factors_cache, 15 * 60) and should_refresh_empty_cache(risk_factors_cache, 60):
+        refresh_factor_data()
+
+    data = risk_factors_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
