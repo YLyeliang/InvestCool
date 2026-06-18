@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXCommitteeMemoPanel } from "@/components/NDXCommitteeMemoPanel";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
@@ -105,6 +106,13 @@ export default function RiskPage() {
           聚焦纳斯达克 100 的价格位置、波动率、利率压力和权重股结构。
         </p>
       </header>
+
+      <section className="signal-dashboard-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:layout-dashboard" className="text-[var(--accent-color)]" /> 机构信号总览
+        </h3>
+        <NDXSignalDashboardPanel />
+      </section>
 
       {/* Real-time NDX risk brief */}
       <section className="strategy-section">
