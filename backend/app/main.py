@@ -69,6 +69,7 @@ risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
+risk_liquidity_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -378,6 +379,32 @@ def options_risk_label(implied_move, put_call_oi_ratio):
     if implied_move <= 1.4 and put_call_oi_ratio < 0.75:
         return "定价平静", "green"
     return "常态定价", "blue"
+
+def liquidity_regime(score, distribution_days, accumulation_days, return_20d, volume_ratio, daily_return, range_expansion):
+    if distribution_days >= 6 and return_20d < 0:
+        return "派发压力", "red"
+    if daily_return < -0.8 and (volume_ratio >= 1.35 or range_expansion >= 1.35):
+        return "下跌放量", "red"
+    if score >= 65 and accumulation_days >= distribution_days + 2:
+        return "量价确认", "green"
+    if volume_ratio <= 0.65 and abs(return_20d) < 3:
+        return "缩量观望", "amber"
+    if score < 35:
+        return "资金转弱", "amber"
+    return "流动均衡", "blue"
+
+def signal_color(value, good_threshold, weak_threshold, inverse=False):
+    if inverse:
+        if value >= weak_threshold:
+            return "red"
+        if value >= good_threshold:
+            return "amber"
+        return "green"
+    if value >= good_threshold:
+        return "green"
+    if value >= weak_threshold:
+        return "blue"
+    return "amber"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -1458,6 +1485,199 @@ def refresh_options_data():
         logger.error(traceback.format_exc())
 
 
+def refresh_liquidity_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_liquidity_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        history = fetch_ohlc_history(proxy_symbol, "6mo", min_rows=80, attempts=3)
+        closes = history["Close"].dropna()
+        volumes = history["Volume"].fillna(0) if "Volume" in history.columns else pd.Series(0, index=closes.index)
+        highs = history["High"] if "High" in history.columns else closes
+        lows = history["Low"] if "Low" in history.columns else closes
+
+        aligned = pd.concat(
+            {"close": closes, "volume": volumes, "high": highs, "low": lows},
+            axis=1,
+            join="inner",
+        ).dropna()
+        if len(aligned) < 80:
+            raise ValueError("Insufficient QQQ history for liquidity analysis")
+
+        closes = aligned["close"]
+        volumes = aligned["volume"]
+        highs = aligned["high"]
+        lows = aligned["low"]
+        returns = closes.pct_change() * 100
+        latest_close = safe_float(closes.iloc[-1], 0)
+        previous_close = safe_float(closes.iloc[-2], latest_close)
+        latest_volume = safe_float(volumes.iloc[-1], 0)
+        volume_avg20 = safe_float(volumes.tail(20).mean(), 0)
+        volume_avg60 = safe_float(volumes.tail(60).mean(), 0)
+        volume_std60 = safe_float(volumes.tail(60).std(), 0)
+        volume_ratio_20 = latest_volume / volume_avg20 if volume_avg20 else 0
+        volume_z_score = (latest_volume - volume_avg60) / volume_std60 if volume_std60 else 0
+        dollar_volume_bn = latest_close * latest_volume / 1_000_000_000
+
+        daily_return = pct_change(latest_close, previous_close)
+        return_5d = pct_change(closes.iloc[-1], closes.iloc[-6]) if len(closes) >= 6 else daily_return
+        return_20d = pct_change(closes.iloc[-1], closes.iloc[-21]) if len(closes) >= 21 else return_5d
+
+        range_pct = (safe_float(highs.iloc[-1], latest_close) - safe_float(lows.iloc[-1], latest_close)) / latest_close * 100 if latest_close else 0
+        range_series = (highs - lows) / closes * 100
+        avg_range20 = safe_float(range_series.tail(20).mean(), range_pct)
+        range_expansion = range_pct / avg_range20 if avg_range20 else 1
+
+        tail_returns = returns.tail(20).fillna(0)
+        tail_volumes = volumes.tail(20)
+        previous_tail_volumes = volumes.shift(1).tail(20).fillna(0)
+        up_volume = safe_float(tail_volumes[tail_returns > 0].sum(), 0)
+        down_volume = safe_float(tail_volumes[tail_returns < 0].sum(), 0)
+        total_tail_volume = safe_float(tail_volumes.sum(), 0)
+        flow_balance = ((up_volume - down_volume) / total_tail_volume * 100) if total_tail_volume else 0
+        accumulation_days = int(((tail_returns > 0.25) & (tail_volumes > previous_tail_volumes)).sum())
+        distribution_days = int(((tail_returns < -0.25) & (tail_volumes > previous_tail_volumes)).sum())
+
+        signed_volume = []
+        for ret, volume in zip(returns.fillna(0), volumes):
+            if ret > 0:
+                signed_volume.append(volume)
+            elif ret < 0:
+                signed_volume.append(-volume)
+            else:
+                signed_volume.append(0)
+        obv = pd.Series(signed_volume, index=closes.index).cumsum()
+        obv_base_volume = safe_float(volumes.tail(20).sum(), 0)
+        obv_20_change = ((obv.iloc[-1] - obv.iloc[-21]) / obv_base_volume * 100) if obv_base_volume and len(obv) >= 21 else 0
+
+        flow_score = 50 + return_20d * 1.4 + flow_balance * 0.35 + (accumulation_days - distribution_days) * 3 + obv_20_change * 0.15
+        if daily_return < 0 and volume_ratio_20 > 1.2:
+            flow_score -= min(18, (volume_ratio_20 - 1) * 16)
+        if daily_return < 0 and range_expansion > 1.25:
+            flow_score -= min(10, (range_expansion - 1) * 10)
+        if volume_ratio_20 < 0.65 and abs(return_20d) < 3:
+            flow_score -= 5
+        flow_score = round(clamp(flow_score), 1)
+
+        regime, color = liquidity_regime(
+            flow_score,
+            distribution_days,
+            accumulation_days,
+            return_20d,
+            volume_ratio_20,
+            daily_return,
+            range_expansion,
+        )
+
+        if regime == "量价确认":
+            summary = "QQQ 量价结构对 NDX 风险偏好形成确认，上涨日成交占比和 OBV 方向较健康。"
+        elif regime in ("派发压力", "下跌放量", "资金转弱"):
+            summary = "QQQ 成交结构显示防守压力，上涨缺少成交确认或下跌日成交占比偏高。"
+        elif regime == "缩量观望":
+            summary = "QQQ 成交量低于近期均值，价格信号需要等待更明确的成交确认。"
+        else:
+            summary = "QQQ 流动性与成交结构处在均衡区，暂未显示极端放量派发或缩量失真。"
+
+        if daily_return > 0 and volume_ratio_20 >= 1.1:
+            volume_state = "放量上涨"
+            volume_color = "green"
+        elif daily_return < 0 and volume_ratio_20 >= 1.1:
+            volume_state = "放量下跌"
+            volume_color = "red"
+        elif volume_ratio_20 < 0.75:
+            volume_state = "缩量"
+            volume_color = "amber"
+        else:
+            volume_state = "常态"
+            volume_color = "blue"
+
+        signals = [
+            {
+                "key": "volume",
+                "label": "成交量倍率",
+                "value": f"{volume_ratio_20:.2f}x",
+                "state": volume_state,
+                "color": volume_color,
+                "detail": f"最新成交量 {latest_volume / 1_000_000:.1f}M，20日均量 {volume_avg20 / 1_000_000:.1f}M。",
+            },
+            {
+                "key": "flow_balance",
+                "label": "20日资金流平衡",
+                "value": f"{flow_balance:+.1f}%",
+                "state": "上行成交占优" if flow_balance > 12 else "下行成交占优" if flow_balance < -12 else "均衡",
+                "color": "green" if flow_balance > 12 else "red" if flow_balance < -12 else "blue",
+                "detail": "按上涨日成交量减下跌日成交量估算方向性成交占比。",
+            },
+            {
+                "key": "distribution",
+                "label": "放量派发天数",
+                "value": f"{distribution_days}/20",
+                "state": "偏高" if distribution_days >= 5 else "可控",
+                "color": "red" if distribution_days >= 6 else "amber" if distribution_days >= 4 else "green",
+                "detail": f"近20日放量上涨 {accumulation_days} 天，放量下跌 {distribution_days} 天。",
+            },
+            {
+                "key": "range",
+                "label": "日内振幅倍率",
+                "value": f"{range_expansion:.2f}x",
+                "state": "扩张" if range_expansion >= 1.25 else "收敛" if range_expansion <= 0.75 else "常态",
+                "color": "amber" if range_expansion >= 1.25 else "green" if range_expansion <= 0.75 else "blue",
+                "detail": f"最新振幅 {range_pct:.2f}%，20日均值 {avg_range20:.2f}%。",
+            },
+            {
+                "key": "obv",
+                "label": "OBV 方向",
+                "value": f"{obv_20_change:+.1f}%",
+                "state": "改善" if obv_20_change > 8 else "走弱" if obv_20_change < -8 else "横盘",
+                "color": "green" if obv_20_change > 8 else "red" if obv_20_change < -8 else "blue",
+                "detail": "用方向性成交量累计变化观察量价背离，不代表真实申赎资金流。",
+            },
+        ]
+
+        controls = [
+            f"若 QQQ 继续上涨但成交量倍率低于 0.75x，需降低突破确认度。",
+            f"若近 20 日放量派发天数升至 6 天以上，优先收缩短线风险预算。",
+            f"若日内振幅倍率高于 1.25x 且收跌，说明波动扩张开始压制流动性承接。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "price_date": str(closes.index[-1].date()),
+            "price": round(latest_close, 2),
+            "daily_return": round(daily_return, 2),
+            "return_5d": round(return_5d, 2),
+            "return_20d": round(return_20d, 2),
+            "volume": round(latest_volume),
+            "volume_avg20": round(volume_avg20),
+            "volume_avg60": round(volume_avg60),
+            "volume_ratio_20": round(volume_ratio_20, 2),
+            "volume_z_score": round(volume_z_score, 2),
+            "dollar_volume_bn": round(dollar_volume_bn, 2),
+            "range_pct": round(range_pct, 2),
+            "avg_range20": round(avg_range20, 2),
+            "range_expansion": round(range_expansion, 2),
+            "flow_balance": round(flow_balance, 1),
+            "accumulation_days": accumulation_days,
+            "distribution_days": distribution_days,
+            "obv_20_change": round(obv_20_change, 1),
+            "flow_score": flow_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "signals": signals,
+            "controls": controls,
+            "methodology": "使用 QQQ 作为 NDX 可交易流动性代理，基于最近 6 个月日线计算成交量倍率、成交额、日内振幅、20 日上涨/下跌成交量平衡、放量派发天数和 OBV 方向。该模块衡量量价确认，不代表真实 ETF 申赎或机构订单流。",
+        }
+        risk_liquidity_cache["data"] = data
+        risk_liquidity_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX liquidity proxy updated: {regime}, score {flow_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX liquidity proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def build_pillar(key, label, score, comment, metrics):
     normalized_score = round(clamp(score), 1)
     return {
@@ -2027,6 +2247,7 @@ def background_worker():
     last_relative = 0
     last_dispersion = 0
     last_options = 0
+    last_liquidity = 0
     while True:
         try:
             update_market_index()
@@ -2068,6 +2289,11 @@ def background_worker():
             if time.time() - last_options > 1800:
                 refresh_options_data()
                 last_options = time.time()
+
+            # QQQ liquidity and volume confirmation every 30 minutes
+            if time.time() - last_liquidity > 1800:
+                refresh_liquidity_data()
+                last_liquidity = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -2205,6 +2431,14 @@ def get_risk_options():
         refresh_options_data()
 
     data = risk_options_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/liquidity', methods=['GET'])
+def get_risk_liquidity():
+    if not cache_is_fresh(risk_liquidity_cache, 15 * 60) and should_refresh_empty_cache(risk_liquidity_cache, 60):
+        refresh_liquidity_data()
+
+    data = risk_liquidity_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
