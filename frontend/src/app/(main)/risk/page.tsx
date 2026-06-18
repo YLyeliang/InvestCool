@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
 import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
+import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
@@ -119,6 +120,13 @@ export default function RiskPage() {
           <Icon name="lucide:line-chart" className="text-[var(--accent-color)]" /> 宏观因子压力
         </h3>
         <NDXFactorPressurePanel />
+      </section>
+
+      <section className="relative-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> 相对强弱与 Beta
+        </h3>
+        <NDXRelativeStrengthPanel />
       </section>
 
       <section className="levels-section">

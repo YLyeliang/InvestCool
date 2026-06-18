@@ -66,6 +66,7 @@ risk_concentration_cache = {"data": None, "last_update": None}
 risk_factors_cache = {"data": None, "last_update": None}
 risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
+risk_relative_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -339,6 +340,24 @@ def tail_risk_color(score):
     if score >= 35:
         return "blue"
     return "green"
+
+def relative_strength_label(score):
+    if score >= 75:
+        return "显著领先"
+    if score >= 55:
+        return "相对占优"
+    if score >= 35:
+        return "中性轮动"
+    return "相对落后"
+
+def relative_strength_color(score):
+    if score >= 75:
+        return "green"
+    if score >= 55:
+        return "blue"
+    if score >= 35:
+        return "amber"
+    return "red"
 
 def update_market_index():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
@@ -1034,6 +1053,135 @@ def refresh_tail_risk_data():
         logger.error(traceback.format_exc())
 
 
+def build_relative_benchmark(key, label, symbol, ndx_closes, ndx_returns):
+    benchmark = fetch_ohlc_history(symbol, "6mo", min_rows=80, attempts=3)["Close"]
+    aligned_prices = pd.concat(
+        {"ndx": ndx_closes, "benchmark": benchmark},
+        axis=1,
+        join="inner",
+    ).dropna()
+    if len(aligned_prices) < 80:
+        raise ValueError(f"Insufficient aligned relative history for {symbol}")
+
+    aligned_returns = pd.concat(
+        {"ndx": ndx_returns, "benchmark": benchmark.pct_change() * 100},
+        axis=1,
+        join="inner",
+    ).dropna().tail(60)
+    if len(aligned_returns) < 45:
+        raise ValueError(f"Insufficient aligned relative returns for {symbol}")
+
+    ndx_return_20 = pct_change(aligned_prices["ndx"].iloc[-1], aligned_prices["ndx"].iloc[-21])
+    benchmark_return_20 = pct_change(aligned_prices["benchmark"].iloc[-1], aligned_prices["benchmark"].iloc[-21])
+    ndx_return_60 = pct_change(aligned_prices["ndx"].iloc[-1], aligned_prices["ndx"].iloc[-61])
+    benchmark_return_60 = pct_change(aligned_prices["benchmark"].iloc[-1], aligned_prices["benchmark"].iloc[-61])
+    excess_20 = ndx_return_20 - benchmark_return_20
+    excess_60 = ndx_return_60 - benchmark_return_60
+
+    ratio = aligned_prices["ndx"] / aligned_prices["benchmark"]
+    ratio_change_20 = pct_change(ratio.iloc[-1], ratio.iloc[-21])
+    ratio_change_60 = pct_change(ratio.iloc[-1], ratio.iloc[-61])
+    correlation = safe_float(aligned_returns["ndx"].corr(aligned_returns["benchmark"]), 0)
+    benchmark_var = safe_float(aligned_returns["benchmark"].var(), 0)
+    beta = safe_float(aligned_returns["ndx"].cov(aligned_returns["benchmark"]) / benchmark_var, 0) if benchmark_var else 0
+    hit_ratio = safe_float((aligned_returns["ndx"] > aligned_returns["benchmark"]).mean() * 100, 0)
+
+    if excess_20 > 1 and excess_60 > 2:
+        direction = "领先"
+        color = "green"
+    elif excess_20 > 0:
+        direction = "短线占优"
+        color = "blue"
+    elif excess_20 < -1 and excess_60 < -2:
+        direction = "落后"
+        color = "red"
+    else:
+        direction = "轮动"
+        color = "amber"
+
+    return {
+        "key": key,
+        "label": label,
+        "symbol": symbol,
+        "direction": direction,
+        "color": color,
+        "ndx_return_20d": round(ndx_return_20, 2),
+        "benchmark_return_20d": round(benchmark_return_20, 2),
+        "excess_20d": round(excess_20, 2),
+        "excess_60d": round(excess_60, 2),
+        "ratio_change_20d": round(ratio_change_20, 2),
+        "ratio_change_60d": round(ratio_change_60, 2),
+        "correlation": round(correlation, 2),
+        "beta": round(beta, 2),
+        "hit_ratio": round(hit_ratio, 1),
+        "sample_days": len(aligned_returns),
+    }
+
+
+def refresh_relative_strength_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_relative_cache
+
+    try:
+        ndx_history = fetch_ohlc_history("^NDX", "6mo", min_rows=80, attempts=3)
+        ndx_closes = ndx_history["Close"]
+        ndx_returns = ndx_closes.pct_change() * 100
+
+        benchmarks = [
+            build_relative_benchmark("spx", "S&P 500", "^GSPC", ndx_closes, ndx_returns),
+            build_relative_benchmark("sox", "半导体指数", "^SOX", ndx_closes, ndx_returns),
+            build_relative_benchmark("rut", "罗素 2000", "^RUT", ndx_closes, ndx_returns),
+        ]
+
+        spx = next(item for item in benchmarks if item["key"] == "spx")
+        sox = next(item for item in benchmarks if item["key"] == "sox")
+        rut = next(item for item in benchmarks if item["key"] == "rut")
+        leadership_score = clamp(
+            50
+            + spx["excess_20d"] * 4
+            + spx["excess_60d"] * 1.5
+            + sox["excess_20d"] * 1.2
+            - max(0, spx["beta"] - 1.3) * 12
+            + (spx["hit_ratio"] - 50) * 0.4
+        )
+
+        if leadership_score >= 65:
+            summary = "NDX 相对大盘保持领先，成长股风险偏好仍在提供支撑。"
+        elif leadership_score >= 40:
+            summary = "NDX 相对强弱处于轮动区，需要观察相对 SPX 的超额收益能否延续。"
+        else:
+            summary = "NDX 相对大盘走弱，组合风险更可能来自成长风格退潮而非单纯指数波动。"
+
+        beta_note = (
+            f"NDX 对 SPX 的 60 日 beta 为 {spx['beta']:.2f}，"
+            f"与半导体指数的 20 日相对收益为 {sox['excess_20d']:+.2f}%，"
+            f"相对小盘股为 {rut['excess_20d']:+.2f}%。"
+        )
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": ndx_history.index[-1].date().isoformat(),
+            "index": round(ndx_closes.iloc[-1], 2),
+            "leadership_score": round(leadership_score, 1),
+            "leadership_label": relative_strength_label(leadership_score),
+            "leadership_color": relative_strength_color(leadership_score),
+            "summary": summary,
+            "beta_note": beta_note,
+            "primary_beta": spx["beta"],
+            "primary_correlation": spx["correlation"],
+            "primary_excess_20d": spx["excess_20d"],
+            "primary_excess_60d": spx["excess_60d"],
+            "benchmarks": benchmarks,
+            "methodology": "使用最近 6 个月日线计算 NDX 相对 SPX、SOX、RUT 的超额收益、价格比率变化、60 日相关性和 beta，用于识别成长股领导力与系统性风险暴露。",
+        }
+        risk_relative_cache["data"] = data
+        risk_relative_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX relative strength updated: {relative_strength_label(leadership_score)}")
+    except Exception as e:
+        logger.error(f"NDX relative strength refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def build_pillar(key, label, score, comment, metrics):
     normalized_score = round(clamp(score), 1)
     return {
@@ -1600,6 +1748,7 @@ def background_worker():
     last_factors = 0
     last_levels = 0
     last_tail = 0
+    last_relative = 0
     while True:
         try:
             update_market_index()
@@ -1626,6 +1775,11 @@ def background_worker():
             if time.time() - last_tail > 1800:
                 refresh_tail_risk_data()
                 last_tail = time.time()
+
+            # Relative strength and beta every 30 minutes
+            if time.time() - last_relative > 1800:
+                refresh_relative_strength_data()
+                last_relative = time.time()
             
             # NDX risk analysis every 2 hours (7200 seconds)
             if time.time() - last_risk_analysis > 7200:
@@ -1739,6 +1893,14 @@ def get_risk_tail():
         refresh_tail_risk_data()
 
     data = risk_tail_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/relative', methods=['GET'])
+def get_risk_relative():
+    if not cache_is_fresh(risk_relative_cache, 15 * 60) and should_refresh_empty_cache(risk_relative_cache, 60):
+        refresh_relative_strength_data()
+
+    data = risk_relative_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/market-index', methods=['GET'])
