@@ -84,6 +84,7 @@ risk_funding_conditions_cache = {"data": None, "last_update": None}
 risk_regime_compass_cache = {"data": None, "last_update": None}
 risk_alerts_cache = {"data": None, "last_update": None}
 risk_scenario_map_cache = {"data": None, "last_update": None}
+risk_recovery_path_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -224,6 +225,15 @@ def risk_color(score):
     if score >= 35:
         return "blue"
     return "green"
+
+def recovery_path_regime(score):
+    if score >= 72:
+        return "修复确认", "green"
+    if score >= 52:
+        return "高位修复", "blue"
+    if score >= 34:
+        return "支撑测试", "amber"
+    return "破位恢复", "red"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -4145,6 +4155,245 @@ def refresh_scenario_map_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_recovery_path_data(allow_dependency_refresh=True):
+    global risk_recovery_path_cache
+
+    try:
+        dependencies = [
+            ("levels", risk_levels_cache, refresh_technical_levels, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            ("scenario_map", risk_scenario_map_cache, refresh_scenario_map_data, 15 * 60),
+            ("scenarios", risk_scenarios_cache, refresh_risk_scenarios, 15 * 60),
+            ("budget", risk_budget_cache, refresh_risk_budget, 15 * 60),
+            ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+        ]
+        light_dependencies = {"levels", "tail", "scenario_map", "scenarios", "budget", "alerts", "regime"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key == "scenario_map":
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    elif key in ("alerts", "regime"):
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Recovery path dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 4:
+            return
+
+        levels = risk_levels_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        scenario_map = risk_scenario_map_cache.get("data") or {}
+        scenarios = risk_scenarios_cache.get("data") or {}
+        budget = risk_budget_cache.get("data") or {}
+        hedge = risk_hedge_overlay_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+
+        index_value = safe_float(levels.get("index"), None)
+        if not index_value:
+            index_value = safe_float(scenario_map.get("index"), None)
+        if not index_value:
+            index_value = safe_float(scenarios.get("index"), None)
+        if not index_value:
+            return
+
+        support_levels = levels.get("support_levels") or []
+        resistance_levels = levels.get("resistance_levels") or []
+        moving_averages = levels.get("moving_averages") or []
+        nearest_support = support_levels[0] if support_levels else {}
+        nearest_resistance = resistance_levels[0] if resistance_levels else {}
+
+        support_value = safe_float(nearest_support.get("value"), None)
+        resistance_value = safe_float(nearest_resistance.get("value"), None)
+        ma20 = next((item for item in moving_averages if item.get("window") == 20), None)
+        ma50 = next((item for item in moving_averages if item.get("window") == 50), None)
+        ma200 = next((item for item in moving_averages if item.get("window") == 200), None)
+        ma20_value = safe_float(ma20.get("value") if ma20 else None, None)
+        ma50_value = safe_float(ma50.get("value") if ma50 else None, None)
+        ma200_value = safe_float(ma200.get("value") if ma200 else None, None)
+
+        scenario_items = scenarios.get("scenarios") or []
+        scenario_lows = [
+            safe_float(item.get("ndx_range", {}).get("low"), None)
+            for item in scenario_items
+        ]
+        scenario_highs = [
+            safe_float(item.get("ndx_range", {}).get("high"), None)
+            for item in scenario_items
+        ]
+        scenario_lows = [value for value in scenario_lows if value]
+        scenario_highs = [value for value in scenario_highs if value]
+
+        weighted_low = safe_float(scenario_map.get("probability_weighted_low"), None)
+        weighted_high = safe_float(scenario_map.get("probability_weighted_high"), None)
+        expected_move = safe_float(scenario_map.get("expected_move"), 0)
+        stress_downside = safe_float(scenario_map.get("stress_downside"), None)
+        if stress_downside is None:
+            stress_downside = safe_float(budget.get("stress_downside"), 0)
+
+        stress_candidates = [value for value in [weighted_low, min(scenario_lows) if scenario_lows else None] if value]
+        stress_line = min(stress_candidates) if stress_candidates else index_value * (1 - stress_downside / 100)
+        invalidation_candidates = [value for value in [support_value, weighted_low, ma50_value] if value and value < index_value]
+        invalidation_line = max(invalidation_candidates) if invalidation_candidates else index_value * 0.985
+
+        repair_candidates = [
+            value for value in [ma20_value, ma50_value, resistance_value]
+            if value and value > index_value * 0.998
+        ]
+        repair_line = min(repair_candidates, key=lambda value: abs(value - index_value)) if repair_candidates else index_value * 1.015
+        confirmation_candidates = [
+            value for value in [resistance_value, weighted_high, max(scenario_highs) if scenario_highs else None]
+            if value and value > repair_line
+        ]
+        confirmation_line = min(confirmation_candidates, key=lambda value: abs(value - index_value)) if confirmation_candidates else max(repair_line * 1.012, index_value * 1.03)
+        target_candidates = [value for value in [weighted_high, max(scenario_highs) if scenario_highs else None, resistance_value] if value and value > index_value]
+        recovery_target = max(target_candidates) if target_candidates else confirmation_line
+
+        distance_to_invalidation = pct_change(invalidation_line, index_value)
+        distance_to_repair = pct_change(repair_line, index_value)
+        distance_to_confirmation = pct_change(confirmation_line, index_value)
+        distance_to_stress = pct_change(stress_line, index_value)
+        distance_to_target = pct_change(recovery_target, index_value)
+        support_cushion = max(0, -distance_to_invalidation)
+
+        zone_score = safe_float(levels.get("zone_score"), 50)
+        regime_score = safe_float(regime.get("regime_score"), 50)
+        alert_score = safe_float(alerts.get("alert_score"), 45)
+        tail_score = safe_float(tail.get("tail_score"), 45)
+        recovery_score = round(clamp(
+            38
+            + zone_score * 0.22
+            + regime_score * 0.18
+            - alert_score * 0.16
+            - tail_score * 0.10
+            + max(0, expected_move) * 3.2
+            - max(0, -expected_move) * 4.2
+            + min(8, support_cushion * 1.4)
+            - max(0, 1.2 - support_cushion) * 3.0
+        ), 1)
+        recovery_regime, recovery_color = recovery_path_regime(recovery_score)
+
+        if recovery_regime == "修复确认":
+            summary = "NDX 已接近或站上修复确认区，回撤路径的重点从防守转向确认后分批恢复风险预算。"
+        elif recovery_regime == "高位修复":
+            summary = "NDX 仍在高位修复区，结构尚可，但新增仓位应绑定失效线和确认线，避免追涨。"
+        elif recovery_regime == "支撑测试":
+            summary = "NDX 正在测试支撑和修复线，组合应先确认失效线没有被收盘跌破，再讨论恢复中性仓位。"
+        else:
+            summary = "NDX 回撤路径偏弱，当前应把压力下沿、现金缓冲和对冲覆盖放在收益目标之前。"
+
+        def path_level(key, label, value, color, usage):
+            distance = pct_change(value, index_value)
+            return {
+                "key": key,
+                "label": label,
+                "value": round(value, 2),
+                "distance": round(distance, 2),
+                "distance_label": f"{distance:+.2f}%",
+                "color": color,
+                "usage": usage,
+            }
+
+        path_levels = [
+            path_level("stress", "压力下沿", stress_line, "red", "压力情景和保证金缓冲的参考下沿。"),
+            path_level("invalidation", "失效线", invalidation_line, "amber", "收盘跌破后，风险预算应向防守区间下沿收缩。"),
+            path_level("repair", "修复线", repair_line, "blue", "收复后可从防守观察恢复到中性观察。"),
+            path_level("confirmation", "确认线", confirmation_line, "green", "站稳后才允许把新增风险预算升级为均衡/进取。"),
+            path_level("target", "概率上沿", recovery_target, "green", "情景概率上沿，用于止盈和仓位上限管理。"),
+        ]
+
+        profiles = budget.get("profiles") or []
+        profile_map = {profile.get("key"): profile for profile in profiles}
+
+        def exposure_label(key, fallback):
+            return profile_map.get(key, {}).get("exposure", {}).get("label", fallback)
+
+        ladder = [
+            {
+                "key": "defensive",
+                "label": "防守再入场",
+                "color": "amber" if recovery_color != "red" else "red",
+                "trigger": f"接近 {path_levels[1]['label']} 但未收盘跌破，或压力预警开始下降。",
+                "max_exposure": exposure_label("defensive", "15% - 40%"),
+                "action": "只保留核心 NDX 暴露，新增资金分批等待修复线确认。",
+            },
+            {
+                "key": "balanced",
+                "label": "中性恢复",
+                "color": "blue",
+                "trigger": f"收盘重新站上 {repair_line:,.0f}，且预警分低于 58 或确认项增加。",
+                "max_exposure": exposure_label("balanced", "35% - 65%"),
+                "action": "把仓位从防守区间恢复到中枢，优先使用再平衡而不是追价。",
+            },
+            {
+                "key": "growth",
+                "label": "进取确认",
+                "color": "green",
+                "trigger": f"站稳 {confirmation_line:,.0f} 后，广度/罗盘同步改善。",
+                "max_exposure": exposure_label("growth", "55% - 85%"),
+                "action": "允许靠近风险预算上沿，但必须保留压力下沿对应的最大损失预算。",
+            },
+        ]
+
+        protection_lower = safe_float(hedge.get("protection_lower"), None)
+        protection_upper = safe_float(hedge.get("protection_upper"), None)
+        hedge_label = hedge.get("hedge_label")
+        controls = [
+            f"收盘跌破 {invalidation_line:,.0f} 时，把 NDX 暴露压回防守区间，并重新核算压力回撤 -{stress_downside:.1f}%。",
+            f"收复 {repair_line:,.0f} 但未突破 {confirmation_line:,.0f} 前，只做中性恢复，不把反弹外推为趋势重启。",
+            f"站稳 {confirmation_line:,.0f} 且预警下降后，才允许把新增风险预算从观察仓位升级为均衡/进取。",
+        ]
+        if protection_lower is not None and protection_upper is not None:
+            controls.append(f"对冲覆盖参考 {protection_lower:.0f}% - {protection_upper:.0f}%，压力线未收复前不要提前撤掉保护。")
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round(index_value, 2),
+            "recovery_score": recovery_score,
+            "recovery_regime": recovery_regime,
+            "recovery_color": recovery_color,
+            "summary": summary,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "stress_downside": round(stress_downside, 1),
+            "expected_move": round(expected_move, 2),
+            "current_drawdown": tail.get("current_drawdown"),
+            "max_drawdown_1y": tail.get("max_drawdown_1y"),
+            "weighted_low": round_optional(weighted_low, 2),
+            "weighted_high": round_optional(weighted_high, 2),
+            "distance_to_invalidation": round(distance_to_invalidation, 2),
+            "distance_to_repair": round(distance_to_repair, 2),
+            "distance_to_confirmation": round(distance_to_confirmation, 2),
+            "distance_to_stress": round(distance_to_stress, 2),
+            "distance_to_target": round(distance_to_target, 2),
+            "hedge_label": hedge_label,
+            "protection_lower": round_optional(protection_lower, 0),
+            "protection_upper": round_optional(protection_upper, 0),
+            "alert_level": alerts.get("alert_level"),
+            "regime": regime.get("regime"),
+            "levels": path_levels,
+            "ladder": ladder,
+            "controls": controls,
+            "methodology": "把 NDX 技术位、情景概率、尾部风险、风险预算、市场状态、预警和对冲覆盖合成为回撤修复路径。该模块用于组合执行纪律和再入场条件管理，不构成买卖指令。",
+        }
+        risk_recovery_path_cache["data"] = data
+        risk_recovery_path_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX recovery path updated: {recovery_regime}, score {recovery_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX recovery path refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_hedge_overlay_data():
     global risk_hedge_overlay_cache
 
@@ -5033,6 +5282,7 @@ def background_worker():
     last_regime_compass = 0
     last_alerts = 0
     last_scenario_map = 0
+    last_recovery_path = 0
     while True:
         try:
             update_market_index()
@@ -5164,6 +5414,11 @@ def background_worker():
             if time.time() - last_scenario_map > 1800:
                 refresh_scenario_map_data()
                 last_scenario_map = time.time()
+
+            # NDX drawdown recovery path every 30 minutes
+            if time.time() - last_recovery_path > 1800:
+                refresh_recovery_path_data()
+                last_recovery_path = time.time()
 
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
@@ -5297,6 +5552,14 @@ def get_risk_scenario_map():
         refresh_scenario_map_data(allow_dependency_refresh="light")
 
     data = risk_scenario_map_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/recovery-path', methods=['GET'])
+def get_risk_recovery_path():
+    if not cache_is_fresh(risk_recovery_path_cache, 15 * 60) and should_refresh_empty_cache(risk_recovery_path_cache, 60):
+        refresh_recovery_path_data(allow_dependency_refresh="light")
+
+    data = risk_recovery_path_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/levels', methods=['GET'])

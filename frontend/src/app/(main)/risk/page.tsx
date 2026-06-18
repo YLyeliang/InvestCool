@@ -26,6 +26,7 @@ import { MAG7QualityPanel } from "@/components/MAG7QualityPanel";
 import { NDXEarningsCatalystPanel } from "@/components/NDXEarningsCatalystPanel";
 import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
 import { NDXScenarioMapPanel } from "@/components/NDXScenarioMapPanel";
+import { NDXRecoveryPathPanel } from "@/components/NDXRecoveryPathPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
 import { NDXRiskBudgetPanel } from "@/components/NDXRiskBudgetPanel";
 import { Icon } from "@/components/ui/Icon";
@@ -292,6 +293,13 @@ export default function RiskPage() {
           <Icon name="lucide:workflow" className="text-[var(--accent-color)]" /> NDX 情景概率图
         </h3>
         <NDXScenarioMapPanel />
+      </section>
+
+      <section className="recovery-path-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:route" className="text-[var(--accent-color)]" /> NDX 回撤修复路径
+        </h3>
+        <NDXRecoveryPathPanel />
       </section>
 
       <section className="scenario-section">

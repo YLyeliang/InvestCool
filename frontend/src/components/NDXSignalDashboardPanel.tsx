@@ -128,6 +128,13 @@ interface HedgeOverlayPayload {
   protection_upper: number;
 }
 
+interface RecoveryPathPayload {
+  recovery_score: number;
+  recovery_regime: string;
+  stress_downside: number;
+  expected_move: number;
+}
+
 interface TailPayload {
   tail_score: number;
   tail_label: string;
@@ -159,6 +166,7 @@ interface DashboardData {
   options: OptionsPayload | null;
   volatilityTerm: VolatilityTermPayload | null;
   hedgeOverlay: HedgeOverlayPayload | null;
+  recoveryPath: RecoveryPathPayload | null;
   tail: TailPayload | null;
   concentration: ConcentrationPayload | null;
 }
@@ -284,6 +292,7 @@ export const NDXSignalDashboardPanel = () => {
           options,
           volatilityTerm,
           hedgeOverlay,
+          recoveryPath,
           tail,
           concentration,
         ] = await Promise.all([
@@ -304,11 +313,12 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<OptionsPayload>("/api/risk/options"),
           fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
           fetchJson<HedgeOverlayPayload>("/api/risk/hedge-overlay"),
+          fetchJson<RecoveryPathPayload>("/api/risk/recovery-path"),
           fetchJson<TailPayload>("/api/risk/tail"),
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, factors, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -338,6 +348,7 @@ export const NDXSignalDashboardPanel = () => {
       data.liquidity?.flow_score ?? 50,
       data.quality?.quality_score ?? 50,
       data.regimeCompass?.regime_score ?? 50,
+      data.recoveryPath?.recovery_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
     const pressureScores = [riskScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
@@ -447,6 +458,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "shield-check",
       },
       {
+        label: "修复路径",
+        value: data.recoveryPath ? data.recoveryPath.recovery_regime : "--",
+        detail: data.recoveryPath ? `压力 -${data.recoveryPath.stress_downside.toFixed(1)}% · E[Move] ${formatSignedPct(data.recoveryPath.expected_move)}` : "等待回撤路径",
+        color: data.recoveryPath ? scoreColor(data.recoveryPath.recovery_score) : "blue",
+        icon: "route",
+      },
+      {
         label: "估值压力",
         value: data.valuation ? data.valuation.valuation_label : "--",
         detail: data.valuation ? `FPE ${data.valuation.weighted_forward_pe?.toFixed(1) ?? "--"}x · ${data.valuation.top_pressure_symbol}` : "等待基本面",
@@ -495,7 +513,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 18 }).map((_, index) => (
+          {Array.from({ length: 19 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
