@@ -14,6 +14,7 @@ import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
 import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
+import { NDXHedgeOverlayPanel } from "@/components/NDXHedgeOverlayPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePanel";
@@ -201,6 +202,13 @@ export default function RiskPage() {
           <Icon name="lucide:waves" className="text-[var(--accent-color)]" /> 波动率期限结构
         </h3>
         <NDXVolatilityTermPanel />
+      </section>
+
+      <section className="hedge-overlay-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:shield-check" className="text-[var(--accent-color)]" /> NDX 对冲覆盖建议
+        </h3>
+        <NDXHedgeOverlayPanel />
       </section>
 
       <section className="liquidity-section">

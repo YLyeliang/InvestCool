@@ -77,6 +77,7 @@ risk_breadth_cache = {"data": None, "last_update": None}
 risk_volatility_term_cache = {"data": None, "last_update": None}
 risk_earnings_cache = {"data": None, "last_update": None}
 risk_theme_rotation_cache = {"data": None, "last_update": None}
+risk_hedge_overlay_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -217,6 +218,15 @@ def risk_color(score):
     if score >= 35:
         return "blue"
     return "green"
+
+def hedge_overlay_regime(score):
+    if score >= 72:
+        return "保护优先", "red"
+    if score >= 55:
+        return "提高保护", "amber"
+    if score >= 38:
+        return "保留保护", "blue"
+    return "低保护", "green"
 
 def round_optional(value, digits=2):
     if value is None:
@@ -3154,6 +3164,184 @@ def refresh_risk_budget():
         logger.error(traceback.format_exc())
 
 
+def refresh_hedge_overlay_data():
+    global risk_hedge_overlay_cache
+
+    try:
+        dependency_refreshers = [
+            (risk_diagnostics_cache, refresh_risk_diagnostics, 15 * 60),
+            (risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+            (risk_options_cache, refresh_options_data, 15 * 60),
+            (risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60),
+            (risk_levels_cache, refresh_technical_levels, 15 * 60),
+            (risk_budget_cache, refresh_risk_budget, 15 * 60),
+        ]
+        for cache, refresher, ttl in dependency_refreshers:
+            if not cache_is_fresh(cache, ttl):
+                refresher()
+
+        diagnostics = risk_diagnostics_cache.get("data")
+        tail = risk_tail_cache.get("data")
+        options = risk_options_cache.get("data")
+        volatility_term = risk_volatility_term_cache.get("data")
+        levels = risk_levels_cache.get("data")
+        budget = risk_budget_cache.get("data")
+        if not all([diagnostics, tail, options, volatility_term, levels, budget]):
+            raise ValueError("Required risk modules unavailable for hedge overlay")
+
+        risk_score = safe_float(diagnostics.get("risk_score"), 50)
+        tail_score = safe_float(tail.get("tail_score"), 50)
+        term_score = safe_float(volatility_term.get("term_score"), 50)
+        implied_move = safe_float(options.get("implied_move"), 0)
+        put_call_oi_ratio = safe_float(options.get("put_call_oi_ratio"), 1)
+        zone_score = safe_float(levels.get("zone_score"), 50)
+        stress_downside = safe_float(budget.get("stress_downside"), 0)
+
+        options_pressure = clamp(
+            30
+            + implied_move * 8
+            + max(0, put_call_oi_ratio - 0.9) * 18,
+            0,
+            100,
+        )
+        technical_pressure = clamp(55 - zone_score, 0, 55)
+        hedge_score = round(clamp(
+            risk_score * 0.24
+            + tail_score * 0.24
+            + term_score * 0.18
+            + options_pressure * 0.16
+            + technical_pressure * 0.10
+            + stress_downside * 1.2
+        ), 1)
+        hedge_label, hedge_color = hedge_overlay_regime(hedge_score)
+
+        base_protection = clamp(
+            hedge_score * 0.55 + max(0, tail_score - 50) * 0.25 + max(0, stress_downside - 5) * 1.5,
+            8,
+            78,
+        )
+        if hedge_score < 38:
+            base_protection = clamp(base_protection, 5, 25)
+        protection_lower = round(clamp(base_protection - 10, 0, 85))
+        protection_upper = round(clamp(base_protection + 10, protection_lower, 85))
+
+        support_levels = levels.get("support_levels") or []
+        resistance_levels = levels.get("resistance_levels") or []
+        nearest_support = support_levels[0] if support_levels else {}
+        nearest_resistance = resistance_levels[0] if resistance_levels else {}
+        ndx_support = safe_float(nearest_support.get("value"), None)
+        ndx_resistance = safe_float(nearest_resistance.get("value"), None)
+
+        proxy_price = safe_float(options.get("proxy_price"), 0)
+        implied_low = safe_float(options.get("implied_range_low"), 0)
+        implied_high = safe_float(options.get("implied_range_high"), 0)
+        atm_strike = safe_float(options.get("atm_strike"), proxy_price)
+        put_spread_long = implied_low if implied_low > 0 else proxy_price * (1 - implied_move / 100)
+        spread_width = max(0.02, min(0.08, implied_move / 100))
+        put_spread_short = max(0, put_spread_long * (1 - spread_width))
+
+        profiles = budget.get("profiles") or []
+        balanced_profile = next((profile for profile in profiles if profile.get("key") == "balanced"), profiles[0] if profiles else {})
+        balanced_exposure = balanced_profile.get("exposure", {}).get("label", "--")
+        cash_buffer = balanced_profile.get("cash_buffer", "--")
+        rebalance_trigger = balanced_profile.get("rebalance_trigger", "按风险预算区间执行再平衡。")
+
+        if hedge_label == "保护优先":
+            summary = (
+                "尾部损失、波动率曲线或压力回撤提示保护优先，组合应先确认最大可承受回撤，"
+                "再决定是否保留进攻性 NDX 暴露。"
+            )
+        elif hedge_label == "提高保护":
+            summary = (
+                "风险定价进入偏紧状态，建议把保护比例抬到中等覆盖区间，并避免在波动率快速上行时一次性补保险。"
+            )
+        elif hedge_label == "保留保护":
+            summary = (
+                "当前保护需求处在均衡区，已有仓位可维持基础保护，用技术位和期权隐含区间触发调整。"
+            )
+        else:
+            summary = (
+                "保护需求温和，重点保留现金和再平衡纪律；若 VIX 曲线趋平或跌破支撑，再提高覆盖比例。"
+            )
+
+        overlays = [
+            {
+                "key": "coverage",
+                "label": "建议保护覆盖",
+                "value": f"{protection_lower}% - {protection_upper}%",
+                "color": hedge_color,
+                "detail": "按组合 NDX 净暴露估算，用于约束下行情景中的保护比例。",
+            },
+            {
+                "key": "cash_buffer",
+                "label": "现金缓冲",
+                "value": cash_buffer,
+                "color": "blue",
+                "detail": f"均衡型风险预算暴露 {balanced_exposure}，现金缓冲用于承接再平衡和补保证金。",
+            },
+            {
+                "key": "put_spread",
+                "label": "QQQ Put Spread",
+                "value": f"{put_spread_long:.2f}/{put_spread_short:.2f}",
+                "color": "amber" if hedge_score >= 55 else "blue",
+                "detail": f"参考最近到期期权隐含下沿，ATM 代理 {atm_strike:.2f}，不作为交易指令。",
+            },
+            {
+                "key": "technical_trigger",
+                "label": "NDX 技术触发",
+                "value": f"{ndx_support:,.0f}" if ndx_support else "--",
+                "color": "red" if zone_score < 35 else "blue",
+                "detail": nearest_support.get("label", "最近支撑位") + "；跌破后应把保护区间推向上沿。",
+            },
+        ]
+
+        controls = [
+            f"保护比例应与压力回撤 -{stress_downside:.1f}% 和最大损失预算匹配，避免只按情绪补仓。",
+            f"若 QQQ 跌破隐含下沿 {put_spread_long:.2f}，说明现货跌幅超过期权市场短线定价。",
+            f"若 VIX/VIX3M 升破 1.00 或 VVIX z-score 高于 1.5，优先降低新增风险预算，而不是追高买入保护。",
+            rebalance_trigger,
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "hedge_score": hedge_score,
+            "hedge_label": hedge_label,
+            "hedge_color": hedge_color,
+            "summary": summary,
+            "protection_lower": protection_lower,
+            "protection_upper": protection_upper,
+            "proxy_symbol": options.get("proxy_symbol", "QQQ"),
+            "proxy_price": round(proxy_price, 2),
+            "expiration": options.get("expiration"),
+            "days_to_expiration": options.get("days_to_expiration"),
+            "implied_move": round(implied_move, 2),
+            "implied_range_low": round(implied_low, 2),
+            "implied_range_high": round(implied_high, 2),
+            "put_call_oi_ratio": round(put_call_oi_ratio, 2),
+            "vix": volatility_term.get("vix"),
+            "front_ratio": volatility_term.get("front_ratio"),
+            "vvix_z_score": volatility_term.get("vvix_z_score"),
+            "tail_score": round(tail_score, 1),
+            "var95": tail.get("var95"),
+            "expected_shortfall_95": tail.get("expected_shortfall_95"),
+            "stress_downside": round(stress_downside, 1),
+            "balanced_exposure": balanced_exposure,
+            "ndx_support": round(ndx_support, 2) if ndx_support else None,
+            "ndx_resistance": round(ndx_resistance, 2) if ndx_resistance else None,
+            "put_spread_long": round(put_spread_long, 2),
+            "put_spread_short": round(put_spread_short, 2),
+            "overlays": overlays,
+            "controls": controls,
+            "methodology": "把风险诊断、历史尾部损失、QQQ 期权隐含区间、VIX 期限结构、技术支撑和风险预算合成为保护覆盖区间；该模块是组合风控参考，不构成期权交易建议。",
+        }
+        risk_hedge_overlay_cache["data"] = data
+        risk_hedge_overlay_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX hedge overlay updated: {hedge_label}, score {hedge_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX hedge overlay refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def cleanup_old_data():
     try:
         with app.app_context():
@@ -3281,6 +3469,7 @@ def background_worker():
     last_valuation = 0
     last_earnings = 0
     last_breadth = 0
+    last_hedge_overlay = 0
     while True:
         try:
             update_market_index()
@@ -3378,6 +3567,11 @@ def background_worker():
                 refresh_risk_budget()
                 last_risk_budget = time.time()
 
+            # NDX hedge overlay every 30 minutes
+            if time.time() - last_hedge_overlay > 1800:
+                refresh_hedge_overlay_data()
+                last_hedge_overlay = time.time()
+
             # Daily cleanup
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
@@ -3438,6 +3632,14 @@ def get_risk_budget():
         refresh_risk_budget()
 
     data = risk_budget_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/hedge-overlay', methods=['GET'])
+def get_risk_hedge_overlay():
+    if not cache_is_fresh(risk_hedge_overlay_cache, 15 * 60) and should_refresh_empty_cache(risk_hedge_overlay_cache, 60):
+        refresh_hedge_overlay_data()
+
+    data = risk_hedge_overlay_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/concentration', methods=['GET'])
