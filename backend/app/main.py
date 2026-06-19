@@ -9282,6 +9282,121 @@ def get_risk_data_quality():
     })
 
 
+@app.route('/api/risk/positioning-summary', methods=['GET'])
+def get_risk_positioning_summary():
+    playbook = risk_module_payload("playbook") or {}
+    capacity = risk_module_payload("capacity") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    alerts = risk_module_payload("alerts") or {}
+    contribution = risk_module_payload("contribution") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    hedge = risk_module_payload("hedge_overlay") or {}
+    desk = risk_module_payload("desk_brief") or {}
+    tail = risk_module_payload("tail") or {}
+    intraday = risk_module_payload("intraday_tape") or {}
+    data_quality_snapshots = RiskModuleSnapshot.query.count()
+
+    if not playbook and not capacity:
+        return jsonify({"error": "Initializing"}), 202
+
+    target_exposure = playbook.get("target_exposure") or capacity.get("target_exposure") or {}
+    hedge_coverage = playbook.get("hedge_coverage") or capacity.get("hedge_coverage") or {}
+    cash_buffer_min = safe_float(playbook.get("cash_buffer_min"), safe_float(capacity.get("cash_buffer_min"), 0))
+    posture = playbook.get("posture") or desk.get("stance") or capacity.get("capacity_regime") or "等待确认"
+    playbook_score = safe_float(playbook.get("playbook_score"), safe_float(capacity.get("capacity_score"), 50))
+    alert_score = safe_float(alerts.get("alert_score"), 50)
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    contribution_pressure = safe_float(contribution.get("net_pressure"), 0)
+    recovery_score = safe_float(recovery.get("recovery_score"), 50)
+    tail_score = safe_float(tail.get("tail_score"), 50)
+    hedge_score = safe_float(hedge.get("hedge_score"), 50)
+    positioning_score = round(clamp(playbook_score * 0.35 + regime_score * 0.2 + recovery_score * 0.15 + (100 - alert_score) * 0.2 + (100 - tail_score) * 0.1), 1)
+
+    if positioning_score >= 68:
+        stance = "可逐步进攻"
+        stance_color = "green"
+    elif positioning_score >= 52:
+        stance = "均衡持有"
+        stance_color = "blue"
+    elif positioning_score >= 38:
+        stance = "降速观察"
+        stance_color = "amber"
+    else:
+        stance = "防守优先"
+        stance_color = "red"
+
+    action_tickets = playbook.get("action_tickets") or []
+    levels = playbook.get("levels") or []
+    level_map = {item.get("key"): item for item in levels if isinstance(item, dict)}
+    today_ticket = next((item for item in action_tickets if item.get("key") == "today"), {})
+    invalidation_ticket = next((item for item in action_tickets if item.get("key") == "invalidation"), {})
+    repair_ticket = next((item for item in action_tickets if item.get("key") == "repair"), {})
+    confirmation_ticket = next((item for item in action_tickets if item.get("key") == "confirmation"), {})
+
+    target_label = target_exposure.get("label", "--")
+    hedge_label = hedge_coverage.get("label", hedge.get("hedge_label", "--"))
+    cash_label = f"{cash_buffer_min:.0f}%+" if cash_buffer_min else "--"
+
+    lanes = [
+        {
+            "key": "tactical",
+            "label": "短线交易",
+            "horizon": "1-3 日",
+            "color": today_ticket.get("color", "amber" if alert_score >= 60 else "blue"),
+            "action": today_ticket.get("action", "只在确认线附近做分批调整，不因盘中噪音一次性改变风险预算。"),
+            "trigger": today_ticket.get("trigger", intraday.get("regime", "等待盘中 tape 更新")),
+            "risk_control": f"若跌破 {level_map.get('invalidation', {}).get('value', '--')}，先降低新增风险预算。",
+        },
+        {
+            "key": "core",
+            "label": "核心仓位",
+            "horizon": "1-4 周",
+            "color": stance_color,
+            "action": f"NDX 目标暴露维持在 {target_label}，现金缓冲 {cash_label}，保护覆盖 {hedge_label}。",
+            "trigger": repair_ticket.get("trigger", f"市场状态：{regime.get('regime', '--')}；预警：{alerts.get('alert_level', '--')}。"),
+            "risk_control": invalidation_ticket.get("action", "失效线未收复前，核心仓位不突破目标上沿。"),
+        },
+        {
+            "key": "defensive",
+            "label": "防守预算",
+            "horizon": "压力情景",
+            "color": "red" if alert_score >= 75 or tail_score >= 70 else "amber",
+            "action": confirmation_ticket.get("action", "只有当确认线、风险预警和修复路径同步改善，才释放防守预算。"),
+            "trigger": confirmation_ticket.get("trigger", f"修复分 {recovery_score:.1f}，净压力 {contribution_pressure:+.1f}。"),
+            "risk_control": f"尾部风险分 {tail_score:.1f}，对冲覆盖纪律：{hedge_label}。",
+        },
+    ]
+
+    summary = (
+        f"当前仓位摘要为{stance}：目标暴露 {target_label}，现金缓冲 {cash_label}，"
+        f"保护覆盖 {hedge_label}。{playbook.get('summary') or desk.get('headline') or ''}"
+    ).strip()
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "stance": stance,
+        "stance_color": stance_color,
+        "posture": posture,
+        "positioning_score": positioning_score,
+        "summary": summary,
+        "target_exposure": target_exposure,
+        "cash_buffer_min": cash_buffer_min,
+        "hedge_coverage": hedge_coverage,
+        "alert_level": alerts.get("alert_level", "--"),
+        "alert_score": round(alert_score, 1),
+        "regime": regime.get("regime", "--"),
+        "regime_score": round(regime_score, 1),
+        "net_pressure": round(contribution_pressure, 1),
+        "recovery_score": round(recovery_score, 1),
+        "tail_score": round(tail_score, 1),
+        "hedge_score": round(hedge_score, 1),
+        "data_snapshots": data_quality_snapshots,
+        "levels": levels[:5],
+        "lanes": lanes,
+        "methodology": "把执行 Playbook、承受力闸门、市场状态、风险预警、风险贡献、修复路径、尾部风险和对冲覆盖压成面向组合管理的仓位动作摘要。该模块用于纪律框架和情景沟通，不构成买卖指令。",
+    })
+
+
 @app.route('/api/risk/latest', methods=['GET'])
 def get_risk_latest():
     global risk_latest_cache

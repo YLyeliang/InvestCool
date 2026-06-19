@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
+import { NDXPositioningSummaryPanel } from "@/components/NDXPositioningSummaryPanel";
 import { NDXDeskBriefPanel } from "@/components/NDXDeskBriefPanel";
 import { NDXExecutionPlaybookPanel } from "@/components/NDXExecutionPlaybookPanel";
 import { NDXRegimeAnalogPanel } from "@/components/NDXRegimeAnalogPanel";
@@ -147,6 +148,13 @@ export default function RiskPage() {
           <Icon name="lucide:database-zap" className="text-[var(--accent-color)]" /> NDX 数据质量与覆盖
         </h3>
         <NDXDataQualityPanel />
+      </section>
+
+      <section className="positioning-summary-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:route" className="text-[var(--accent-color)]" /> NDX 仓位动作摘要
+        </h3>
+        <NDXPositioningSummaryPanel />
       </section>
 
       <section className="desk-brief-section">
