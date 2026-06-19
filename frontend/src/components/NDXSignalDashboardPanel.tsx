@@ -201,6 +201,14 @@ interface GammaMapPayload {
   };
 }
 
+interface OptionSkewPayload {
+  skew_score: number;
+  regime: string;
+  risk_reversal: number;
+  tail_oi_ratio: number;
+  put_spread_cost_pct: number;
+}
+
 interface VolPremiumPayload {
   premium_score: number;
   premium_regime: string;
@@ -285,6 +293,7 @@ interface DashboardData {
   earnings: EarningsPayload | null;
   options: OptionsPayload | null;
   gammaMap: GammaMapPayload | null;
+  optionSkew: OptionSkewPayload | null;
   volPremium: VolPremiumPayload | null;
   intradayTape: IntradayTapePayload | null;
   volumeProfile: VolumeProfilePayload | null;
@@ -437,6 +446,7 @@ export const NDXSignalDashboardPanel = () => {
           earnings,
           options,
           gammaMap,
+          optionSkew,
           volPremium,
           intradayTape,
           volumeProfile,
@@ -468,6 +478,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<EarningsPayload>("/api/risk/earnings"),
           fetchJson<OptionsPayload>("/api/risk/options"),
           fetchJson<GammaMapPayload>("/api/risk/gamma-map", 15000),
+          fetchJson<OptionSkewPayload>("/api/risk/option-skew", 15000),
           fetchJson<VolPremiumPayload>("/api/risk/vol-premium"),
           fetchJson<IntradayTapePayload>("/api/risk/intraday-tape", 15000),
           fetchJson<VolumeProfilePayload>("/api/risk/volume-profile", 15000),
@@ -478,7 +489,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -505,6 +516,7 @@ export const NDXSignalDashboardPanel = () => {
     const contributionScore = data.contribution?.risk_contribution_score ?? 50;
     const rateSensitivityScore = data.rateSensitivity?.rate_sensitivity_score ?? 50;
     const gammaScore = data.gammaMap?.gamma_score ?? 50;
+    const skewScore = data.optionSkew?.skew_score ?? 50;
     const volPremiumScore = data.volPremium?.premium_score ?? 50;
     const intradayTapeScore = data.intradayTape?.tape_pressure_score ?? 50;
     const volumeProfileScore = data.volumeProfile?.profile_score ?? 50;
@@ -521,7 +533,7 @@ export const NDXSignalDashboardPanel = () => {
       data.deskBrief?.desk_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, gammaScore, volPremiumScore, intradayTapeScore, volumeProfileScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
+    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, gammaScore, skewScore, volPremiumScore, intradayTapeScore, volumeProfileScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -663,6 +675,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "crosshair",
       },
       {
+        label: "期权偏斜",
+        value: data.optionSkew ? data.optionSkew.regime : "--",
+        detail: data.optionSkew ? `RR ${formatSignedPoint(data.optionSkew.risk_reversal)} vol · OTM P/C ${data.optionSkew.tail_oi_ratio.toFixed(2)}x · Spread ${data.optionSkew.put_spread_cost_pct.toFixed(2)}%` : "等待 skew 链",
+        color: data.optionSkew ? scoreColor(data.optionSkew.skew_score, true) : "blue",
+        icon: "shield-alert",
+      },
+      {
         label: "波动溢价",
         value: data.volPremium ? data.volPremium.premium_regime : "--",
         detail: data.volPremium ? `隐含 ${data.volPremium.implied_move.toFixed(2)}% · 实现 ${data.volPremium.realized_move.toFixed(2)}% · 溢价 ${formatSignedPoint(data.volPremium.premium_points)}` : "等待波动溢价",
@@ -753,7 +772,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 29 }).map((_, index) => (
+          {Array.from({ length: 30 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

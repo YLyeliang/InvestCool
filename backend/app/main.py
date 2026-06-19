@@ -72,6 +72,7 @@ risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_gamma_map_cache = {"data": None, "last_update": None}
+risk_option_skew_cache = {"data": None, "last_update": None}
 risk_vol_premium_cache = {"data": None, "last_update": None}
 risk_intraday_tape_cache = {"data": None, "last_update": None}
 risk_volume_profile_cache = {"data": None, "last_update": None}
@@ -644,6 +645,15 @@ def gamma_map_regime(net_gamma_ratio, put_wall_distance):
     if net_gamma_ratio <= -0.06:
         return "下方凸性", "amber"
     return "Gamma 均衡", "blue"
+
+def option_skew_regime(score, risk_reversal, tail_oi_ratio):
+    if score >= 76 or risk_reversal >= 9:
+        return "尾部保护拥挤", "red"
+    if score >= 58 or tail_oi_ratio >= 1.45:
+        return "下行保护升温", "amber"
+    if score <= 34 and risk_reversal <= 3:
+        return "偏斜温和", "green"
+    return "偏斜均衡", "blue"
 
 def volume_profile_regime(last_price, value_area_low, value_area_high, poc, session_return):
     if last_price > value_area_high:
@@ -3481,6 +3491,13 @@ def clean_option_rows(frame):
     return rows
 
 
+def nearest_option_row(rows, target_strike):
+    valid = [row for row in rows if safe_float(row.get("iv"), 0) > 0]
+    if not valid:
+        return None
+    return min(valid, key=lambda row: abs(row["strike"] - target_strike))
+
+
 def option_gamma_notional(row, spot, dte, sign=1):
     strike = safe_float(row.get("strike"), 0)
     iv = safe_float(row.get("iv"), 0)
@@ -3753,6 +3770,185 @@ def refresh_options_data():
         logger.info(f"NDX options proxy updated: {label}, move {implied_move:.2f}%")
     except Exception as e:
         logger.error(f"NDX options proxy refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_option_skew_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_option_skew_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        ticker = yf.Ticker(proxy_symbol)
+        price = safe_float(ticker.fast_info.last_price, 0)
+        if price <= 0:
+            raise ValueError("QQQ price unavailable for option skew")
+
+        today = datetime.utcnow().date()
+        expirations = sorted([
+            exp for exp in ticker.options
+            if datetime.strptime(exp, "%Y-%m-%d").date() > today
+        ])
+        if not expirations:
+            raise ValueError("No future QQQ option expirations available for skew")
+
+        selected_expiration = None
+        for exp in expirations:
+            exp_date = datetime.strptime(exp, "%Y-%m-%d").date()
+            dte_candidate = (exp_date - today).days
+            if 7 <= dte_candidate <= 45:
+                selected_expiration = exp
+                break
+        if selected_expiration is None:
+            selected_expiration = expirations[0]
+
+        expiry_date = datetime.strptime(selected_expiration, "%Y-%m-%d").date()
+        dte = max((expiry_date - today).days, 1)
+        chain = ticker.option_chain(selected_expiration)
+        calls = clean_option_rows(chain.calls)
+        puts = clean_option_rows(chain.puts)
+        if not calls or not puts:
+            raise ValueError("QQQ option chain unavailable or illiquid for skew")
+
+        call_atm = nearest_option_row(calls, price)
+        put_atm = nearest_option_row(puts, price)
+        put_95 = nearest_option_row(puts, price * 0.95)
+        put_90 = nearest_option_row(puts, price * 0.90)
+        call_105 = nearest_option_row(calls, price * 1.05)
+        call_110 = nearest_option_row(calls, price * 1.10)
+        required_rows = [call_atm, put_atm, put_95, put_90, call_105]
+        if any(row is None for row in required_rows):
+            raise ValueError("Missing required option strikes for skew")
+
+        atm_iv = (call_atm["iv"] + put_atm["iv"]) / 2 * 100
+        put_95_iv = put_95["iv"] * 100
+        put_90_iv = put_90["iv"] * 100
+        call_105_iv = call_105["iv"] * 100
+        call_110_iv = call_110["iv"] * 100 if call_110 else call_105_iv
+        put_skew = put_95_iv - atm_iv
+        deep_put_skew = put_90_iv - atm_iv
+        call_skew = call_105_iv - atm_iv
+        risk_reversal = put_95_iv - call_105_iv
+
+        downside_puts = [row for row in puts if price * 0.86 <= row["strike"] <= price * 0.97]
+        upside_calls = [row for row in calls if price * 1.03 <= row["strike"] <= price * 1.14]
+        downside_put_oi = sum(row["open_interest"] for row in downside_puts)
+        upside_call_oi = sum(row["open_interest"] for row in upside_calls)
+        downside_put_volume = sum(row["volume"] for row in downside_puts)
+        upside_call_volume = sum(row["volume"] for row in upside_calls)
+        tail_oi_ratio = downside_put_oi / upside_call_oi if upside_call_oi else 0
+        tail_volume_ratio = downside_put_volume / upside_call_volume if upside_call_volume else 0
+
+        put_spread_cost = max(0, put_95["mid"] - put_90["mid"])
+        put_spread_cost_pct = put_spread_cost / price * 100 if price else 0
+        put_95_distance = pct_change(put_95["strike"], price)
+        put_90_distance = pct_change(put_90["strike"], price)
+        call_105_distance = pct_change(call_105["strike"], price)
+
+        skew_score = round(clamp(
+            34
+            + max(0, put_skew) * 2.4
+            + max(0, deep_put_skew) * 1.1
+            + max(0, risk_reversal) * 1.9
+            + max(0, tail_oi_ratio - 1.0) * 12
+            + max(0, tail_volume_ratio - 1.0) * 8
+            + max(0, put_spread_cost_pct - 0.6) * 10
+        ), 1)
+        regime, color = option_skew_regime(skew_score, risk_reversal, tail_oi_ratio)
+
+        metrics = [
+            {
+                "key": "put_skew",
+                "label": "5% Put Skew",
+                "value": f"{put_skew:+.1f} vol pts",
+                "score": round(clamp(35 + max(0, put_skew) * 4), 1),
+                "color": risk_color(clamp(35 + max(0, put_skew) * 4)),
+                "detail": f"{put_95['strike']:.0f} put IV {put_95_iv:.1f}% 对比 ATM IV {atm_iv:.1f}%。",
+            },
+            {
+                "key": "risk_reversal",
+                "label": "Put/Call 风险逆转",
+                "value": f"{risk_reversal:+.1f} vol pts",
+                "score": round(clamp(32 + max(0, risk_reversal) * 4.5), 1),
+                "color": risk_color(clamp(32 + max(0, risk_reversal) * 4.5)),
+                "detail": f"5% OTM put IV {put_95_iv:.1f}%，5% OTM call IV {call_105_iv:.1f}%。",
+            },
+            {
+                "key": "tail_oi",
+                "label": "OTM Put/Call OI",
+                "value": f"{tail_oi_ratio:.2f}x",
+                "score": round(clamp(34 + max(0, tail_oi_ratio - 0.9) * 28), 1),
+                "color": risk_color(clamp(34 + max(0, tail_oi_ratio - 0.9) * 28)),
+                "detail": f"下方 3%-14% put OI {downside_put_oi:,.0f}，上方 3%-14% call OI {upside_call_oi:,.0f}。",
+            },
+            {
+                "key": "put_spread",
+                "label": "95/90 Put Spread",
+                "value": f"{put_spread_cost_pct:.2f}%",
+                "score": round(clamp(30 + put_spread_cost_pct * 20), 1),
+                "color": risk_color(clamp(30 + put_spread_cost_pct * 20)),
+                "detail": f"{put_95['strike']:.0f}/{put_90['strike']:.0f} put spread 中价约 {put_spread_cost:.2f}。",
+            },
+        ]
+
+        if regime == "尾部保护拥挤":
+            summary = f"QQQ 下行偏斜显著抬升，5% put/call 风险逆转 {risk_reversal:+.1f} vol pts，保护需求可能已经拥挤。"
+        elif regime == "下行保护升温":
+            summary = f"QQQ 下行保护需求升温，OTM put/call OI 为 {tail_oi_ratio:.2f}x，尾部保护成本需要纳入仓位预算。"
+        elif regime == "偏斜温和":
+            summary = f"QQQ 期权偏斜温和，5% put skew {put_skew:+.1f} vol pts，尾部保护暂未明显拥挤。"
+        else:
+            summary = f"QQQ 偏斜处在均衡区，5% put IV {put_95_iv:.1f}%、ATM IV {atm_iv:.1f}%，保护成本没有给出极端信号。"
+
+        controls = [
+            f"若 5% put/call 风险逆转升至 +9 vol pts 以上，避免在保护需求最拥挤时一次性补保险。",
+            f"若 QQQ 跌近 {put_95['strike']:.0f}（{put_95_distance:+.2f}%）且 skew 同步上行，优先降低净暴露而不是追高买保护。",
+            f"若 skew 分数低于 35 且 VIX 曲线仍为 contango，可用分批方式补基础保护。",
+            "偏斜只反映公开期权链定价，不代表真实做市商库存或保证收益的保护策略。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "proxy_price": round(price, 2),
+            "expiration": selected_expiration,
+            "days_to_expiration": dte,
+            "skew_score": skew_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "atm_iv": round(atm_iv, 1),
+            "put_95_iv": round(put_95_iv, 1),
+            "put_90_iv": round(put_90_iv, 1),
+            "call_105_iv": round(call_105_iv, 1),
+            "call_110_iv": round(call_110_iv, 1),
+            "put_skew": round(put_skew, 1),
+            "deep_put_skew": round(deep_put_skew, 1),
+            "call_skew": round(call_skew, 1),
+            "risk_reversal": round(risk_reversal, 1),
+            "tail_oi_ratio": round(tail_oi_ratio, 2),
+            "tail_volume_ratio": round(tail_volume_ratio, 2),
+            "downside_put_oi": round(downside_put_oi),
+            "upside_call_oi": round(upside_call_oi),
+            "downside_put_volume": round(downside_put_volume),
+            "upside_call_volume": round(upside_call_volume),
+            "put_spread_cost": round(put_spread_cost, 2),
+            "put_spread_cost_pct": round(put_spread_cost_pct, 2),
+            "put_95_strike": round(put_95["strike"], 2),
+            "put_90_strike": round(put_90["strike"], 2),
+            "call_105_strike": round(call_105["strike"], 2),
+            "put_95_distance": round(put_95_distance, 2),
+            "put_90_distance": round(put_90_distance, 2),
+            "call_105_distance": round(call_105_distance, 2),
+            "metrics": metrics,
+            "controls": controls,
+            "methodology": "使用 QQQ 7-45 天内最近到期期权链，比较 ATM IV、5%/10% OTM put IV、5%/10% OTM call IV，并统计 OTM put/call 未平仓量与成交量，用于观察 NDX 下行尾部保护需求和期权偏斜压力。该模块是公开期权链风险读数，不构成期权交易建议。",
+        }
+        risk_option_skew_cache["data"] = data
+        risk_option_skew_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX option skew updated: {regime}, score {skew_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX option skew refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -6255,6 +6451,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("cross_asset", risk_cross_asset_cache, refresh_cross_asset_data, 15 * 60, False),
             ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60, False),
             ("gamma", risk_gamma_map_cache, refresh_gamma_map_data, 15 * 60, False),
+            ("skew", risk_option_skew_cache, refresh_option_skew_data, 15 * 60, False),
             ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
             ("vol_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60, False),
             ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60, False),
@@ -6276,6 +6473,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "cross_asset",
             "hedge",
             "gamma",
+            "skew",
             "vol_premium",
             "vol_term",
             "breadth",
@@ -6312,6 +6510,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         cross_asset = risk_cross_asset_cache.get("data") or {}
         hedge = risk_hedge_overlay_cache.get("data") or {}
         gamma = risk_gamma_map_cache.get("data") or {}
+        skew = risk_option_skew_cache.get("data") or {}
         vol_premium = risk_vol_premium_cache.get("data") or {}
         vol_term = risk_volatility_term_cache.get("data") or {}
         breadth = risk_breadth_cache.get("data") or {}
@@ -6337,6 +6536,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             100 - safe_float(cross_asset.get("confirmation_score"), 50),
             hedge.get("hedge_score"),
             gamma.get("gamma_score"),
+            skew.get("skew_score"),
             vol_premium.get("premium_score"),
             vol_term.get("term_score"),
             valuation.get("valuation_score"),
@@ -6413,7 +6613,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
                 "label": "波动保护",
                 "color": hedge.get("hedge_color", risk_color(safe_float(hedge.get("hedge_score"), 50))),
                 "state": hedge.get("hedge_label", gamma.get("regime", vol_term.get("regime", "等待波动定价"))),
-                "readout": f"Gamma {gamma.get('regime', '--')} / 隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}% / VIX曲线 {vol_term.get('regime', '--')}",
+                "readout": f"Gamma {gamma.get('regime', '--')} / Skew {skew.get('regime', '--')} / 隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}%",
                 "action": f"保护覆盖跟随 Playbook 区间；若跌近 put wall {safe_float((gamma.get('put_wall') or {}).get('strike'), 0):.0f}，先提高保护再讨论加仓。",
             },
         ]
@@ -6452,6 +6652,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "profile_score": round(safe_float(volume_profile.get("profile_score"), 50), 1),
             "cross_asset_score": round(safe_float(cross_asset.get("confirmation_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
+            "skew_score": round(safe_float(skew.get("skew_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
             "cash_buffer": cash_label,
@@ -6461,7 +6662,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -7542,6 +7743,7 @@ def background_worker():
     last_dispersion = 0
     last_options = 0
     last_gamma_map = 0
+    last_option_skew = 0
     last_volatility_term = 0
     last_vol_premium = 0
     last_intraday_tape = 0
@@ -7632,6 +7834,11 @@ def background_worker():
             if time.time() - last_gamma_map > 1800:
                 refresh_gamma_map_data()
                 last_gamma_map = time.time()
+
+            # QQQ option skew and tail hedge demand every 30 minutes
+            if time.time() - last_option_skew > 1800:
+                refresh_option_skew_data()
+                last_option_skew = time.time()
 
             # VIX term structure every 30 minutes
             if time.time() - last_volatility_term > 1800:
@@ -7992,6 +8199,14 @@ def get_risk_gamma_map():
         refresh_gamma_map_data()
 
     data = risk_gamma_map_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/option-skew', methods=['GET'])
+def get_risk_option_skew():
+    if not cache_is_fresh(risk_option_skew_cache, 15 * 60) and should_refresh_empty_cache(risk_option_skew_cache, 60):
+        refresh_option_skew_data()
+
+    data = risk_option_skew_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/volatility-term', methods=['GET'])

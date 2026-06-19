@@ -25,6 +25,7 @@ import { NDXBreadthParticipationPanel } from "@/components/NDXBreadthParticipati
 import { NDXTechnicalLevelsPanel } from "@/components/NDXTechnicalLevelsPanel";
 import { NDXTailRiskPanel } from "@/components/NDXTailRiskPanel";
 import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
+import { NDXOptionSkewPanel } from "@/components/NDXOptionSkewPanel";
 import { NDXGammaMapPanel } from "@/components/NDXGammaMapPanel";
 import { NDXVolPremiumPanel } from "@/components/NDXVolPremiumPanel";
 import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
@@ -296,6 +297,13 @@ export default function RiskPage() {
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> 期权隐含定价
         </h3>
         <NDXOptionsPricingPanel />
+      </section>
+
+      <section className="option-skew-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:shield-alert" className="text-[var(--accent-color)]" /> QQQ 期权偏斜与尾部保护
+        </h3>
+        <NDXOptionSkewPanel />
       </section>
 
       <section className="gamma-map-section">
