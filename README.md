@@ -136,6 +136,12 @@ cd ..
 python -m compileall -q backend
 ```
 
+生产实例的快速健康检查：
+
+```bash
+./scripts/verify-ndx-production.sh
+```
+
 ## 生产部署
 
 先构建前端并向 PM2 进程环境提供管理令牌：

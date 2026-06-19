@@ -66,32 +66,13 @@ pm2 reload investcool-frontend
 pm2 status
 ```
 
-Endpoint smoke checks:
+After the services are running, use the one-shot production smoke check:
 
 ```bash
-python - <<'PY'
-import json
-import urllib.request
-
-checks = [
-    "dashboard",
-    "key-takeaways",
-    "thesis-monitor",
-    "catalyst-calendar",
-    "risk-register",
-    "hedge-book",
-]
-
-for name in checks:
-    with urllib.request.urlopen(f"http://127.0.0.1:5000/api/risk/{name}", timeout=20) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
-        print(name, resp.status, data.get("headline") or data.get("summary") or "ok")
-
-with urllib.request.urlopen("http://127.0.0.1:3000/risk", timeout=20) as resp:
-    body = resp.read().decode("utf-8", "ignore")
-    print("/risk", resp.status, "This page couldn't load" in body)
-PY
+./scripts/verify-ndx-production.sh
 ```
+
+The script checks Python syntax, PM2 app status, key NDX risk APIs, `/risk` HTML, legacy Gemini/Vue references, and patch hygiene.
 
 Browser check for client-rendered panels:
 
