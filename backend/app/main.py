@@ -10409,6 +10409,324 @@ def get_risk_reward_framework():
     })
 
 
+@app.route('/api/risk/pre-trade-checklist', methods=['GET'])
+def get_risk_pre_trade_checklist():
+    latest = latest_risk_payload() or {}
+    scenario_map = risk_module_payload("scenario_map") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    playbook = risk_module_payload("playbook") or {}
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    breadth = risk_module_payload("breadth") or {}
+    liquidity = risk_module_payload("liquidity") or {}
+    hedge = risk_module_payload("hedge_overlay") or {}
+    earnings = risk_module_payload("earnings") or {}
+    data_quality = get_risk_data_quality().get_json(silent=True) or {}
+
+    index_value = safe_float(
+        playbook.get("index"),
+        safe_float(scenario_map.get("index"), safe_float(recovery.get("index"), safe_float(latest.get("index_position"), 0)))
+    )
+    if not index_value or not playbook:
+        return jsonify({"error": "Initializing"}), 202
+
+    gates = []
+
+    def add_gate(key, group, label, status, color, value, evidence, action, priority):
+        gates.append({
+            "key": key,
+            "group": group,
+            "label": label,
+            "status": status,
+            "color": color,
+            "value": value,
+            "evidence": evidence,
+            "action": action,
+            "priority": priority,
+        })
+
+    health_score = safe_float(data_quality.get("health_score"), 0)
+    if health_score >= 95:
+        data_status, data_color = "pass", "green"
+        data_action = "数据新鲜度允许作为执行依据。"
+    elif health_score >= 85:
+        data_status, data_color = "watch", "amber"
+        data_action = "只允许观察单，先确认陈旧或缺失模块。"
+    else:
+        data_status, data_color = "fail", "red"
+        data_action = "暂停新增风险，等待核心模块刷新。"
+    add_gate(
+        "data_quality",
+        "数据",
+        "数据质量",
+        data_status,
+        data_color,
+        f"{health_score:.1f}",
+        f"新鲜 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}，陈旧 {data_quality.get('stale_modules', 0)}。",
+        data_action,
+        100,
+    )
+
+    alert_score = safe_float(alerts.get("alert_score"), 50)
+    critical_count = int(alerts.get("critical_count") or 0)
+    if alert_score >= 75 or critical_count >= 2:
+        alert_status, alert_color = "fail", "red"
+        alert_action = "先处理红色预警，降低新增风险预算和确认保护覆盖。"
+    elif alert_score >= 60 or critical_count >= 1:
+        alert_status, alert_color = "watch", "amber"
+        alert_action = "不追高，只保留触发线内的分批动作。"
+    else:
+        alert_status, alert_color = "pass", "green"
+        alert_action = "预警压力允许进入执行队列。"
+    add_gate(
+        "alerts",
+        "风险",
+        "预警压力",
+        alert_status,
+        alert_color,
+        f"{alert_score:.1f}",
+        alerts.get("summary", "预警模块用于处理最高优先级风险。"),
+        alert_action,
+        96,
+    )
+
+    expected_move = safe_float(scenario_map.get("expected_move"), 0)
+    downside_probability = safe_float(scenario_map.get("downside_probability"), 50)
+    scenarios = scenario_map.get("scenarios") or []
+    base_case = max(scenarios, key=lambda item: safe_float(item.get("probability_pct"), 0)) if scenarios else {}
+    worst_case = min(
+        scenarios,
+        key=lambda item: safe_float(item.get("range_low"), safe_float((item.get("ndx_range") or {}).get("low"), index_value))
+    ) if scenarios else {}
+    worst_low = safe_float(worst_case.get("range_low"), safe_float((worst_case.get("ndx_range") or {}).get("low"), index_value))
+    worst_downside = pct_change(worst_low, index_value)
+    if expected_move >= 0 and downside_probability < 52:
+        rr_status, rr_color = "pass", "green"
+        rr_action = "情景补偿允许分批释放新增风险预算。"
+    elif expected_move >= -2.5 and downside_probability < 58:
+        rr_status, rr_color = "watch", "amber"
+        rr_action = "只在修复线和确认线配合时执行，不单独追随上涨。"
+    else:
+        rr_status, rr_color = "fail", "red"
+        rr_action = "概率加权路径不足，新增风险预算应暂停。"
+    add_gate(
+        "risk_reward",
+        "情景",
+        "风险回报",
+        rr_status,
+        rr_color,
+        f"{expected_move:+.2f}%",
+        f"下行概率 {downside_probability:.1f}%，最高概率情景 {base_case.get('name', '--')}，最差下沿 {worst_downside:.1f}%。",
+        rr_action,
+        92,
+    )
+
+    levels = recovery.get("levels") or playbook.get("levels") or []
+    level_map = {item.get("key"): item for item in levels if isinstance(item, dict)}
+    invalidation = level_map.get("invalidation", {})
+    repair = level_map.get("repair", {})
+    confirmation = level_map.get("confirmation", {})
+    invalidation_distance = safe_float(invalidation.get("distance"), pct_change(safe_float(invalidation.get("value"), 0), index_value))
+    repair_distance = safe_float(repair.get("distance"), pct_change(safe_float(repair.get("value"), 0), index_value))
+    if abs(invalidation_distance) <= 0.75:
+        trigger_status, trigger_color = "fail", "red"
+        trigger_action = "失效线过近，新增仓位必须暂停，先定义止损和保护覆盖。"
+    elif abs(invalidation_distance) <= 2 or repair_distance > 0:
+        trigger_status, trigger_color = "watch", "amber"
+        trigger_action = "等待收盘重新站上修复线，或者确认失效线没有被跌破。"
+    else:
+        trigger_status, trigger_color = "pass", "green"
+        trigger_action = "触发线距离允许使用分批执行。"
+    add_gate(
+        "trigger_lines",
+        "价格",
+        "触发线纪律",
+        trigger_status,
+        trigger_color,
+        invalidation.get("distance_label", f"{invalidation_distance:+.2f}%"),
+        f"失效线 {safe_float(invalidation.get('value'), 0):,.0f}，修复线 {safe_float(repair.get('value'), 0):,.0f}，确认线 {safe_float(confirmation.get('value'), 0):,.0f}。",
+        trigger_action,
+        90,
+    )
+
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    if regime_score >= 63:
+        regime_status, regime_color = "pass", "green"
+        regime_action = "市场状态支持保留核心暴露。"
+    elif regime_score >= 50:
+        regime_status, regime_color = "watch", "blue"
+        regime_action = "可持有核心暴露，但新增仓位等待短板改善。"
+    else:
+        regime_status, regime_color = "fail", "red"
+        regime_action = "状态罗盘不足，先降低上限而不是扩大风险。"
+    add_gate(
+        "regime",
+        "状态",
+        "市场状态罗盘",
+        regime_status,
+        regime_color,
+        f"{regime_score:.1f}",
+        regime.get("summary", "市场状态用于确认趋势、宏观、内部结构和基本面支撑。"),
+        regime_action,
+        84,
+    )
+
+    breadth_score = safe_float(breadth.get("breadth_score"), 50)
+    flow_score = safe_float(liquidity.get("flow_score"), 50)
+    participation_gap = safe_float(breadth.get("participation_gap_20d"), 0)
+    if breadth_score >= 60 and flow_score >= 50:
+        internals_status, internals_color = "pass", "green"
+        internals_action = "内部扩散和成交确认允许保留核心仓位。"
+    elif breadth_score >= 45 and flow_score >= 45:
+        internals_status, internals_color = "watch", "blue"
+        internals_action = "上涨需要成交和等权继续确认，新增资金分批。"
+    else:
+        internals_status, internals_color = "fail", "red"
+        internals_action = "内部结构不足，避免把窄幅龙头行情外推。"
+    add_gate(
+        "internals",
+        "结构",
+        "广度与流动性",
+        internals_status,
+        internals_color,
+        f"{breadth_score:.1f}/{flow_score:.1f}",
+        f"20 日参与差 {participation_gap:+.2f}%，流动性状态 {liquidity.get('regime', '--')}。",
+        internals_action,
+        78,
+    )
+
+    hedge_score = safe_float(hedge.get("hedge_score"), 50)
+    protection_lower = safe_float(hedge.get("protection_lower"), 0)
+    protection_upper = safe_float(hedge.get("protection_upper"), 0)
+    if protection_lower > 0 and hedge_score <= 55:
+        hedge_status, hedge_color = "pass", "green"
+        hedge_action = "保护覆盖充足，可按现有预算执行。"
+    elif protection_lower > 0 and hedge_score <= 70:
+        hedge_status, hedge_color = "watch", "blue"
+        hedge_action = "维持基础保护，新增仓位必须同步定义下行覆盖。"
+    else:
+        hedge_status, hedge_color = "fail", "red"
+        hedge_action = "保护不足或成本压力偏高，先补保护再扩大暴露。"
+    add_gate(
+        "hedge",
+        "组合",
+        "保护覆盖",
+        hedge_status,
+        hedge_color,
+        hedge.get("hedge_label", "--"),
+        f"建议保护 {protection_lower:.0f}% - {protection_upper:.0f}%，对冲分 {hedge_score:.1f}。",
+        hedge_action,
+        72,
+    )
+
+    nearest_days = safe_float(earnings.get("nearest_days"), 999)
+    event_weight_45d = safe_float(earnings.get("event_weight_45d"), 0)
+    if nearest_days <= 14 and event_weight_45d >= 30:
+        event_status, event_color = "fail", "red"
+        event_action = "进入财报高风险窗口，不扩大单一方向暴露。"
+    elif nearest_days <= 45 or event_weight_45d >= 50:
+        event_status, event_color = "watch", "amber"
+        event_action = "财报季预热，仓位释放要避开权重股事件集中日。"
+    else:
+        event_status, event_color = "pass", "green"
+        event_action = "事件窗口暂不限制新增风险预算。"
+    add_gate(
+        "events",
+        "事件",
+        "财报催化",
+        event_status,
+        event_color,
+        f"{earnings.get('nearest_symbol', '--')} {nearest_days:.0f}D",
+        earnings.get("summary", "财报窗口用于识别 MAG7 事件集中风险。"),
+        event_action,
+        66,
+    )
+
+    posture_color = playbook.get("posture_color", "blue")
+    playbook_score = safe_float(playbook.get("playbook_score"), 50)
+    if posture_color == "green" and playbook_score >= 62:
+        playbook_status, playbook_color = "pass", "green"
+        playbook_action = "Playbook 允许把观察动作升级为分批执行。"
+    elif posture_color in ("amber", "red") or playbook_score < 52:
+        playbook_status = "fail" if posture_color == "red" or playbook_score < 42 else "watch"
+        playbook_color = "red" if playbook_status == "fail" else "amber"
+        playbook_action = playbook.get("headline_action", "Playbook 未确认，不扩大新增风险预算。")
+    else:
+        playbook_status, playbook_color = "watch", "blue"
+        playbook_action = playbook.get("headline_action", "按 Playbook 触发条件执行。")
+    add_gate(
+        "playbook",
+        "执行",
+        "执行 Playbook",
+        playbook_status,
+        playbook_color,
+        f"{playbook_score:.1f}",
+        playbook.get("summary", "Playbook 决定账户暴露、现金缓冲和保护覆盖。"),
+        playbook_action,
+        60,
+    )
+
+    gates = sorted(gates, key=lambda item: item["priority"], reverse=True)
+    pass_count = len([gate for gate in gates if gate["status"] == "pass"])
+    watch_count = len([gate for gate in gates if gate["status"] == "watch"])
+    fail_count = len([gate for gate in gates if gate["status"] == "fail"])
+    readiness_score = round(clamp((pass_count * 100 + watch_count * 58 + fail_count * 18) / max(1, len(gates))), 1)
+
+    if fail_count >= 2:
+        headline = "暂停新增风险"
+        headline_color = "red"
+        verdict = "新增 NDX 风险预算不通过，先处理红色门槛和失效线纪律。"
+        allowed_actions = ["降低超标暴露", "维持或提高保护覆盖", "等待修复线确认"]
+        blocked_actions = ["追高加仓", "扩大集中暴露", "撤掉基础保护"]
+    elif fail_count == 1 or watch_count >= 4:
+        headline = "只允许防守观察"
+        headline_color = "amber"
+        verdict = "当前只允许观察单和再平衡动作，新增资金必须绑定触发线。"
+        allowed_actions = ["核心仓位再平衡", "触发线内分批", "保留现金缓冲"]
+        blocked_actions = ["一次性加仓", "突破追价", "忽略财报窗口"]
+    elif watch_count >= 2:
+        headline = "允许小额试单"
+        headline_color = "blue"
+        verdict = "多数门槛通过，但仍需等待确认线、预警和内部结构同步改善。"
+        allowed_actions = ["小额分批", "回踩买入", "保护同步调整"]
+        blocked_actions = ["超过目标上沿", "无止损试单", "撤保护后加仓"]
+    else:
+        headline = "允许分批执行"
+        headline_color = "green"
+        verdict = "核心门槛通过，可按预算和触发线分批释放风险。"
+        allowed_actions = ["分批加到目标区间", "确认线后提高预算", "按波动区间校准止损"]
+        blocked_actions = ["超预算集中暴露", "无保护追高", "脱离 Playbook 执行"]
+
+    next_confirmations = [
+        f"收盘站上修复线 {safe_float(repair.get('value'), 0):,.0f} 后，观察单才可升级为中性恢复。",
+        f"预警分从 {alert_score:.1f} 回落到 60 以下，新增风险预算才重新进入执行队列。",
+        f"数据健康维持 {health_score:.1f}，同时广度分 {breadth_score:.1f} 不再恶化。",
+    ]
+    if confirmation:
+        next_confirmations.append(f"站稳确认线 {safe_float(confirmation.get('value'), 0):,.0f} 后，才讨论目标区间上沿。")
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "verdict": verdict,
+        "readiness_score": readiness_score,
+        "index": round(index_value, 2),
+        "pass_count": pass_count,
+        "watch_count": watch_count,
+        "fail_count": fail_count,
+        "posture": playbook.get("posture", latest.get("status", "--")),
+        "target_exposure": playbook.get("target_exposure", {}),
+        "cash_buffer_min": safe_float(playbook.get("cash_buffer_min"), 0),
+        "hedge_coverage": playbook.get("hedge_coverage", {}),
+        "gates": gates,
+        "allowed_actions": allowed_actions,
+        "blocked_actions": blocked_actions,
+        "next_confirmations": next_confirmations[:4],
+        "methodology": "把数据质量、预警、情景风险回报、触发线、市场状态、广度流动性、保护覆盖、财报窗口和执行 Playbook 转成投前检查清单。该模块用于决定新增风险预算是否进入执行队列，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None

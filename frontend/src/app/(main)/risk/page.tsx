@@ -9,6 +9,7 @@ import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPane
 import { NDXRiskTemperatureTimelinePanel } from "@/components/NDXRiskTemperatureTimelinePanel";
 import { NDXTriggerMonitorPanel } from "@/components/NDXTriggerMonitorPanel";
 import { NDXRiskRewardPanel } from "@/components/NDXRiskRewardPanel";
+import { NDXPreTradeChecklistPanel } from "@/components/NDXPreTradeChecklistPanel";
 import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
 import { NDXModuleTrendPanel } from "@/components/NDXModuleTrendPanel";
@@ -187,6 +188,13 @@ export default function RiskPage() {
           <Icon name="lucide:scale" className="text-[var(--accent-color)]" /> NDX 风险回报框架
         </h3>
         <NDXRiskRewardPanel />
+      </section>
+
+      <section id="pre-trade-checklist-section" className="pre-trade-checklist-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:clipboard-check" className="text-[var(--accent-color)]" /> NDX 投前检查清单
+        </h3>
+        <NDXPreTradeChecklistPanel />
       </section>
 
       <section id="portfolio-actions-section" className="portfolio-actions-section">
