@@ -10727,6 +10727,222 @@ def get_risk_pre_trade_checklist():
     })
 
 
+@app.route('/api/risk/position-sizing', methods=['GET'])
+def get_risk_position_sizing():
+    latest = latest_risk_payload() or {}
+    playbook = risk_module_payload("playbook") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    volatility_cone = risk_module_payload("volatility_cone") or {}
+    budget = risk_module_payload("budget") or {}
+    hedge = risk_module_payload("hedge_overlay") or {}
+    tail = risk_module_payload("tail") or {}
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+
+    index_value = safe_float(
+        playbook.get("index"),
+        safe_float(recovery.get("index"), safe_float(latest.get("index_position"), 0))
+    )
+    target_exposure = playbook.get("target_exposure") or {}
+    if not index_value or not target_exposure:
+        return jsonify({"error": "Initializing"}), 202
+
+    target_lower = safe_float(target_exposure.get("lower"), 0)
+    target_upper = safe_float(target_exposure.get("upper"), 0)
+    cash_buffer_min = safe_float(playbook.get("cash_buffer_min"), 0)
+    max_loss_budget = safe_float(playbook.get("max_loss_budget"), 0)
+    if not max_loss_budget:
+        max_loss_budget = safe_float(budget.get("stress_downside"), 10) * max(target_upper, 1) / 100
+
+    levels = recovery.get("levels") or playbook.get("levels") or []
+    level_map = {item.get("key"): item for item in levels if isinstance(item, dict)}
+    invalidation = level_map.get("invalidation", {})
+    repair = level_map.get("repair", {})
+    confirmation = level_map.get("confirmation", {})
+    stress = level_map.get("stress", {})
+    invalidation_loss = abs(safe_float(invalidation.get("distance"), pct_change(safe_float(invalidation.get("value"), 0), index_value)))
+    repair_distance = safe_float(repair.get("distance"), pct_change(safe_float(repair.get("value"), 0), index_value))
+    stress_downside = abs(safe_float(recovery.get("stress_downside"), safe_float(playbook.get("stress_downside"), safe_float(budget.get("stress_downside"), 0))))
+
+    ranges = volatility_cone.get("ranges") or []
+    range_map = {item.get("key"): item for item in ranges if isinstance(item, dict)}
+    one_day_sigma = safe_float((range_map.get("1d") or {}).get("one_sigma_pct"), 0)
+    five_day_sigma = safe_float((range_map.get("5d") or {}).get("one_sigma_pct"), 0)
+    ten_day_sigma = safe_float((range_map.get("10d") or {}).get("one_sigma_pct"), 0)
+    var95 = abs(safe_float(tail.get("var95"), 0))
+    expected_shortfall = abs(safe_float(tail.get("expected_shortfall_95"), 0))
+    alert_score = safe_float(alerts.get("alert_score"), 50)
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    protection_lower = safe_float(hedge.get("protection_lower"), 0)
+    protection_upper = safe_float(hedge.get("protection_upper"), 0)
+
+    def exposure_cap(loss_pct, label, source, tone):
+        loss_pct = abs(safe_float(loss_pct, 0))
+        if loss_pct <= 0:
+            cap = target_upper or 0
+        else:
+            cap = max_loss_budget / loss_pct * 100
+        return {
+            "key": source,
+            "label": label,
+            "loss_pct": round(loss_pct, 2),
+            "max_exposure": round(clamp(cap, 0, 100), 1),
+            "raw_exposure": round(cap, 1),
+            "tone": tone,
+            "detail": f"若损失尺度为 {loss_pct:.2f}%，用 {max_loss_budget:.1f}% 组合损失预算倒推。",
+        }
+
+    constraints = [
+        exposure_cap(stress_downside, "压力回撤约束", "stress", "red"),
+        exposure_cap(invalidation_loss, "失效线约束", "invalidation", "amber"),
+        exposure_cap(five_day_sigma, "5D 波动约束", "vol_5d", "blue"),
+        exposure_cap(var95, "单日 VaR 约束", "var95", "blue"),
+        {
+            "key": "cash",
+            "label": "现金缓冲约束",
+            "loss_pct": 0,
+            "max_exposure": round(clamp(100 - cash_buffer_min, 0, 100), 1),
+            "raw_exposure": round(100 - cash_buffer_min, 1),
+            "tone": "green" if cash_buffer_min <= 45 else "amber",
+            "detail": f"现金缓冲至少 {cash_buffer_min:.0f}%+，组合总 NDX 暴露不可穿透现金下限。",
+        },
+        {
+            "key": "target",
+            "label": "Playbook 目标上沿",
+            "loss_pct": 0,
+            "max_exposure": round(clamp(target_upper, 0, 100), 1),
+            "raw_exposure": round(target_upper, 1),
+            "tone": playbook.get("posture_color", "blue"),
+            "detail": f"当前 Playbook 目标暴露 {target_exposure.get('label', '--')}。",
+        },
+    ]
+    binding = min(constraints, key=lambda item: item["max_exposure"])
+    hard_cap = round(binding["max_exposure"], 1)
+    current_floor = round(min(target_lower, hard_cap), 1)
+
+    if alert_score >= 75 or repair_distance > 0 or invalidation_loss <= 2:
+        tranche_multiplier = 0.18
+        headline = "单笔仓位从严"
+        headline_color = "amber"
+        stance = "失效线或预警仍在约束新增风险，单笔只能用小 tranche，并且必须绑定收盘确认。"
+    elif regime_score >= 63 and alert_score < 60:
+        tranche_multiplier = 0.34
+        headline = "允许分批 sizing"
+        headline_color = "green"
+        stance = "状态和预警允许按预算分批释放仓位，但仍需遵守压力回撤上限。"
+    else:
+        tranche_multiplier = 0.25
+        headline = "中性 sizing"
+        headline_color = "blue"
+        stance = "仓位 sizing 接近中性，新增风险应拆分而不是一次性释放。"
+
+    max_single_tranche = round(max(1, min(8, hard_cap * tranche_multiplier)), 1)
+    initial_tranche = round(max(1, min(max_single_tranche, max(0, hard_cap - target_lower) * 0.35)), 1)
+    if hard_cap <= target_lower:
+        initial_tranche = 0
+        max_single_tranche = 0
+        headline = "不应新增仓位"
+        headline_color = "red"
+        stance = "硬约束已经低于目标区间下沿，当前只允许再平衡或降低超标暴露。"
+
+    profiles = [
+        {
+            "key": "defensive",
+            "name": "防守账户",
+            "color": "green" if hard_cap >= target_lower else "amber",
+            "max_total_exposure": round(min(hard_cap, max(target_lower, 0)), 1),
+            "single_tranche": round(min(initial_tranche, 2.5), 1),
+            "cash_buffer": f"{max(cash_buffer_min, 100 - min(hard_cap, max(target_lower, 0))):.0f}%+",
+            "rule": "只保留核心暴露，新增资金等待修复线和预警缓和。",
+        },
+        {
+            "key": "core",
+            "name": "核心账户",
+            "color": headline_color if headline_color != "red" else "amber",
+            "max_total_exposure": hard_cap,
+            "single_tranche": max_single_tranche,
+            "cash_buffer": f"{cash_buffer_min:.0f}%+",
+            "rule": "围绕目标区间分批，任何新增都绑定失效线和保护覆盖。",
+        },
+        {
+            "key": "opportunistic",
+            "name": "机会账户",
+            "color": "green" if headline_color == "green" else "amber" if headline_color == "blue" else "red",
+            "max_total_exposure": round(hard_cap if headline_color == "green" else min(hard_cap, target_lower + max_single_tranche), 1),
+            "single_tranche": round(max_single_tranche if headline_color == "green" else min(max_single_tranche, 2.5), 1),
+            "cash_buffer": f"{cash_buffer_min:.0f}%+",
+            "rule": "只有确认线、广度和预警同步改善时才允许使用机会预算。",
+        },
+    ]
+
+    sizing_ladder = [
+        {
+            "key": "observe",
+            "label": "观察单",
+            "trigger": f"NDX 未跌破失效线 {safe_float(invalidation.get('value'), 0):,.0f}，但仍低于修复线。",
+            "size": f"{initial_tranche:.1f}%" if initial_tranche else "0%",
+            "color": "amber",
+            "action": "只用于测试流动性和执行质量，不视为趋势确认。",
+        },
+        {
+            "key": "repair",
+            "label": "修复加仓",
+            "trigger": f"收盘站上修复线 {safe_float(repair.get('value'), 0):,.0f}，且预警分低于 60。",
+            "size": f"{max_single_tranche:.1f}%",
+            "color": "blue",
+            "action": "把暴露恢复到目标区间中枢，继续保留保护覆盖。",
+        },
+        {
+            "key": "confirmation",
+            "label": "确认加仓",
+            "trigger": f"站稳确认线 {safe_float(confirmation.get('value'), 0):,.0f}，广度和成交确认不恶化。",
+            "size": f"{min(max_single_tranche * 1.2, 10):.1f}%",
+            "color": "green",
+            "action": "只在总暴露低于硬上限时，把预算推向目标区间上沿。",
+        },
+        {
+            "key": "stop",
+            "label": "失效降档",
+            "trigger": f"收盘跌破失效线 {safe_float(invalidation.get('value'), 0):,.0f}。",
+            "size": f"-{max_single_tranche:.1f}%+",
+            "color": "red",
+            "action": "降低新增仓位和超标核心暴露，保护覆盖向上沿靠拢。",
+        },
+    ]
+
+    risk_metrics = [
+        {"label": "压力回撤", "value": f"{stress_downside:.1f}%", "tone": "red", "detail": "用于硬约束总暴露上限。"},
+        {"label": "失效距离", "value": f"{invalidation_loss:.2f}%", "tone": "amber", "detail": "用于单笔止损和降档触发。"},
+        {"label": "5D 1σ", "value": f"{five_day_sigma:.2f}%", "tone": "blue", "detail": "用于短线波动仓位校准。"},
+        {"label": "VaR 95", "value": f"{var95:.2f}%", "tone": "blue", "detail": "用于常规尾部预算。"},
+        {"label": "ES 95", "value": f"{expected_shortfall:.2f}%", "tone": "red", "detail": "用于更严格损失估计。"},
+        {"label": "保护覆盖", "value": f"{protection_lower:.0f}-{protection_upper:.0f}%", "tone": hedge.get("hedge_color", "blue"), "detail": hedge.get("hedge_label", "--")},
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "stance": stance,
+        "index": round(index_value, 2),
+        "target_exposure": target_exposure,
+        "cash_buffer_min": round(cash_buffer_min, 1),
+        "max_loss_budget": round(max_loss_budget, 1),
+        "hard_cap": hard_cap,
+        "current_floor": current_floor,
+        "binding_constraint": binding,
+        "max_single_tranche": max_single_tranche,
+        "initial_tranche": initial_tranche,
+        "one_day_sigma": round(one_day_sigma, 2),
+        "ten_day_sigma": round(ten_day_sigma, 2),
+        "constraints": sorted(constraints, key=lambda item: item["max_exposure"]),
+        "profiles": profiles,
+        "sizing_ladder": sizing_ladder,
+        "risk_metrics": risk_metrics,
+        "methodology": "用最大组合损失预算分别除以压力回撤、失效线距离、波动区间和历史尾部损失，再叠加现金缓冲、Playbook 目标上沿、保护覆盖和预警状态，倒推出 NDX 总暴露硬上限与单笔 tranche。该模块用于仓位预算和风控校准，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
