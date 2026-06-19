@@ -5,6 +5,7 @@ import { NDXLazyRiskPanel } from "@/components/NDXLazyRiskPanel";
 import { NDXRiskSectionNavigator } from "@/components/NDXRiskSectionNavigator";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
+import { NDXThesisMonitorPanel } from "@/components/NDXThesisMonitorPanel";
 import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPanel";
 import { NDXRiskTemperatureTimelinePanel } from "@/components/NDXRiskTemperatureTimelinePanel";
 import { NDXTriggerMonitorPanel } from "@/components/NDXTriggerMonitorPanel";
@@ -163,6 +164,13 @@ export default function RiskPage() {
           <Icon name="lucide:list-checks" className="text-[var(--accent-color)]" /> NDX 关键看点
         </h3>
         <NDXKeyTakeawaysPanel />
+      </section>
+
+      <section id="thesis-monitor-section" className="thesis-monitor-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:book-open-check" className="text-[var(--accent-color)]" /> NDX 投资论点监控
+        </h3>
+        <NDXThesisMonitorPanel />
       </section>
 
       <section id="change-attribution-section" className="change-attribution-section">

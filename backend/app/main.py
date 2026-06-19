@@ -11415,6 +11415,267 @@ def get_risk_register():
     })
 
 
+@app.route('/api/risk/thesis-monitor', methods=['GET'])
+def get_risk_thesis_monitor():
+    regime = risk_module_payload("regime_compass") or {}
+    contribution = risk_module_payload("contribution") or {}
+    valuation = risk_module_payload("valuation") or {}
+    quality = risk_module_payload("quality") or {}
+    earnings = risk_module_payload("earnings") or {}
+    liquidity = risk_module_payload("liquidity") or {}
+    concentration = risk_module_payload("concentration") or {}
+    option_skew = risk_module_payload("option_skew") or {}
+    gamma = risk_module_payload("gamma_map") or {}
+    playbook = risk_module_payload("playbook") or {}
+    trigger = route_json_payload(get_risk_trigger_monitor()) or {}
+    risk_reward = route_json_payload(get_risk_reward_framework()) or {}
+    register = route_json_payload(get_risk_register()) or {}
+
+    if not regime and not risk_reward:
+        return jsonify({"error": "Initializing"}), 202
+
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    support_score = safe_float(regime.get("support_score"), 50)
+    pressure_score = safe_float(regime.get("pressure_score"), 50)
+    net_pressure = safe_float(contribution.get("net_pressure"), 0)
+    reward_to_risk = safe_float(risk_reward.get("reward_to_risk"), 0.5)
+    expected_move = safe_float(risk_reward.get("expected_move"), 0)
+    downside_probability = safe_float(risk_reward.get("downside_probability"), 50)
+    register_score = safe_float(register.get("register_score"), 50)
+    quality_score = safe_float(quality.get("quality_score"), 50)
+    valuation_score = safe_float(valuation.get("valuation_score"), 50)
+    event_score = safe_float(earnings.get("event_score"), 50)
+    flow_score = safe_float(liquidity.get("flow_score"), 50)
+    skew_score = safe_float(option_skew.get("skew_score"), 50)
+    gamma_score = safe_float(gamma.get("gamma_score"), 50)
+
+    conviction_score = clamp(
+        50
+        + (regime_score - 50) * 0.45
+        + (quality_score - 50) * 0.22
+        + (flow_score - 50) * 0.16
+        - max(net_pressure, 0) * 1.1
+        - max(register_score - 50, 0) * 0.42
+        - max(skew_score - 70, 0) * 0.18
+        + expected_move * 2.2
+        + (reward_to_risk - 0.5) * 9,
+        0,
+        100,
+    )
+
+    if conviction_score >= 66 and reward_to_risk >= 0.8:
+        headline = "进攻论点需要确认"
+        headline_color = "green"
+        primary_thesis = "趋势延续"
+    elif conviction_score >= 54:
+        headline = "核心持有论点仍成立"
+        headline_color = "blue"
+        primary_thesis = "防守持有"
+    elif register_score >= 58 or net_pressure >= 7:
+        headline = "论点转向防守验证"
+        headline_color = "amber"
+        primary_thesis = "降档观察"
+    else:
+        headline = "等待新证据"
+        headline_color = "amber"
+        primary_thesis = "中性观察"
+
+    nearest_down = trigger.get("nearest_down") or {}
+    nearest_up = trigger.get("nearest_up") or {}
+    confirmation = (risk_reward.get("levels") or {}).get("confirmation") or nearest_up
+    invalidation = (risk_reward.get("levels") or {}).get("invalidation") or nearest_down
+    bull_case = risk_reward.get("bull_case") or {}
+    base_case = risk_reward.get("base_case") or {}
+    bear_case = risk_reward.get("bear_case") or {}
+    top_risk = register.get("top_risk") or {}
+
+    top_supports = contribution.get("top_supports") or []
+    top_pressures = contribution.get("top_pressures") or []
+    strongest_axes = regime.get("strongest_axes") or []
+    weakest_axes = regime.get("weakest_axes") or []
+
+    supports = [
+        {
+            "label": "市场状态",
+            "color": regime.get("regime_color", "blue"),
+            "value": f"{regime.get('regime', '--')} {regime_score:.1f}",
+            "detail": regime.get("summary", "市场状态罗盘用于判断趋势、宏观、内部结构和基本面支撑。"),
+        },
+        {
+            "label": "盈利质量",
+            "color": quality.get("quality_color", "blue"),
+            "value": f"{quality.get('quality_label', '--')} {quality_score:.1f}",
+            "detail": quality.get("summary", "MAG7 盈利质量用于判断估值溢价是否有基本面支撑。"),
+        },
+        {
+            "label": "估值支撑",
+            "color": valuation.get("valuation_color", "blue"),
+            "value": f"{valuation.get('valuation_label', '--')} {valuation_score:.1f}",
+            "detail": valuation.get("summary", "估值压力用于约束长期回报假设。"),
+        },
+    ]
+    if top_supports:
+        supports.append({
+            "label": top_supports[0].get("label", "主要支撑"),
+            "color": top_supports[0].get("color", "blue"),
+            "value": f"{safe_float(top_supports[0].get('signed_impact'), 0):+.1f}",
+            "detail": top_supports[0].get("evidence", "贡献拆解显示存在支撑项。"),
+        })
+
+    contradictions = [
+        {
+            "label": "风险登记",
+            "color": register.get("headline_color", "amber"),
+            "value": f"{register.get('headline', '--')} {register_score:.1f}",
+            "detail": top_risk.get("evidence", register.get("methodology", "风险登记簿显示需要跟踪的反证。")),
+        },
+        {
+            "label": "风险回报",
+            "color": risk_reward.get("headline_color", "amber"),
+            "value": f"R/R {reward_to_risk:.2f}",
+            "detail": risk_reward.get("stance", "风险回报框架用于比较上行补偿和下行风险。"),
+        },
+        {
+            "label": "期权压力",
+            "color": option_skew.get("regime_color", "amber"),
+            "value": f"{option_skew.get('regime', '--')} {skew_score:.1f}",
+            "detail": option_skew.get("summary", "期权偏斜用于识别保护需求是否拥挤。"),
+        },
+    ]
+    if top_pressures:
+        contradictions.append({
+            "label": top_pressures[0].get("label", "主要压力"),
+            "color": top_pressures[0].get("color", "amber"),
+            "value": f"{safe_float(top_pressures[0].get('signed_impact'), 0):+.1f}",
+            "detail": top_pressures[0].get("evidence", "贡献拆解显示压力项占优。"),
+        })
+
+    def thesis_row(key, title, color, probability, score, evidence, risk, action, trigger_text):
+        return {
+            "key": key,
+            "title": title,
+            "color": color,
+            "probability": round(clamp(safe_float(probability, 0), 0, 100), 1),
+            "score": round(clamp(safe_float(score, 0), 0, 100), 1),
+            "evidence": evidence,
+            "risk": risk,
+            "action": action,
+            "trigger": trigger_text,
+        }
+
+    theses = [
+        thesis_row(
+            "bull",
+            bull_case.get("name", "趋势延续 / 广度修复"),
+            bull_case.get("color", "green"),
+            bull_case.get("probability_pct", max(15, support_score - pressure_score + 30)),
+            support_score + max(0, reward_to_risk - 0.5) * 12,
+            bull_case.get("rationale", "趋势结构和盈利质量提供上行论点，但需要广度和触发线确认。"),
+            f"主要反证：{top_risk.get('title', '风险登记项升温')}。",
+            f"站上 {confirmation.get('label', '确认线')} 后，才把新增风险预算升级到 Playbook 目标中枢。",
+            confirmation.get("trigger", f"NDX 收盘站上 {safe_float(confirmation.get('value'), 0):,.0f}。"),
+        ),
+        thesis_row(
+            "base",
+            base_case.get("name", "防守持有 / 区间延续"),
+            base_case.get("color", "blue"),
+            base_case.get("probability_pct", 35),
+            conviction_score,
+            base_case.get("rationale", regime.get("summary", "基准论点是保留核心暴露，但避免追高。")),
+            f"净压力 {net_pressure:+.1f}，风险登记分 {register_score:.1f}。",
+            playbook.get("headline_action", "保留核心暴露，把新增资金放在确认后执行。"),
+            nearest_up.get("trigger", "等待修复线、预警分和量价确认同步改善。"),
+        ),
+        thesis_row(
+            "bear",
+            bear_case.get("name", "失效降档 / 波动冲击"),
+            bear_case.get("color", "amber"),
+            max(bear_case.get("probability_pct", 0), downside_probability * 0.45),
+            max(register_score, pressure_score, skew_score * 0.8, gamma_score * 0.75),
+            bear_case.get("rationale", "期权、风险登记和净压力决定下行论点是否升级。"),
+            f"失效线 {safe_float(invalidation.get('value'), 0):,.0f}，距离 {invalidation.get('distance_label', '--')}。",
+            invalidation.get("action", "跌破失效线后降低新增仓位并提高保护覆盖。"),
+            invalidation.get("trigger", f"NDX 收盘跌破 {safe_float(invalidation.get('value'), 0):,.0f}。"),
+        ),
+    ]
+
+    catalysts = [
+        {
+            "label": "上行确认",
+            "color": confirmation.get("color", "green"),
+            "value": f"{safe_float(confirmation.get('value'), 0):,.0f}",
+            "detail": confirmation.get("usage", confirmation.get("trigger", "确认线用于升级新增风险预算。")),
+        },
+        {
+            "label": "失效降档",
+            "color": invalidation.get("color", "amber"),
+            "value": f"{safe_float(invalidation.get('value'), 0):,.0f}",
+            "detail": invalidation.get("usage", invalidation.get("trigger", "失效线用于触发降档。")),
+        },
+        {
+            "label": "财报窗口",
+            "color": earnings.get("event_color", "amber"),
+            "value": f"{earnings.get('nearest_symbol', '--')} {safe_float(earnings.get('nearest_days'), 0):.0f}天",
+            "detail": earnings.get("summary", "财报窗口用于识别基本面催化。"),
+        },
+        {
+            "label": "Gamma 位置",
+            "color": gamma.get("regime_color", "amber"),
+            "value": gamma.get("regime", "--"),
+            "detail": gamma.get("summary", "Gamma 定位用于识别短线波动放大或钉住风险。"),
+        },
+    ]
+
+    decision_gates = [
+        {
+            "label": "提高论点置信",
+            "color": "green",
+            "trigger": f"站稳 {safe_float(confirmation.get('value'), 0):,.0f}，风险登记分低于 52，净压力降到 +5 以下。",
+            "action": "把观察仓位升级为核心仓位，但总暴露不突破 Playbook 上沿。",
+        },
+        {
+            "label": "维持防守持有",
+            "color": "blue",
+            "trigger": f"NDX 位于 {safe_float(invalidation.get('value'), 0):,.0f} 与 {safe_float(confirmation.get('value'), 0):,.0f} 之间。",
+            "action": playbook.get("headline_action", "保留核心暴露，新增资金等待确认。"),
+        },
+        {
+            "label": "降低论点置信",
+            "color": "red" if register_score >= 60 else "amber",
+            "trigger": invalidation.get("trigger", f"跌破 {safe_float(invalidation.get('value'), 0):,.0f} 或风险登记继续升温。"),
+            "action": invalidation.get("action", "降低新增仓位，提高现金缓冲和保护覆盖。"),
+        },
+    ]
+
+    watchlist = [
+        f"最强状态轴：{(strongest_axes[0] if strongest_axes else {}).get('label', '--')}；最弱状态轴：{(weakest_axes[0] if weakest_axes else {}).get('label', '--')}。",
+        f"估值/质量：Forward PE {safe_float(valuation.get('weighted_forward_pe'), 0):.1f}x，质量分 {quality_score:.1f}。",
+        f"流动性：{liquidity.get('regime', '--')}，资金流分 {flow_score:.1f}，派发天数 {liquidity.get('distribution_days', 0)}。",
+        f"集中度：Top3 权重 {safe_float(concentration.get('top3_weight'), 0):.1f}%，龙头 {concentration.get('top1_symbol', '--')}。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "primary_thesis": primary_thesis,
+        "conviction_score": round(conviction_score, 1),
+        "regime": regime.get("regime", "--"),
+        "playbook_posture": playbook.get("posture", "--"),
+        "risk_reward": round(reward_to_risk, 2),
+        "expected_move": round(expected_move, 2),
+        "register_score": round(register_score, 1),
+        "net_pressure": round(net_pressure, 1),
+        "theses": theses,
+        "supports": supports,
+        "contradictions": contradictions,
+        "catalysts": catalysts,
+        "decision_gates": decision_gates,
+        "watchlist": watchlist,
+        "methodology": "投资论点监控把市场状态罗盘、贡献拆解、风险回报、估值质量、财报窗口、流动性、集中度、期权压力、Gamma、触发线、Playbook 和风险登记簿聚合成 Bull/Base/Bear 三套可验证论点。该模块用于研究阅读、投委会讨论和风控复盘，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
