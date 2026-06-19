@@ -1,10 +1,11 @@
 module.exports = {
   apps: [
     {
-      name: "investcool-backend",
-      script: "./backend/venv/bin/gunicorn",
-      args: "-w 2 -b 127.0.0.1:5000 --chdir ./backend/app main:app",
-      interpreter: "python3",
+      name: "backend-real",
+      script: "/usr/bin/bash",
+      args: "-c \"gunicorn -w 2 -b 0.0.0.0:5000 --timeout 90 --graceful-timeout 30 main:app\"",
+      cwd: "./backend/app",
+      interpreter: "none",
       env: {
         NODE_ENV: "production",
         ADMIN_TOKEN: process.env.ADMIN_TOKEN

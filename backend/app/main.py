@@ -8922,20 +8922,89 @@ def background_worker():
         time.sleep(60) 
 
 # Routes
-@app.route('/api/risk/latest', methods=['GET'])
-def get_risk_latest():
-    global risk_latest_cache
-    # Serve from memory cache for maximum concurrency
+def latest_risk_payload():
     if risk_latest_cache["data"] and risk_latest_cache["data"].get("status") in RISK_BRIEF_STATUSES:
-        return jsonify(risk_latest_cache["data"])
-    
-    # Lazy init cache from DB if memory is empty
+        return risk_latest_cache["data"]
+
     rec = RiskBrief.query.filter(RiskBrief.status.in_(RISK_BRIEF_STATUSES)).order_by(RiskBrief.created_at.desc()).first()
     if rec:
         risk_latest_cache["data"] = rec.to_dict()
         risk_latest_cache["last_update"] = datetime.utcnow()
-        return jsonify(risk_latest_cache["data"])
-        
+        return risk_latest_cache["data"]
+    return None
+
+
+def serve_cached_risk_module(cache, refresh_fn=None, ttl=15 * 60, empty_refresh_interval=60):
+    data = cache.get("data")
+    if cache_is_fresh(cache, ttl) and data:
+        return jsonify(data)
+
+    if data:
+        return jsonify(data)
+
+    if refresh_fn and should_refresh_empty_cache(cache, empty_refresh_interval):
+        refresh_fn(allow_dependency_refresh=False)
+
+    data = cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+
+@app.route('/api/risk/dashboard', methods=['GET'])
+def get_risk_dashboard():
+    modules = {
+        "latest": latest_risk_payload(),
+        "diagnostics": risk_diagnostics_cache.get("data"),
+        "regimeCompass": risk_regime_compass_cache.get("data"),
+        "alerts": risk_alerts_cache.get("data"),
+        "contribution": risk_contribution_cache.get("data"),
+        "capacity": risk_capacity_cache.get("data"),
+        "playbook": risk_playbook_cache.get("data"),
+        "regimeAnalog": risk_regime_analog_cache.get("data"),
+        "deskBrief": risk_desk_brief_cache.get("data"),
+        "factors": risk_factors_cache.get("data"),
+        "rateSensitivity": risk_rate_sensitivity_cache.get("data"),
+        "conditionMatrix": risk_condition_matrix_cache.get("data"),
+        "funding": risk_funding_conditions_cache.get("data"),
+        "crossAsset": risk_cross_asset_cache.get("data"),
+        "attribution": risk_factor_attribution_cache.get("data"),
+        "factorShock": risk_factor_shock_cache.get("data"),
+        "breadth": risk_breadth_cache.get("data"),
+        "themeRotation": risk_theme_rotation_cache.get("data"),
+        "correlationStress": risk_correlation_stress_cache.get("data"),
+        "liquidity": risk_liquidity_cache.get("data"),
+        "valuation": risk_valuation_cache.get("data"),
+        "quality": risk_quality_cache.get("data"),
+        "earnings": risk_earnings_cache.get("data"),
+        "options": risk_options_cache.get("data"),
+        "gammaMap": risk_gamma_map_cache.get("data"),
+        "optionSkew": risk_option_skew_cache.get("data"),
+        "volPremium": risk_vol_premium_cache.get("data"),
+        "volatilityCone": risk_volatility_cone_cache.get("data"),
+        "intradayTape": risk_intraday_tape_cache.get("data"),
+        "volumeProfile": risk_volume_profile_cache.get("data"),
+        "volatilityTerm": risk_volatility_term_cache.get("data"),
+        "hedgeOverlay": risk_hedge_overlay_cache.get("data"),
+        "recoveryPath": risk_recovery_path_cache.get("data"),
+        "tail": risk_tail_cache.get("data"),
+        "concentration": risk_concentration_cache.get("data"),
+    }
+    available = sum(1 for value in modules.values() if value)
+    total_modules = len(modules)
+    modules["as_of"] = datetime.utcnow().isoformat()
+    modules["data_coverage"] = f"{available}/{total_modules} 模块"
+    modules["available_modules"] = available
+    modules["total_modules"] = total_modules
+    return jsonify(modules)
+
+
+@app.route('/api/risk/latest', methods=['GET'])
+def get_risk_latest():
+    global risk_latest_cache
+
+    data = latest_risk_payload()
+    if data:
+        return jsonify(data)
+
     return jsonify({"error": "No recommendations yet"}), 202
 
 @app.route('/api/risk/history', methods=['GET'])
@@ -9040,59 +9109,31 @@ def get_risk_cross_asset():
 
 @app.route('/api/risk/regime-compass', methods=['GET'])
 def get_risk_regime_compass():
-    if not cache_is_fresh(risk_regime_compass_cache, 15 * 60) and should_refresh_empty_cache(risk_regime_compass_cache, 60):
-        refresh_regime_compass_data(allow_dependency_refresh="light")
-
-    data = risk_regime_compass_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_regime_compass_cache, refresh_regime_compass_data)
 
 @app.route('/api/risk/alerts', methods=['GET'])
 def get_risk_alerts():
-    if not cache_is_fresh(risk_alerts_cache, 15 * 60) and should_refresh_empty_cache(risk_alerts_cache, 60):
-        refresh_alerts_data(allow_dependency_refresh="light")
-
-    data = risk_alerts_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_alerts_cache, refresh_alerts_data)
 
 @app.route('/api/risk/scenario-map', methods=['GET'])
 def get_risk_scenario_map():
-    if not cache_is_fresh(risk_scenario_map_cache, 15 * 60) and should_refresh_empty_cache(risk_scenario_map_cache, 60):
-        refresh_scenario_map_data(allow_dependency_refresh="light")
-
-    data = risk_scenario_map_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_scenario_map_cache, refresh_scenario_map_data)
 
 @app.route('/api/risk/recovery-path', methods=['GET'])
 def get_risk_recovery_path():
-    if not cache_is_fresh(risk_recovery_path_cache, 15 * 60) and should_refresh_empty_cache(risk_recovery_path_cache, 60):
-        refresh_recovery_path_data(allow_dependency_refresh="light")
-
-    data = risk_recovery_path_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_recovery_path_cache, refresh_recovery_path_data)
 
 @app.route('/api/risk/contribution', methods=['GET'])
 def get_risk_contribution():
-    if not cache_is_fresh(risk_contribution_cache, 15 * 60) and should_refresh_empty_cache(risk_contribution_cache, 60):
-        refresh_contribution_data(allow_dependency_refresh="light")
-
-    data = risk_contribution_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_contribution_cache, refresh_contribution_data)
 
 @app.route('/api/risk/capacity', methods=['GET'])
 def get_risk_capacity():
-    if not cache_is_fresh(risk_capacity_cache, 15 * 60) and should_refresh_empty_cache(risk_capacity_cache, 60):
-        refresh_capacity_data(allow_dependency_refresh="light")
-
-    data = risk_capacity_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_capacity_cache, refresh_capacity_data)
 
 @app.route('/api/risk/playbook', methods=['GET'])
 def get_risk_playbook():
-    if not cache_is_fresh(risk_playbook_cache, 15 * 60) and should_refresh_empty_cache(risk_playbook_cache, 60):
-        refresh_playbook_data(allow_dependency_refresh="light")
-
-    data = risk_playbook_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_playbook_cache, refresh_playbook_data)
 
 @app.route('/api/risk/regime-analog', methods=['GET'])
 def get_risk_regime_analog():
@@ -9104,19 +9145,11 @@ def get_risk_regime_analog():
 
 @app.route('/api/risk/desk-brief', methods=['GET'])
 def get_risk_desk_brief():
-    if not cache_is_fresh(risk_desk_brief_cache, 15 * 60) and should_refresh_empty_cache(risk_desk_brief_cache, 60):
-        refresh_desk_brief_data(allow_dependency_refresh="light")
-
-    data = risk_desk_brief_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_desk_brief_cache, refresh_desk_brief_data)
 
 @app.route('/api/risk/rate-sensitivity', methods=['GET'])
 def get_risk_rate_sensitivity():
-    if not cache_is_fresh(risk_rate_sensitivity_cache, 15 * 60) and should_refresh_empty_cache(risk_rate_sensitivity_cache, 60):
-        refresh_rate_sensitivity_data(allow_dependency_refresh="light")
-
-    data = risk_rate_sensitivity_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_cached_risk_module(risk_rate_sensitivity_cache, refresh_rate_sensitivity_data)
 
 @app.route('/api/risk/levels', methods=['GET'])
 def get_risk_levels():

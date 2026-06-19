@@ -313,6 +313,8 @@ interface ConcentrationPayload {
 }
 
 interface DashboardData {
+  available_modules?: number;
+  total_modules?: number;
   latest: LatestPayload | null;
   diagnostics: DiagnosticsPayload | null;
   regimeCompass: RegimeCompassPayload | null;
@@ -385,35 +387,6 @@ const colorMap = {
   },
 };
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
-const fetchJson = async <T,>(path: string, timeoutMs = 12000): Promise<T | null> => {
-  const requestOnce = async () => {
-    const response = await fetch(path);
-    const payload = await response.json();
-    return response.ok && !payload.error ? payload as T : null;
-  };
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    const timeout = new Promise<null>((resolve) => {
-      window.setTimeout(() => resolve(null), timeoutMs);
-    });
-
-    try {
-      const result = await Promise.race([requestOnce(), timeout]);
-      if (result) return result;
-    } catch {
-      // Retry once below; cold PM2 reloads can return 202 while caches initialize.
-    }
-
-    if (attempt === 0) {
-      await sleep(2500);
-    }
-  }
-
-  return null;
-};
-
 const scoreColor = (score: number, inverse = false): ColorKey => {
   if (inverse) {
     if (score >= 75) return "red";
@@ -466,93 +439,39 @@ export const NDXSignalDashboardPanel = () => {
   const [pending, setPending] = useState(true);
 
   useEffect(() => {
-    const fetchDashboard = async () => {
-      setPending(true);
-      try {
-        const [
-          latest,
-          diagnostics,
-          regimeCompass,
-          alerts,
-          contribution,
-          capacity,
-          playbook,
-          regimeAnalog,
-          deskBrief,
-          factors,
-          rateSensitivity,
-          conditionMatrix,
-          funding,
-          crossAsset,
-          attribution,
-          factorShock,
-          breadth,
-          themeRotation,
-          correlationStress,
-          liquidity,
-          valuation,
-          quality,
-          earnings,
-          options,
-          gammaMap,
-          optionSkew,
-          volPremium,
-          volatilityCone,
-          intradayTape,
-          volumeProfile,
-          volatilityTerm,
-          hedgeOverlay,
-          recoveryPath,
-          tail,
-          concentration,
-        ] = await Promise.all([
-          fetchJson<LatestPayload>("/api/risk/latest"),
-          fetchJson<DiagnosticsPayload>("/api/risk/diagnostics"),
-          fetchJson<RegimeCompassPayload>("/api/risk/regime-compass"),
-          fetchJson<AlertsPayload>("/api/risk/alerts"),
-          fetchJson<ContributionPayload>("/api/risk/contribution"),
-          fetchJson<CapacityPayload>("/api/risk/capacity"),
-          fetchJson<PlaybookPayload>("/api/risk/playbook", 15000),
-          fetchJson<RegimeAnalogPayload>("/api/risk/regime-analog", 15000),
-          fetchJson<DeskBriefPayload>("/api/risk/desk-brief", 15000),
-          fetchJson<FactorPayload>("/api/risk/factors"),
-          fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
-          fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
-          fetchJson<FundingPayload>("/api/risk/funding-conditions"),
-          fetchJson<CrossAssetPayload>("/api/risk/cross-asset"),
-          fetchJson<AttributionPayload>("/api/risk/attribution"),
-          fetchJson<FactorShockPayload>("/api/risk/factor-shock", 15000),
-          fetchJson<BreadthPayload>("/api/risk/breadth"),
-          fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
-          fetchJson<CorrelationStressPayload>("/api/risk/correlation-stress", 15000),
-          fetchJson<LiquidityPayload>("/api/risk/liquidity"),
-          fetchJson<ValuationPayload>("/api/risk/valuation"),
-          fetchJson<QualityPayload>("/api/risk/quality"),
-          fetchJson<EarningsPayload>("/api/risk/earnings"),
-          fetchJson<OptionsPayload>("/api/risk/options"),
-          fetchJson<GammaMapPayload>("/api/risk/gamma-map", 15000),
-          fetchJson<OptionSkewPayload>("/api/risk/option-skew", 15000),
-          fetchJson<VolPremiumPayload>("/api/risk/vol-premium"),
-          fetchJson<VolatilityConePayload>("/api/risk/volatility-cone", 15000),
-          fetchJson<IntradayTapePayload>("/api/risk/intraday-tape", 15000),
-          fetchJson<VolumeProfilePayload>("/api/risk/volume-profile", 15000),
-          fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
-          fetchJson<HedgeOverlayPayload>("/api/risk/hedge-overlay"),
-          fetchJson<RecoveryPathPayload>("/api/risk/recovery-path"),
-          fetchJson<TailPayload>("/api/risk/tail"),
-          fetchJson<ConcentrationPayload>("/api/risk/concentration"),
-        ]);
+    let cancelled = false;
+    let retryTimer: number | null = null;
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, regimeAnalog, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, factorShock, breadth, themeRotation, correlationStress, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, volatilityCone, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+    const fetchDashboard = async (attempt = 0) => {
+      if (attempt === 0) setPending(true);
+      try {
+        const controller = new AbortController();
+        const timeout = window.setTimeout(() => controller.abort(), 15000);
+        const response = await fetch("/api/risk/dashboard", { signal: controller.signal });
+        window.clearTimeout(timeout);
+        const payload = await response.json();
+        if (cancelled) return;
+        const dashboardPayload = response.ok && !payload.error ? payload as DashboardData : null;
+        setData(dashboardPayload);
+        const available = dashboardPayload?.available_modules ?? 0;
+        const total = dashboardPayload?.total_modules ?? 1;
+        if (dashboardPayload && available < Math.ceil(total * 0.55) && attempt < 3) {
+          retryTimer = window.setTimeout(() => void fetchDashboard(attempt + 1), 7000);
+        }
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
-        setData(null);
+        if (!cancelled) setData(null);
       } finally {
-        setPending(false);
+        if (!cancelled) setPending(false);
       }
     };
 
     void fetchDashboard();
+
+    return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
+    };
   }, []);
 
   const dashboard = useMemo(() => {
