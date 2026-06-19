@@ -85,6 +85,7 @@ risk_theme_rotation_cache = {"data": None, "last_update": None}
 risk_hedge_overlay_cache = {"data": None, "last_update": None}
 risk_condition_matrix_cache = {"data": None, "last_update": None}
 risk_funding_conditions_cache = {"data": None, "last_update": None}
+risk_cross_asset_cache = {"data": None, "last_update": None}
 risk_regime_compass_cache = {"data": None, "last_update": None}
 risk_alerts_cache = {"data": None, "last_update": None}
 risk_scenario_map_cache = {"data": None, "last_update": None}
@@ -371,6 +372,15 @@ def funding_conditions_regime(score):
     if score >= 38:
         return "融资均衡", "blue"
     return "融资友好", "green"
+
+def cross_asset_regime(score, confirmation_count, divergence_count):
+    if score >= 70 and confirmation_count >= 5:
+        return "广泛确认", "green"
+    if score >= 54 and divergence_count <= 2:
+        return "选择性确认", "blue"
+    if score >= 38:
+        return "分歧观察", "amber"
+    return "跨资产失配", "red"
 
 def regime_compass_label(regime_score, pressure_score, support_score, axes):
     axis_map = {axis["key"]: axis for axis in axes}
@@ -2559,6 +2569,233 @@ def refresh_funding_conditions_data():
         logger.info(f"NDX funding conditions updated: {regime}, score {funding_score:.1f}")
     except Exception as e:
         logger.error(f"NDX funding conditions refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def build_cross_asset_item(key, label, value, value_label, score, detail, metric_label="20D"):
+    normalized_score = round(clamp(score), 1)
+    color = constructive_color(normalized_score)
+    if normalized_score >= 70:
+        state = "强确认"
+    elif normalized_score >= 55:
+        state = "确认"
+    elif normalized_score >= 42:
+        state = "中性"
+    else:
+        state = "分歧"
+
+    return {
+        "key": key,
+        "label": label,
+        "metric_label": metric_label,
+        "value": value_label,
+        "raw_value": round(safe_float(value, 0), 2),
+        "score": normalized_score,
+        "state": state,
+        "color": color,
+        "detail": detail,
+    }
+
+
+def refresh_cross_asset_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_cross_asset_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "spy": "SPY",
+            "iwm": "IWM",
+            "smh": "SMH",
+            "hyg": "HYG",
+            "lqd": "LQD",
+            "tlt": "TLT",
+            "shy": "SHY",
+            "vix": "^VIX",
+            "rates": "^TNX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "6mo", min_rows=90, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+        try:
+            close_map["dollar"] = fetch_ohlc_history("DX-Y.NYB", "6mo", min_rows=90, attempts=3)["Close"]
+            dollar_symbol = "DXY"
+        except Exception as e:
+            logger.error(f"DXY fetch failed for cross-asset confirmation, falling back to UUP: {e}")
+            close_map["dollar"] = fetch_ohlc_history("UUP", "6mo", min_rows=90, attempts=3)["Close"]
+            dollar_symbol = "UUP"
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 90:
+            raise ValueError("Insufficient aligned history for cross-asset confirmation")
+
+        credit_ratio = prices["hyg"] / prices["lqd"]
+        duration_ratio = prices["tlt"] / prices["shy"]
+        daily_returns = prices.pct_change() * 100
+
+        qqq_return_5d = pct_change(prices["qqq"].iloc[-1], prices["qqq"].iloc[-6]) if len(prices) >= 6 else 0
+        qqq_return_20d = pct_change(prices["qqq"].iloc[-1], prices["qqq"].iloc[-21]) if len(prices) >= 21 else qqq_return_5d
+        spy_return_20d = pct_change(prices["spy"].iloc[-1], prices["spy"].iloc[-21]) if len(prices) >= 21 else 0
+        iwm_return_20d = pct_change(prices["iwm"].iloc[-1], prices["iwm"].iloc[-21]) if len(prices) >= 21 else 0
+        smh_return_20d = pct_change(prices["smh"].iloc[-1], prices["smh"].iloc[-21]) if len(prices) >= 21 else 0
+        qqq_spy_20d = qqq_return_20d - spy_return_20d
+        qqq_iwm_20d = qqq_return_20d - iwm_return_20d
+        smh_spy_20d = smh_return_20d - spy_return_20d
+        credit_ratio_20d = pct_change(credit_ratio.iloc[-1], credit_ratio.iloc[-21]) if len(credit_ratio) >= 21 else 0
+        duration_ratio_20d = pct_change(duration_ratio.iloc[-1], duration_ratio.iloc[-21]) if len(duration_ratio) >= 21 else 0
+        dollar_return_20d = pct_change(prices["dollar"].iloc[-1], prices["dollar"].iloc[-21]) if len(prices) >= 21 else 0
+        vix_change_20d = safe_float(prices["vix"].iloc[-1] - prices["vix"].iloc[-21], 0) if len(prices) >= 21 else 0
+        rates_change_20d_bps = safe_float((prices["rates"].iloc[-1] - prices["rates"].iloc[-21]) * 100, 0) if len(prices) >= 21 else 0
+
+        qqq_returns_60 = daily_returns["qqq"].tail(60)
+        def corr_to_qqq(key):
+            aligned = pd.concat([qqq_returns_60, daily_returns[key].tail(60)], axis=1, join="inner").dropna()
+            return safe_float(aligned.iloc[:, 0].corr(aligned.iloc[:, 1]), 0) if len(aligned) >= 30 else 0
+
+        broad_score = clamp(52 + qqq_spy_20d * 7 + max(0, spy_return_20d) * 1.6)
+        small_cap_score = clamp(50 + min(max(iwm_return_20d, -6), 8) * 3.2 - max(0, qqq_iwm_20d - 6) * 4)
+        semis_score = clamp(52 + smh_spy_20d * 7 + max(0, smh_return_20d) * 1.1)
+        credit_score = clamp(50 + credit_ratio_20d * 15)
+        duration_score = clamp(52 + duration_ratio_20d * 11 - max(0, rates_change_20d_bps) * 0.34)
+        dollar_score = clamp(54 - dollar_return_20d * 8)
+        volatility_score = clamp(54 - vix_change_20d * 6)
+
+        items = [
+            build_cross_asset_item(
+                "broad_market",
+                "大盘确认",
+                qqq_spy_20d,
+                f"{qqq_spy_20d:+.2f}pt",
+                broad_score,
+                f"QQQ 20 日 {qqq_return_20d:+.2f}%，SPY {spy_return_20d:+.2f}%；科技超额需要大盘不明显掉队。",
+            ),
+            build_cross_asset_item(
+                "small_caps",
+                "小盘风险偏好",
+                iwm_return_20d,
+                f"{iwm_return_20d:+.2f}%",
+                small_cap_score,
+                f"IWM 20 日 {iwm_return_20d:+.2f}%，QQQ/IWM 主动差 {qqq_iwm_20d:+.2f}pt，用于识别是否只有巨头上涨。",
+            ),
+            build_cross_asset_item(
+                "semis",
+                "半导体确认",
+                smh_spy_20d,
+                f"{smh_spy_20d:+.2f}pt",
+                semis_score,
+                f"SMH 20 日 {smh_return_20d:+.2f}%，相对 SPY {smh_spy_20d:+.2f}pt，衡量 NDX 核心增长链条是否同步。",
+            ),
+            build_cross_asset_item(
+                "credit",
+                "信用风险偏好",
+                credit_ratio_20d,
+                f"{credit_ratio_20d:+.2f}%",
+                credit_score,
+                f"HYG/LQD 20 日 {credit_ratio_20d:+.2f}%，信用改善通常提高权益上涨质量。",
+            ),
+            build_cross_asset_item(
+                "duration",
+                "久期与利率",
+                duration_ratio_20d,
+                f"{duration_ratio_20d:+.2f}%",
+                duration_score,
+                f"TLT/SHY 20 日 {duration_ratio_20d:+.2f}%，10Y 同期 {rates_change_20d_bps:+.1f}bps，久期修复更利于成长估值。",
+            ),
+            build_cross_asset_item(
+                "dollar",
+                "美元条件",
+                dollar_return_20d,
+                f"{dollar_return_20d:+.2f}%",
+                dollar_score,
+                f"{dollar_symbol} 20 日 {dollar_return_20d:+.2f}%，美元走强会削弱全球风险资产确认度。",
+            ),
+            build_cross_asset_item(
+                "volatility",
+                "波动确认",
+                vix_change_20d,
+                f"{vix_change_20d:+.1f}pt",
+                volatility_score,
+                f"VIX 20 日 {vix_change_20d:+.1f} 点；波动率下行代表上涨更容易被期权和风险预算吸收。",
+                "20D 点差",
+            ),
+        ]
+
+        confirmation_count = len([item for item in items if item["score"] >= 55])
+        divergence_count = len([item for item in items if item["score"] < 42])
+        confirmation_score = round(clamp(
+            broad_score * 0.17
+            + small_cap_score * 0.12
+            + semis_score * 0.18
+            + credit_score * 0.17
+            + duration_score * 0.13
+            + dollar_score * 0.11
+            + volatility_score * 0.12
+            - max(0, qqq_return_20d) * max(0, divergence_count - 1) * 0.75
+        ), 1)
+        regime, color = cross_asset_regime(confirmation_score, confirmation_count, divergence_count)
+
+        leaders = sorted(items, key=lambda item: item["score"], reverse=True)[:3]
+        laggards = sorted(items, key=lambda item: item["score"])[:3]
+        main_support = leaders[0]
+        main_lag = laggards[0]
+        if regime == "广泛确认":
+            summary = f"NDX/QQQ 上涨获得跨资产广泛确认，{confirmation_count}/{len(items)} 个维度为确认状态，主要支撑来自 {main_support['label']}。"
+        elif regime == "选择性确认":
+            summary = f"NDX/QQQ 跨资产确认度可用但不全面，{main_support['label']} 提供支撑，{main_lag['label']} 仍是主要短板。"
+        elif regime == "分歧观察":
+            summary = f"跨资产信号出现分歧，{divergence_count} 个维度低于确认线；若 QQQ 继续上行，需要等待信用、久期或广度式风险偏好补确认。"
+        else:
+            summary = f"QQQ 当前走势与跨资产环境失配，主要拖累来自 {main_lag['label']}，新增风险预算应降低速度。"
+
+        controls = [
+            f"确认线：至少 5 个维度维持确认，且信用和波动两项不能同时低于 45。",
+            f"失效线：QQQ 继续上涨但分歧维度升至 3 个以上，应把上涨视为集中权重行情。",
+            f"宏观约束：若 10Y 上行超过 20bps 且 {dollar_symbol} 同步走强，降低估值扩张假设权重。",
+            "跨资产确认是风险质量过滤器，不等同于单一买卖信号。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "regime": regime,
+            "regime_color": color,
+            "confirmation_score": confirmation_score,
+            "summary": summary,
+            "qqq_return_5d": round(qqq_return_5d, 2),
+            "qqq_return_20d": round(qqq_return_20d, 2),
+            "spy_return_20d": round(spy_return_20d, 2),
+            "iwm_return_20d": round(iwm_return_20d, 2),
+            "smh_return_20d": round(smh_return_20d, 2),
+            "qqq_spy_20d": round(qqq_spy_20d, 2),
+            "qqq_iwm_20d": round(qqq_iwm_20d, 2),
+            "smh_spy_20d": round(smh_spy_20d, 2),
+            "credit_ratio_20d": round(credit_ratio_20d, 2),
+            "duration_ratio_20d": round(duration_ratio_20d, 2),
+            "dollar_return_20d": round(dollar_return_20d, 2),
+            "vix_change_20d": round(vix_change_20d, 2),
+            "rates_change_20d_bps": round(rates_change_20d_bps, 1),
+            "dollar_symbol": dollar_symbol,
+            "confirmation_count": confirmation_count,
+            "divergence_count": divergence_count,
+            "items": items,
+            "leaders": leaders,
+            "laggards": laggards,
+            "correlations": [
+                {"label": "SPY", "value": round(corr_to_qqq("spy"), 2)},
+                {"label": "IWM", "value": round(corr_to_qqq("iwm"), 2)},
+                {"label": "SMH", "value": round(corr_to_qqq("smh"), 2)},
+                {"label": "HYG", "value": round(corr_to_qqq("hyg"), 2)},
+                {"label": "TLT", "value": round(corr_to_qqq("tlt"), 2)},
+            ],
+            "controls": controls,
+            "methodology": "使用 QQQ、SPY、IWM、SMH、HYG/LQD、TLT/SHY、美元、VIX 和 10Y 利率最近 6 个月日线，评估 NDX 上涨是否得到风格、信用、久期、美元和波动率共同确认。分数越高代表上涨质量越好，不构成买卖建议。",
+        }
+        risk_cross_asset_cache["data"] = data
+        risk_cross_asset_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX cross-asset confirmation updated: {regime}, score {confirmation_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX cross-asset confirmation refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -6015,6 +6252,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
             ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
             ("volume_profile", risk_volume_profile_cache, refresh_volume_profile_data, 5 * 60, False),
+            ("cross_asset", risk_cross_asset_cache, refresh_cross_asset_data, 15 * 60, False),
             ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60, False),
             ("gamma", risk_gamma_map_cache, refresh_gamma_map_data, 15 * 60, False),
             ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
@@ -6035,6 +6273,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "rate_sensitivity",
             "intraday",
             "volume_profile",
+            "cross_asset",
             "hedge",
             "gamma",
             "vol_premium",
@@ -6070,6 +6309,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
         intraday = risk_intraday_tape_cache.get("data") or {}
         volume_profile = risk_volume_profile_cache.get("data") or {}
+        cross_asset = risk_cross_asset_cache.get("data") or {}
         hedge = risk_hedge_overlay_cache.get("data") or {}
         gamma = risk_gamma_map_cache.get("data") or {}
         vol_premium = risk_vol_premium_cache.get("data") or {}
@@ -6094,6 +6334,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             rate_sensitivity.get("rate_sensitivity_score"),
             intraday.get("tape_pressure_score"),
             volume_profile.get("profile_score"),
+            100 - safe_float(cross_asset.get("confirmation_score"), 50),
             hedge.get("hedge_score"),
             gamma.get("gamma_score"),
             vol_premium.get("premium_score"),
@@ -6108,6 +6349,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             recovery.get("recovery_score"),
             breadth.get("breadth_score"),
             liquidity.get("flow_score"),
+            cross_asset.get("confirmation_score"),
             quality.get("quality_score"),
         ])
         desk_score = round(clamp(50 + support_score * 0.38 - pressure_score * 0.34 - max(0, net_pressure) * 0.45), 1)
@@ -6163,7 +6405,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
                 "label": "内部结构",
                 "color": constructive_color(avg([breadth.get("breadth_score"), liquidity.get("flow_score"), regime.get("support_score")])),
                 "state": f"{breadth.get('breadth_label', '广度待确认')} / {liquidity.get('regime', '流动性待确认')}",
-                "readout": f"广度 {safe_float(breadth.get('breadth_score'), 50):.1f} / 流动性 {safe_float(liquidity.get('flow_score'), 50):.1f} / 支撑 {safe_float(regime.get('support_score'), 50):.1f}",
+                "readout": f"广度 {safe_float(breadth.get('breadth_score'), 50):.1f} / 流动性 {safe_float(liquidity.get('flow_score'), 50):.1f} / 跨资产 {safe_float(cross_asset.get('confirmation_score'), 50):.1f}",
                 "action": "若等权和成交承接没有跟上，指数上涨更像权重股驱动，新增仓位应低于目标中位。",
             },
             {
@@ -6208,6 +6450,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "alert_score": round(alert_score, 1),
             "tape_pressure_score": round(tape_pressure, 1),
             "profile_score": round(safe_float(volume_profile.get("profile_score"), 50), 1),
+            "cross_asset_score": round(safe_float(cross_asset.get("confirmation_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
@@ -6218,7 +6461,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、估值利率敏感度、广度/流动性、MAG7 质量/财报、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -6603,13 +6846,14 @@ def refresh_regime_compass_data(allow_dependency_refresh=True):
             ("funding", risk_funding_conditions_cache, refresh_funding_conditions_data, 15 * 60),
             ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60),
             ("theme_rotation", risk_theme_rotation_cache, refresh_theme_rotation_data, 15 * 60),
+            ("cross_asset", risk_cross_asset_cache, refresh_cross_asset_data, 15 * 60),
             ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60),
             ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60),
             ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60),
             ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60),
             ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
         ]
-        light_dependencies = {"diagnostics", "factors", "funding", "breadth", "theme_rotation", "liquidity", "tail"}
+        light_dependencies = {"diagnostics", "factors", "funding", "breadth", "theme_rotation", "cross_asset", "liquidity", "tail"}
         dependency_status = []
         for key, cache, refresher, ttl in dependency_refreshers:
             try:
@@ -6631,6 +6875,7 @@ def refresh_regime_compass_data(allow_dependency_refresh=True):
         funding = risk_funding_conditions_cache.get("data") or {}
         breadth = risk_breadth_cache.get("data") or {}
         theme_rotation = risk_theme_rotation_cache.get("data") or {}
+        cross_asset = risk_cross_asset_cache.get("data") or {}
         liquidity = risk_liquidity_cache.get("data") or {}
         valuation = risk_valuation_cache.get("data") or {}
         quality = risk_quality_cache.get("data") or {}
@@ -6648,9 +6893,10 @@ def refresh_regime_compass_data(allow_dependency_refresh=True):
             + safe_float(volatility_pillar.get("score"), 50) * 0.20
         ))
         internal_health = clamp(
-            safe_float(breadth.get("breadth_score"), 50) * 0.36
-            + safe_float(theme_rotation.get("leadership_score"), 50) * 0.32
-            + safe_float(liquidity.get("flow_score"), 50) * 0.32
+            safe_float(breadth.get("breadth_score"), 50) * 0.30
+            + safe_float(theme_rotation.get("leadership_score"), 50) * 0.26
+            + safe_float(cross_asset.get("confirmation_score"), 50) * 0.22
+            + safe_float(liquidity.get("flow_score"), 50) * 0.22
         )
         fundamental_health = clamp(
             safe_float(quality.get("quality_score"), 50) * 0.45
@@ -6691,10 +6937,11 @@ def refresh_regime_compass_data(allow_dependency_refresh=True):
                 "score": round(internal_health, 1),
                 "state": constructive_state(internal_health),
                 "color": constructive_color(internal_health),
-                "detail": f"广度为 {breadth.get('breadth_label', '中性')}，主题轮动为 {theme_rotation.get('regime', '中性')}，流动性为 {liquidity.get('regime', '中性')}。",
+                "detail": f"广度为 {breadth.get('breadth_label', '中性')}，主题轮动为 {theme_rotation.get('regime', '中性')}，跨资产为 {cross_asset.get('regime', '中性')}，流动性为 {liquidity.get('regime', '中性')}。",
                 "inputs": [
                     {"label": "广度", "value": f"{safe_float(breadth.get('breadth_score'), 50):.1f}"},
                     {"label": "主题", "value": f"{safe_float(theme_rotation.get('leadership_score'), 50):.1f}"},
+                    {"label": "跨资产", "value": f"{safe_float(cross_asset.get('confirmation_score'), 50):.1f}"},
                     {"label": "流动性", "value": f"{safe_float(liquidity.get('flow_score'), 50):.1f}"},
                 ],
             },
@@ -7287,6 +7534,7 @@ def background_worker():
     last_factor_attribution = 0
     last_condition_matrix = 0
     last_funding_conditions = 0
+    last_cross_asset = 0
     last_levels = 0
     last_tail = 0
     last_relative = 0
@@ -7344,6 +7592,11 @@ def background_worker():
             if time.time() - last_funding_conditions > 1800:
                 refresh_funding_conditions_data()
                 last_funding_conditions = time.time()
+
+            # NDX cross-asset confirmation every 30 minutes
+            if time.time() - last_cross_asset > 1800:
+                refresh_cross_asset_data()
+                last_cross_asset = time.time()
 
             # Technical levels every 30 minutes
             if time.time() - last_levels > 1800:
@@ -7603,6 +7856,14 @@ def get_risk_funding_conditions():
         refresh_funding_conditions_data()
 
     data = risk_funding_conditions_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/cross-asset', methods=['GET'])
+def get_risk_cross_asset():
+    if not cache_is_fresh(risk_cross_asset_cache, 15 * 60) and should_refresh_empty_cache(risk_cross_asset_cache, 60):
+        refresh_cross_asset_data()
+
+    data = risk_cross_asset_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/regime-compass', methods=['GET'])

@@ -118,6 +118,14 @@ interface FundingPayload {
   duration_ratio_20d: number;
 }
 
+interface CrossAssetPayload {
+  confirmation_score: number;
+  regime: string;
+  confirmation_count: number;
+  divergence_count: number;
+  qqq_return_20d: number;
+}
+
 interface AttributionPayload {
   regime: string;
   actual_return: number;
@@ -267,6 +275,7 @@ interface DashboardData {
   rateSensitivity: RateSensitivityPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
   funding: FundingPayload | null;
+  crossAsset: CrossAssetPayload | null;
   attribution: AttributionPayload | null;
   breadth: BreadthPayload | null;
   themeRotation: ThemeRotationPayload | null;
@@ -418,6 +427,7 @@ export const NDXSignalDashboardPanel = () => {
           rateSensitivity,
           conditionMatrix,
           funding,
+          crossAsset,
           attribution,
           breadth,
           themeRotation,
@@ -448,6 +458,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
           fetchJson<FundingPayload>("/api/risk/funding-conditions"),
+          fetchJson<CrossAssetPayload>("/api/risk/cross-asset"),
           fetchJson<AttributionPayload>("/api/risk/attribution"),
           fetchJson<BreadthPayload>("/api/risk/breadth"),
           fetchJson<ThemeRotationPayload>("/api/risk/theme-rotation"),
@@ -467,7 +478,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -501,6 +512,7 @@ export const NDXSignalDashboardPanel = () => {
       data.breadth?.breadth_score ?? 50,
       data.themeRotation?.leadership_score ?? 50,
       data.liquidity?.flow_score ?? 50,
+      data.crossAsset?.confirmation_score ?? 50,
       data.quality?.quality_score ?? 50,
       data.regimeCompass?.regime_score ?? 50,
       data.recoveryPath?.recovery_score ?? 50,
@@ -600,6 +612,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.funding ? `HYG/LQD ${formatSignedPct(data.funding.credit_ratio_20d)} · TLT/SHY ${formatSignedPct(data.funding.duration_ratio_20d)}` : "等待融资条件",
         color: data.funding ? scoreColor(data.funding.funding_score, true) : "blue",
         icon: "landmark",
+      },
+      {
+        label: "跨资产确认",
+        value: data.crossAsset ? data.crossAsset.regime : "--",
+        detail: data.crossAsset ? `确认 ${data.crossAsset.confirmation_count} · 分歧 ${data.crossAsset.divergence_count} · QQQ ${formatSignedPct(data.crossAsset.qqq_return_20d)}` : "等待跨资产读数",
+        color: data.crossAsset ? scoreColor(data.crossAsset.confirmation_score) : "blue",
+        icon: "git-compare-arrows",
       },
       {
         label: "因子归因",
@@ -734,7 +753,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 28 }).map((_, index) => (
+          {Array.from({ length: 29 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

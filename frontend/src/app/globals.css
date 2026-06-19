@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 @theme {
-  --color-primary: #1d4f7a;
+  --color-primary: #24415f;
   --color-accent: #0f766e;
   --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
 }
@@ -11,53 +11,53 @@
   --sidebar-width: 260px;
   --radius-lg: 0.5rem;
   
-  --bg-color: #eef2f6;
+  --bg-color: #f6f3ed;
   --card-bg: #ffffff;
-  --sidebar-bg: #f7f9fc;
-  --surface-muted: #edf3f8;
-  --text-primary: #101828;
-  --text-secondary: #344054;
-  --text-tertiary: #667085;
-  --border-color: #d8e0eb;
-  --border-strong: #aebbd0;
-  --accent-color: #1d4f7a;
-  --accent-strong: #123a5c;
-  --accent-soft: #e7f0f8;
-  --success-color: #067647;
+  --sidebar-bg: #fbfaf7;
+  --surface-muted: #f0ede6;
+  --text-primary: #151515;
+  --text-secondary: #35383f;
+  --text-tertiary: #68707d;
+  --border-color: #d4d0c7;
+  --border-strong: #a9a298;
+  --accent-color: #24415f;
+  --accent-strong: #18324d;
+  --accent-soft: #e8eef2;
+  --success-color: #087443;
   --danger-color: #b42318;
-  --warning-color: #b54708;
-  --hover-bg: #e9eff6;
-  --section-bg: #f3f7fb;
-  --content-shell-bg: #ffffff;
-  --focus-ring: rgba(29, 79, 122, 0.2);
-  --shadow-soft: 0 1px 2px rgba(16, 24, 40, 0.05), 0 10px 24px rgba(16, 24, 40, 0.045);
-  --shadow-raised: 0 18px 40px rgba(16, 24, 40, 0.09);
+  --warning-color: #a15c07;
+  --hover-bg: #ece8de;
+  --section-bg: #f4f1eb;
+  --content-shell-bg: #fffdf8;
+  --focus-ring: rgba(36, 65, 95, 0.22);
+  --shadow-soft: 0 1px 2px rgba(20, 20, 20, 0.045), 0 12px 26px rgba(20, 20, 20, 0.04);
+  --shadow-raised: 0 18px 42px rgba(20, 20, 20, 0.08);
   --reading-measure: 760px;
-  --panel-measure: 1120px;
+  --panel-measure: 1180px;
 }
 
 [data-theme='dark'] {
-  --bg-color: #0d1320;
-  --card-bg: #141c2a;
-  --sidebar-bg: #101826;
-  --surface-muted: #1d2939;
-  --text-primary: #f8fafc;
-  --text-secondary: #d0d5dd;
-  --text-tertiary: #98a2b3;
-  --border-color: #2c3a4e;
-  --border-strong: #50627a;
-  --accent-color: #7cc4e6;
-  --accent-strong: #bae6fd;
-  --accent-soft: rgba(124, 196, 230, 0.14);
-  --success-color: #6ce9a6;
-  --danger-color: #f97066;
-  --warning-color: #fdb022;
-  --hover-bg: #1b2638;
-  --section-bg: #111b2a;
-  --content-shell-bg: #101724;
-  --focus-ring: rgba(124, 196, 230, 0.3);
-  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.26), 0 14px 30px rgba(0, 0, 0, 0.24);
-  --shadow-raised: 0 22px 46px rgba(0, 0, 0, 0.36);
+  --bg-color: #111318;
+  --card-bg: #191c22;
+  --sidebar-bg: #151820;
+  --surface-muted: #23272f;
+  --text-primary: #f4f2eb;
+  --text-secondary: #d9d4c8;
+  --text-tertiary: #a8a398;
+  --border-color: #333842;
+  --border-strong: #575f6b;
+  --accent-color: #9fc5d9;
+  --accent-strong: #d3e7f0;
+  --accent-soft: rgba(159, 197, 217, 0.14);
+  --success-color: #7bdca7;
+  --danger-color: #ff9b90;
+  --warning-color: #f5c26b;
+  --hover-bg: #242933;
+  --section-bg: #20242b;
+  --content-shell-bg: #16191f;
+  --focus-ring: rgba(159, 197, 217, 0.32);
+  --shadow-soft: 0 1px 2px rgba(0, 0, 0, 0.28), 0 14px 32px rgba(0, 0, 0, 0.22);
+  --shadow-raised: 0 22px 48px rgba(0, 0, 0, 0.34);
 }
 
 html {
@@ -115,7 +115,7 @@ body * {
   background: var(--content-shell-bg);
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
-  box-shadow: 0 18px 56px rgba(16, 24, 40, 0.055);
+  box-shadow: 0 18px 56px rgba(20, 20, 20, 0.055);
 }
 
 .main-feed {
@@ -142,12 +142,12 @@ body * {
 
 .section-title {
   color: var(--text-primary);
-  padding: 0.85rem 1rem;
+  padding: 0.95rem 1.05rem;
   background: var(--section-bg);
   border: 1px solid var(--border-color);
   border-left: 4px solid var(--accent-color);
   border-radius: var(--radius-lg);
-  box-shadow: 0 1px 1px rgba(16, 24, 40, 0.025);
+  box-shadow: 0 1px 1px rgba(20, 20, 20, 0.025);
   min-height: 3rem;
 }
 
@@ -211,7 +211,8 @@ body * {
 }
 
 .risk-page > section {
-  padding-top: 0.15rem;
+  padding-top: 0.2rem;
+  padding-bottom: 0.2rem;
 }
 
 .risk-page > section,
@@ -222,6 +223,7 @@ body * {
 .risk-page .section-title {
   font-size: 1.05rem;
   line-height: 1.35;
+  color: var(--text-primary);
 }
 
 .risk-page .section-title svg {
@@ -246,6 +248,21 @@ body * {
 .risk-page [class*="bg-[var(--section-bg)]"],
 .risk-page .bg-\[var\(--section-bg\)\] {
   background-color: var(--section-bg);
+}
+
+.risk-page p,
+.risk-page li,
+.risk-page span {
+  text-wrap: pretty;
+}
+
+.risk-page article p,
+.risk-page .text-\[var\(--text-secondary\)\] {
+  color: var(--text-secondary);
+}
+
+.risk-page .text-\[var\(--text-tertiary\)\] {
+  color: var(--text-tertiary);
 }
 
 /* ============================================================

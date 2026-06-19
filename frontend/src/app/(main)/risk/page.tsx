@@ -17,6 +17,7 @@ import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
 import { NDXRateSensitivityPanel } from "@/components/NDXRateSensitivityPanel";
 import { NDXConditionMatrixPanel } from "@/components/NDXConditionMatrixPanel";
 import { NDXFundingConditionsPanel } from "@/components/NDXFundingConditionsPanel";
+import { NDXCrossAssetPanel } from "@/components/NDXCrossAssetPanel";
 import { NDXFactorAttributionPanel } from "@/components/NDXFactorAttributionPanel";
 import { NDXRelativeStrengthPanel } from "@/components/NDXRelativeStrengthPanel";
 import { NDXThemeRotationPanel } from "@/components/NDXThemeRotationPanel";
@@ -239,6 +240,13 @@ export default function RiskPage() {
           <Icon name="lucide:landmark" className="text-[var(--accent-color)]" /> NDX 信用与融资条件
         </h3>
         <NDXFundingConditionsPanel />
+      </section>
+
+      <section className="cross-asset-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:git-compare-arrows" className="text-[var(--accent-color)]" /> NDX 跨资产确认
+        </h3>
+        <NDXCrossAssetPanel />
       </section>
 
       <section className="attribution-section">
