@@ -13,6 +13,7 @@ import hmac
 import io
 import json
 import inspect
+import re
 from glob import glob
 from logging.handlers import RotatingFileHandler
 from PIL import Image, UnidentifiedImageError
@@ -9863,6 +9864,204 @@ def get_risk_portfolio_actions():
         "matrix": matrix,
         "risk_drivers": risk_drivers,
         "methodology": "把执行 Playbook、市场状态罗盘、风险预警、尾部风险、对冲覆盖、估值质量、修复路径和数据质量压成四类读者的组合动作矩阵。该模块用于风控框架和阅读决策，不构成个性化投资建议或买卖指令。",
+    })
+
+
+def extract_risk_temperature(summary):
+    if not summary:
+        return None
+    match = re.search(r"综合风险温度\s*([0-9]+(?:\.[0-9]+)?)\s*/\s*100", summary)
+    return safe_float(match.group(1)) if match else None
+
+
+@app.route('/api/risk/change-attribution', methods=['GET'])
+def get_risk_change_attribution():
+    briefs = RiskBrief.query.filter(
+        RiskBrief.status.in_(RISK_BRIEF_STATUSES)
+    ).order_by(RiskBrief.created_at.desc()).limit(8).all()
+    latest = briefs[0] if briefs else None
+    previous = briefs[1] if len(briefs) > 1 else None
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    contribution = risk_module_payload("contribution") or {}
+    playbook = risk_module_payload("playbook") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    data_quality = get_risk_data_quality().get_json(silent=True) or {}
+
+    if not latest:
+        return jsonify({"error": "Initializing"}), 202
+
+    status_rank = {
+        "机会窗口": 1,
+        "中性震荡": 2,
+        "谨慎观察": 3,
+        "防守观察": 4,
+        "风险偏高": 5,
+    }
+    current_rank = status_rank.get(latest.status, 3)
+    previous_rank = status_rank.get(previous.status, current_rank) if previous else current_rank
+    status_delta = current_rank - previous_rank
+    current_temp = extract_risk_temperature(latest.summary)
+    previous_temp = extract_risk_temperature(previous.summary) if previous else None
+    temp_delta = None if current_temp is None or previous_temp is None else round(current_temp - previous_temp, 1)
+    index_delta = None
+    index_delta_pct = None
+    if previous and latest.index_position and previous.index_position:
+        index_delta = round(latest.index_position - previous.index_position, 2)
+        index_delta_pct = round(pct_change(latest.index_position, previous.index_position), 2)
+    elapsed_minutes = None
+    if previous:
+        elapsed_minutes = round(max(0, (latest.created_at - previous.created_at).total_seconds()) / 60, 1)
+
+    if status_delta > 0 or (temp_delta is not None and temp_delta >= 2):
+        headline = "风险较上次升温"
+        headline_color = "red" if status_delta >= 2 or (temp_delta or 0) >= 6 else "amber"
+    elif status_delta < 0 or (temp_delta is not None and temp_delta <= -2):
+        headline = "风险较上次缓和"
+        headline_color = "green"
+    else:
+        headline = "风险判断保持稳定"
+        headline_color = "blue"
+
+    active_alerts = alerts.get("alerts") or []
+    drivers = []
+
+    def add_driver(key, label, tone, value, detail, action, source, priority):
+        drivers.append({
+            "key": key,
+            "label": label,
+            "tone": tone,
+            "value": value,
+            "detail": detail,
+            "action": action,
+            "source": source,
+            "priority": priority,
+        })
+
+    add_driver(
+        "brief_delta",
+        "简报变化",
+        headline_color,
+        f"{previous.status if previous else '--'} -> {latest.status}",
+        latest.summary,
+        "若状态连续两次升温，优先降低新增风险预算；若连续缓和，再恢复到目标中枢。",
+        "风险简报",
+        100 + abs(status_delta) * 8 + abs(temp_delta or 0),
+    )
+
+    if current_temp is not None:
+        add_driver(
+            "temperature_delta",
+            "风险温度",
+            "red" if current_temp >= 70 else "amber" if current_temp >= 55 else "blue",
+            f"{current_temp:.1f}/100" + (f" ({temp_delta:+.1f})" if temp_delta is not None else ""),
+            "风险温度来自 NDX 价格分位、RSI、VIX 缓冲和利率缓冲的综合摘要。",
+            "温度高于 65 时，所有新增仓位都需要绑定修复线、失效线和现金缓冲。",
+            "风险简报",
+            90 + current_temp / 5,
+        )
+
+    if active_alerts:
+        top_alert = active_alerts[0]
+        add_driver(
+            "top_alert",
+            "最高预警",
+            top_alert.get("color", "amber"),
+            top_alert.get("value", alerts.get("alert_level", "--")),
+            top_alert.get("evidence", alerts.get("summary", "预警模块提示需要检查仓位约束。")),
+            top_alert.get("action", "先处理仓位上限、失效线和保护覆盖。"),
+            "风险预警",
+            88 + safe_float(top_alert.get("score"), alerts.get("alert_score", 50)) / 3,
+        )
+
+    contribution_drivers = contribution.get("drivers") or []
+    top_pressure = next((item for item in contribution_drivers if item.get("direction") == "pressure"), None)
+    top_support = next((item for item in contribution_drivers if item.get("direction") == "support"), None)
+    if top_pressure:
+        add_driver(
+            "top_pressure",
+            "主要压力源",
+            top_pressure.get("color", "amber"),
+            f"{safe_float(top_pressure.get('signed_impact'), top_pressure.get('impact')):+.1f}",
+            top_pressure.get("evidence", contribution.get("summary", "风险贡献显示压力项占优。")),
+            top_pressure.get("action", "先确认该压力源是否继续恶化，再决定是否释放风险预算。"),
+            top_pressure.get("label", "风险贡献"),
+            84 + abs(safe_float(top_pressure.get("signed_impact"), 0)),
+        )
+    if top_support:
+        add_driver(
+            "top_support",
+            "主要缓冲项",
+            "green" if top_support.get("color") == "green" else "blue",
+            f"{safe_float(top_support.get('signed_impact'), -safe_float(top_support.get('impact'), 0)):+.1f}",
+            top_support.get("evidence", "当前存在对冲压力的支撑项。"),
+            top_support.get("action", "只有缓冲项持续改善，才把观察仓位升级为均衡仓位。"),
+            top_support.get("label", "风险贡献"),
+            72 + abs(safe_float(top_support.get("signed_impact"), 0)),
+        )
+
+    weakest_axes = regime.get("weakest_axes") or []
+    if weakest_axes:
+        weakest = weakest_axes[0]
+        add_driver(
+            "weakest_axis",
+            "状态短板",
+            "amber" if safe_float(weakest.get("score"), 50) < 55 else "blue",
+            f"{weakest.get('label', '--')} {safe_float(weakest.get('score'), 0):.1f}",
+            regime.get("summary", "市场状态罗盘显示仍有短板需要跟踪。"),
+            "该轴低于 45 时，把新增资金从执行队列降级为观察队列。",
+            "市场状态罗盘",
+            70 + (60 - safe_float(weakest.get("score"), 50)),
+        )
+
+    action_tickets = playbook.get("action_tickets") or []
+    today_ticket = next((item for item in action_tickets if item.get("key") == "today"), None)
+    if today_ticket:
+        add_driver(
+            "today_ticket",
+            "今日执行变化",
+            today_ticket.get("color", "blue"),
+            today_ticket.get("label", "今日执行"),
+            today_ticket.get("trigger", playbook.get("summary", "执行 Playbook 提示需要等待触发线。")),
+            today_ticket.get("action", "围绕触发线分批执行，不因盘中噪音一次性改变仓位。"),
+            "执行 Playbook",
+            68,
+        )
+
+    if recovery:
+        add_driver(
+            "recovery_path",
+            "修复路径",
+            recovery.get("recovery_color", "blue"),
+            f"{safe_float(recovery.get('recovery_score'), 50):.1f}",
+            recovery.get("summary", "修复路径用于确认压力后是否可以恢复风险预算。"),
+            "修复分未回到 55 以上前，核心暴露不突破目标上沿。",
+            "修复路径",
+            62 + safe_float(recovery.get("recovery_score"), 50) / 10,
+        )
+
+    drivers = sorted(drivers, key=lambda item: item["priority"], reverse=True)[:7]
+    watch_items = [
+        f"数据健康 {safe_float(data_quality.get('health_score'), 0):.1f}，新鲜模块 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}。",
+        f"预警分 {safe_float(alerts.get('alert_score'), 50):.1f}，红色预警 {alerts.get('critical_count', 0)} 条。",
+        f"Playbook：{playbook.get('posture', '--')}，目标暴露 {playbook.get('target_exposure', {}).get('label', '--')}。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "latest": latest.to_dict(),
+        "previous": previous.to_dict() if previous else None,
+        "elapsed_minutes": elapsed_minutes,
+        "status_delta": status_delta,
+        "risk_temperature": current_temp,
+        "risk_temperature_delta": temp_delta,
+        "index_delta": index_delta,
+        "index_delta_pct": index_delta_pct,
+        "drivers": drivers,
+        "watch_items": watch_items,
+        "methodology": "用最近两条 NDX 风险简报比较状态、点位和风险温度，再结合当前预警、风险贡献、状态罗盘、Playbook 和修复路径解释本次判断变化。该模块用于解释变化原因，不构成买卖指令。",
     })
 
 

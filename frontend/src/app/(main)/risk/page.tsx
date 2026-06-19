@@ -5,6 +5,7 @@ import { NDXLazyRiskPanel } from "@/components/NDXLazyRiskPanel";
 import { NDXRiskSectionNavigator } from "@/components/NDXRiskSectionNavigator";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
+import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPanel";
 import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
 import { NDXPositioningSummaryPanel } from "@/components/NDXPositioningSummaryPanel";
@@ -154,6 +155,13 @@ export default function RiskPage() {
           <Icon name="lucide:list-checks" className="text-[var(--accent-color)]" /> NDX 关键看点
         </h3>
         <NDXKeyTakeawaysPanel />
+      </section>
+
+      <section id="change-attribution-section" className="change-attribution-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:git-compare-arrows" className="text-[var(--accent-color)]" /> NDX 变化归因
+        </h3>
+        <NDXChangeAttributionPanel />
       </section>
 
       <section id="portfolio-actions-section" className="portfolio-actions-section">

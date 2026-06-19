@@ -12,6 +12,7 @@ InvestCool 是一个面向纳斯达克 100 的金融研究与风险分析平台�
 - NDX 风险页深层模块延迟挂载，保留首屏结论即时加载，其余重分析面板进入阅读区域前再发起请求，减少首次打开时的 API 并发压力
 - NDX 风险模块快照表，将 worker 计算出的模块结果持久化到 SQLite，Gunicorn Web 进程冷启动后也能直接恢复 dashboard 和单模块 API 数据
 - NDX 关键看点面板，通过 `/api/risk/key-takeaways` 把风险预警、支撑项、衍生品压力、财报窗口和触发线压成晨会式阅读优先级
+- NDX 变化归因面板，通过 `/api/risk/change-attribution` 对比最近两条风险简报的状态、点位和风险温度，并结合当前预警、贡献拆解、罗盘和 Playbook 解释判断为何变化
 - NDX 组合动作矩阵，通过 `/api/risk/portfolio-actions` 把 Playbook、预警、罗盘、尾部风险、对冲覆盖、估值质量和数据质量压成战术交易、核心配置、保护型组合、新增资金四类动作框架
 - NDX 数据质量与覆盖面板，通过 `/api/risk/data-quality` 展示风险模块覆盖率、刷新年龄、陈旧模块和缺失模块，帮助读者判断当前分析可信度
 - NDX 仓位动作摘要，通过 `/api/risk/positioning-summary` 把 Playbook、承受力闸门、预警、修复路径和对冲覆盖压成短线、核心仓位、防守预算三档执行框架
