@@ -89,6 +89,7 @@ risk_scenario_map_cache = {"data": None, "last_update": None}
 risk_recovery_path_cache = {"data": None, "last_update": None}
 risk_contribution_cache = {"data": None, "last_update": None}
 risk_capacity_cache = {"data": None, "last_update": None}
+risk_playbook_cache = {"data": None, "last_update": None}
 risk_rate_sensitivity_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
@@ -322,6 +323,15 @@ def intraday_tape_regime(daily_return, vwap_distance, volume_pace, range_expansi
     if abs(vwap_distance) <= 0.18 and 35 <= range_position <= 65:
         return "VWAP 均衡", "blue"
     return "盘中观察", "blue"
+
+def playbook_regime(score, alert_score, net_pressure):
+    if score >= 68 and alert_score < 58 and net_pressure < 6:
+        return "进攻可用", "green"
+    if score >= 52 and alert_score < 70:
+        return "核心持有", "blue"
+    if score >= 38:
+        return "降档观察", "amber"
+    return "防守执行", "red"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -5374,6 +5384,232 @@ def refresh_capacity_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_playbook_data(allow_dependency_refresh=True):
+    global risk_playbook_cache
+
+    try:
+        dependencies = [
+            ("capacity", risk_capacity_cache, refresh_capacity_data, 15 * 60),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60),
+            ("contribution", risk_contribution_cache, refresh_contribution_data, 15 * 60),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60),
+            ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60),
+            ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60),
+            ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60),
+            ("budget", risk_budget_cache, refresh_risk_budget, 15 * 60),
+        ]
+        light_dependencies = {"capacity", "regime", "contribution", "alerts", "recovery", "hedge", "intraday", "budget"}
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if key in ("capacity", "regime", "contribution", "alerts", "recovery"):
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Execution playbook dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 5:
+            return
+
+        capacity = risk_capacity_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+        contribution = risk_contribution_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        recovery = risk_recovery_path_cache.get("data") or {}
+        hedge = risk_hedge_overlay_cache.get("data") or {}
+        intraday = risk_intraday_tape_cache.get("data") or {}
+        budget = risk_budget_cache.get("data") or {}
+
+        target = capacity.get("target_exposure") or {}
+        hedge_coverage = capacity.get("hedge_coverage") or {}
+        target_lower = safe_float(target.get("lower"), 25)
+        target_upper = safe_float(target.get("upper"), 55)
+        cash_buffer = safe_float(capacity.get("cash_buffer_min"), 30)
+        hedge_lower = safe_float(hedge_coverage.get("lower"), safe_float(hedge.get("protection_lower"), 12))
+        hedge_upper = safe_float(hedge_coverage.get("upper"), safe_float(hedge.get("protection_upper"), 30))
+        stress_downside = safe_float(capacity.get("stress_downside"), safe_float(budget.get("stress_downside"), 8))
+        max_loss_budget = safe_float(capacity.get("max_loss_budget"), stress_downside * target_upper / 100)
+
+        capacity_score = safe_float(capacity.get("capacity_score"), 50)
+        regime_score = safe_float(regime.get("regime_score"), 50)
+        recovery_score = safe_float(recovery.get("recovery_score"), 50)
+        alert_score = safe_float(alerts.get("alert_score"), 45)
+        net_pressure = safe_float(contribution.get("net_pressure"), 0)
+        tape_pressure = safe_float(intraday.get("tape_pressure_score"), 45)
+
+        playbook_score = round(clamp(
+            42
+            + capacity_score * 0.26
+            + regime_score * 0.22
+            + recovery_score * 0.18
+            - alert_score * 0.17
+            - max(0, net_pressure) * 0.72
+            - max(0, tape_pressure - 50) * 0.10
+            + max(0, -net_pressure) * 0.20
+        ), 1)
+        posture, color = playbook_regime(playbook_score, alert_score, net_pressure)
+
+        level_map = {item.get("key"): item for item in recovery.get("levels", [])}
+        invalidation = level_map.get("invalidation", {})
+        repair = level_map.get("repair", {})
+        confirmation = level_map.get("confirmation", {})
+        stress = level_map.get("stress", {})
+        target_level = level_map.get("target", {})
+        invalidation_value = safe_float(invalidation.get("value"), None)
+        repair_value = safe_float(repair.get("value"), None)
+        confirmation_value = safe_float(confirmation.get("value"), None)
+
+        def point_label(value):
+            return f"{value:,.0f}" if value else "--"
+
+        if posture == "进攻可用":
+            headline_action = "允许把新增风险预算分批推向目标区间上沿，但必须保留对冲和失效线。"
+        elif posture == "核心持有":
+            headline_action = "维持核心 NDX 暴露，把新增资金留给回踩、VWAP 或修复线确认。"
+        elif posture == "降档观察":
+            headline_action = "降低追高和集中暴露，超过目标上沿的仓位优先再平衡。"
+        else:
+            headline_action = "暂停进攻性加仓，先确认现金缓冲、保护覆盖和技术失效线。"
+
+        def account_row(key, label, lower, upper, cash_add, hedge_add, mandate):
+            row_lower = round(clamp(lower, 0, 100), 0)
+            row_upper = round(clamp(max(upper, row_lower), row_lower, 100), 0)
+            row_cash = round(clamp(cash_buffer + cash_add, 8, 80), 0)
+            row_hedge_lower = round(clamp(hedge_lower + hedge_add, 0, 90), 0)
+            row_hedge_upper = round(clamp(hedge_upper + hedge_add, row_hedge_lower, 95), 0)
+            if posture in ("防守执行", "降档观察") and key != "defensive":
+                action = "降档/等待"
+                color_key = "amber" if posture == "降档观察" else "red"
+            elif posture == "进攻可用" and key == "tactical":
+                action = "分批上调"
+                color_key = "green"
+            elif posture == "防守执行":
+                action = "防守执行"
+                color_key = "red"
+            else:
+                action = "核心持有"
+                color_key = "blue"
+            return {
+                "key": key,
+                "label": label,
+                "action": action,
+                "color": color_key,
+                "target_exposure": {"lower": row_lower, "upper": row_upper, "label": f"{row_lower:.0f}% - {row_upper:.0f}%"},
+                "cash_buffer": f"{row_cash:.0f}%+",
+                "hedge_coverage": f"{row_hedge_lower:.0f}% - {row_hedge_upper:.0f}%",
+                "max_loss_budget": f"{stress_downside * row_upper / 100:.1f}%",
+                "mandate": mandate,
+            }
+
+        defensive_upper = min(target_upper, max(target_lower, target_upper - 18))
+        balanced_lower = target_lower
+        balanced_upper = target_upper
+        tactical_upper = target_upper + (10 if posture == "进攻可用" else -6 if posture == "降档观察" else -14 if posture == "防守执行" else 3)
+        account_profiles = [
+            account_row("defensive", "防守账户", max(0, target_lower - 18), defensive_upper, 10, 8, "优先控制回撤和现金缓冲，只保留核心 NDX 暴露。"),
+            account_row("core", "核心账户", balanced_lower, balanced_upper, 0, 0, "围绕目标区间再平衡，避免观点驱动的一次性加仓。"),
+            account_row("tactical", "战术账户", max(target_lower, target_upper - 12), tactical_upper, -6, -4, "只在触发线确认后分批上调，盘中失效时快速降回核心区间。"),
+        ]
+
+        action_tickets = [
+            {
+                "key": "today",
+                "label": "今日执行",
+                "color": color,
+                "trigger": f"盘中状态：{intraday.get('regime', '盘中观察')}，VWAP 偏离 {safe_float(intraday.get('vwap_distance'), 0):+.2f}%。",
+                "action": headline_action,
+            },
+            {
+                "key": "invalidation",
+                "label": "失效线",
+                "color": "red" if posture == "防守执行" else "amber",
+                "trigger": f"NDX 收盘跌破 {point_label(invalidation_value)}。",
+                "action": f"把暴露压回防守账户区间，保护覆盖提高到 {hedge_upper:.0f}% 附近。",
+            },
+            {
+                "key": "repair",
+                "label": "修复线",
+                "color": "blue",
+                "trigger": f"NDX 收盘重新站上 {point_label(repair_value)}，且预警分低于 58。",
+                "action": "允许从防守区间恢复到核心账户目标区间。",
+            },
+            {
+                "key": "confirmation",
+                "label": "确认线",
+                "color": "green",
+                "trigger": f"NDX 站稳 {point_label(confirmation_value)}，罗盘和盘中 tape 同步改善。",
+                "action": "允许战术账户分批靠近上沿，但不得突破 playbook 目标上限。",
+            },
+        ]
+
+        guardrails = [
+            f"组合层 NDX 暴露不要超过 {target_upper:.0f}%，除非确认线、罗盘和盘中 tape 同时改善。",
+            f"现金缓冲维持 {cash_buffer:.0f}%+，用于承接 -{stress_downside:.1f}% 压力情景。",
+            f"保护覆盖维持 {hedge_lower:.0f}% - {hedge_upper:.0f}%，失效线未收复前不要提前撤保护。",
+            f"目标上沿对应压力损失预算约 {max_loss_budget:.1f}%，超过账户承受力时直接降档。",
+        ]
+
+        if posture == "进攻可用":
+            summary = f"NDX Playbook 允许分批上调风险预算，目标暴露 {target_lower:.0f}% - {target_upper:.0f}%，但执行必须绑定确认线和保护覆盖。"
+        elif posture == "核心持有":
+            summary = f"NDX Playbook 建议核心持有，目标暴露 {target_lower:.0f}% - {target_upper:.0f}%，新增资金等待修复线或盘中确认。"
+        elif posture == "降档观察":
+            summary = f"NDX Playbook 进入降档观察，净压力 {net_pressure:+.1f}，超过目标上沿的暴露应先再平衡。"
+        else:
+            summary = f"NDX Playbook 进入防守执行，预警分 {alert_score:.1f}，先保现金和保护覆盖，再讨论恢复风险预算。"
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round_optional(safe_float(capacity.get("index"), safe_float(recovery.get("index"), None)), 2),
+            "playbook_score": playbook_score,
+            "posture": posture,
+            "posture_color": color,
+            "summary": summary,
+            "headline_action": headline_action,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "target_exposure": {"lower": round(target_lower, 0), "upper": round(target_upper, 0), "label": f"{target_lower:.0f}% - {target_upper:.0f}%"},
+            "cash_buffer_min": round(cash_buffer, 0),
+            "hedge_coverage": {"lower": round(hedge_lower, 0), "upper": round(hedge_upper, 0), "label": f"{hedge_lower:.0f}% - {hedge_upper:.0f}%"},
+            "max_loss_budget": round(max_loss_budget, 1),
+            "stress_downside": round(stress_downside, 1),
+            "capacity_score": round(capacity_score, 1),
+            "regime_score": round(regime_score, 1),
+            "recovery_score": round(recovery_score, 1),
+            "alert_score": round(alert_score, 1),
+            "net_pressure": round(net_pressure, 1),
+            "tape_pressure_score": round(tape_pressure, 1),
+            "regime": regime.get("regime"),
+            "alert_level": alerts.get("alert_level"),
+            "recovery_regime": recovery.get("recovery_regime"),
+            "hedge_label": hedge.get("hedge_label"),
+            "intraday_regime": intraday.get("regime"),
+            "levels": [
+                {**stress, "key": "stress"} if stress else {"key": "stress", "label": "压力下沿", "value": None, "distance_label": "--", "color": "red"},
+                {**invalidation, "key": "invalidation"} if invalidation else {"key": "invalidation", "label": "失效线", "value": None, "distance_label": "--", "color": "amber"},
+                {**repair, "key": "repair"} if repair else {"key": "repair", "label": "修复线", "value": None, "distance_label": "--", "color": "blue"},
+                {**confirmation, "key": "confirmation"} if confirmation else {"key": "confirmation", "label": "确认线", "value": None, "distance_label": "--", "color": "green"},
+                {**target_level, "key": "target"} if target_level else {"key": "target", "label": "概率上沿", "value": None, "distance_label": "--", "color": "green"},
+            ],
+            "account_profiles": account_profiles,
+            "action_tickets": action_tickets,
+            "guardrails": guardrails,
+            "methodology": "把 NDX 风险承受力闸门、市场状态罗盘、风险贡献、预警、回撤修复路径、对冲覆盖、盘中交易台脉冲和风险预算矩阵压成账户分层执行 Playbook。该模块用于投委会动作、仓位上限、现金缓冲、保护覆盖和触发线管理，不构成买卖指令。",
+        }
+        risk_playbook_cache["data"] = data
+        risk_playbook_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX execution playbook updated: {posture}, score {playbook_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX execution playbook refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_rate_sensitivity_data(allow_dependency_refresh=True):
     global risk_rate_sensitivity_cache
 
@@ -6454,6 +6690,7 @@ def background_worker():
     last_recovery_path = 0
     last_contribution = 0
     last_capacity = 0
+    last_playbook = 0
     last_rate_sensitivity = 0
     while True:
         try:
@@ -6611,6 +6848,11 @@ def background_worker():
             if time.time() - last_capacity > 1800:
                 refresh_capacity_data()
                 last_capacity = time.time()
+
+            # NDX execution playbook every 30 minutes
+            if time.time() - last_playbook > 1800:
+                refresh_playbook_data()
+                last_playbook = time.time()
 
             # NDX valuation-rate sensitivity every 30 minutes
             if time.time() - last_rate_sensitivity > 1800:
@@ -6773,6 +7015,14 @@ def get_risk_capacity():
         refresh_capacity_data(allow_dependency_refresh="light")
 
     data = risk_capacity_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/playbook', methods=['GET'])
+def get_risk_playbook():
+    if not cache_is_fresh(risk_playbook_cache, 15 * 60) and should_refresh_empty_cache(risk_playbook_cache, 60):
+        refresh_playbook_data(allow_dependency_refresh="light")
+
+    data = risk_playbook_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/rate-sensitivity', methods=['GET'])

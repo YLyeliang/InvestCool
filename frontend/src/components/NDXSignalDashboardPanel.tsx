@@ -58,6 +58,22 @@ interface CapacityPayload {
   };
 }
 
+interface PlaybookPayload {
+  playbook_score: number;
+  posture: string;
+  target_exposure: {
+    lower: number;
+    upper: number;
+    label: string;
+  };
+  cash_buffer_min: number;
+  hedge_coverage: {
+    lower: number;
+    upper: number;
+    label: string;
+  };
+}
+
 interface FactorPayload {
   pressure_score: number;
   pressure_label: string;
@@ -206,6 +222,7 @@ interface DashboardData {
   alerts: AlertsPayload | null;
   contribution: ContributionPayload | null;
   capacity: CapacityPayload | null;
+  playbook: PlaybookPayload | null;
   factors: FactorPayload | null;
   rateSensitivity: RateSensitivityPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
@@ -342,6 +359,7 @@ export const NDXSignalDashboardPanel = () => {
           alerts,
           contribution,
           capacity,
+          playbook,
           factors,
           rateSensitivity,
           conditionMatrix,
@@ -368,6 +386,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<AlertsPayload>("/api/risk/alerts"),
           fetchJson<ContributionPayload>("/api/risk/contribution"),
           fetchJson<CapacityPayload>("/api/risk/capacity"),
+          fetchJson<PlaybookPayload>("/api/risk/playbook", 15000),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
@@ -389,7 +408,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volPremium, intradayTape, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volPremium, intradayTape, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -425,6 +444,7 @@ export const NDXSignalDashboardPanel = () => {
       data.regimeCompass?.regime_score ?? 50,
       data.recoveryPath?.recovery_score ?? 50,
       data.capacity?.capacity_score ?? 50,
+      data.playbook?.playbook_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
     const pressureScores = [riskScore, contributionScore, rateSensitivityScore, volPremiumScore, intradayTapeScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
@@ -476,6 +496,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.capacity ? `暴露 ${data.capacity.target_exposure.label} · 现金 ${data.capacity.cash_buffer_min.toFixed(0)}%+ · 保护 ${data.capacity.hedge_coverage.label}` : "等待承受力闸门",
         color: data.capacity ? scoreColor(data.capacity.capacity_score) : "blue",
         icon: "gauge",
+      },
+      {
+        label: "执行 Playbook",
+        value: data.playbook ? data.playbook.posture : "--",
+        detail: data.playbook ? `暴露 ${data.playbook.target_exposure.label} · 现金 ${data.playbook.cash_buffer_min.toFixed(0)}%+ · 保护 ${data.playbook.hedge_coverage.label}` : "等待执行手册",
+        color: data.playbook ? scoreColor(data.playbook.playbook_score) : "blue",
+        icon: "clipboard-list",
       },
       {
         label: "宏观压力",
@@ -624,7 +651,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 24 }).map((_, index) => (
+          {Array.from({ length: 25 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
