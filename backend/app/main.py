@@ -71,6 +71,7 @@ risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
+risk_gamma_map_cache = {"data": None, "last_update": None}
 risk_vol_premium_cache = {"data": None, "last_update": None}
 risk_intraday_tape_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
@@ -621,6 +622,17 @@ def options_risk_label(implied_move, put_call_oi_ratio):
     if implied_move <= 1.4 and put_call_oi_ratio < 0.75:
         return "定价平静", "green"
     return "常态定价", "blue"
+
+def gamma_map_regime(net_gamma_ratio, put_wall_distance):
+    if net_gamma_ratio >= 0.25:
+        return "正 Gamma 钉住", "green"
+    if net_gamma_ratio >= 0.06:
+        return "轻度钉住", "blue"
+    if net_gamma_ratio <= -0.25 or put_wall_distance > -1.5:
+        return "负 Gamma 风险", "red"
+    if net_gamma_ratio <= -0.06:
+        return "下方凸性", "amber"
+    return "Gamma 均衡", "blue"
 
 def liquidity_regime(score, distribution_days, accumulation_days, return_20d, volume_ratio, daily_return, range_expansion):
     if distribution_days >= 6 and return_20d < 0:
@@ -3222,6 +3234,165 @@ def clean_option_rows(frame):
     return rows
 
 
+def option_gamma_notional(row, spot, dte, sign=1):
+    strike = safe_float(row.get("strike"), 0)
+    iv = safe_float(row.get("iv"), 0)
+    open_interest = safe_float(row.get("open_interest"), 0)
+    if strike <= 0 or spot <= 0 or iv <= 0.01 or open_interest <= 0:
+        return 0
+
+    sigma = clamp(iv, 0.03, 3.0)
+    time_to_expiry = max(dte / 365, 1 / 365)
+    sqrt_time = time_to_expiry ** 0.5
+    d1 = (np.log(spot / strike) + 0.5 * sigma * sigma * time_to_expiry) / (sigma * sqrt_time)
+    pdf = np.exp(-0.5 * d1 * d1) / ((2 * np.pi) ** 0.5)
+    gamma = pdf / (spot * sigma * sqrt_time)
+    return sign * gamma * open_interest * 100 * spot * spot * 0.01
+
+
+def refresh_gamma_map_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_gamma_map_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        ticker = yf.Ticker(proxy_symbol)
+        price = safe_float(ticker.fast_info.last_price, 0)
+        if price <= 0:
+            raise ValueError("QQQ price unavailable for gamma map")
+
+        today = datetime.utcnow().date()
+        expirations = [
+            exp for exp in ticker.options
+            if datetime.strptime(exp, "%Y-%m-%d").date() > today
+        ]
+        if not expirations:
+            raise ValueError("No future QQQ option expirations available for gamma map")
+
+        selected_expiration = expirations[0]
+        expiry_date = datetime.strptime(selected_expiration, "%Y-%m-%d").date()
+        dte = max((expiry_date - today).days, 1)
+        chain = ticker.option_chain(selected_expiration)
+        calls = clean_option_rows(chain.calls)
+        puts = clean_option_rows(chain.puts)
+        if not calls or not puts:
+            raise ValueError("QQQ option chain unavailable or illiquid for gamma map")
+
+        call_by_strike = {}
+        for row in calls:
+            strike = row["strike"]
+            if abs(strike / price - 1) > 0.18:
+                continue
+            call_by_strike[strike] = call_by_strike.get(strike, 0) + option_gamma_notional(row, price, dte, sign=1)
+
+        put_by_strike = {}
+        for row in puts:
+            strike = row["strike"]
+            if abs(strike / price - 1) > 0.18:
+                continue
+            put_by_strike[strike] = put_by_strike.get(strike, 0) + option_gamma_notional(row, price, dte, sign=-1)
+
+        strikes = sorted(set(call_by_strike.keys()) | set(put_by_strike.keys()))
+        if not strikes:
+            raise ValueError("No strikes inside gamma map window")
+
+        rows = []
+        for strike in strikes:
+            call_gamma = safe_float(call_by_strike.get(strike), 0)
+            put_gamma = safe_float(put_by_strike.get(strike), 0)
+            net_gamma = call_gamma + put_gamma
+            total_abs = abs(call_gamma) + abs(put_gamma)
+            distance_pct = pct_change(strike, price)
+            rows.append({
+                "strike": round(strike, 2),
+                "call_gamma": round(call_gamma / 1_000_000, 2),
+                "put_gamma": round(put_gamma / 1_000_000, 2),
+                "net_gamma": round(net_gamma / 1_000_000, 2),
+                "total_abs_gamma": round(total_abs / 1_000_000, 2),
+                "distance_pct": round(distance_pct, 2),
+                "color": "green" if net_gamma > 0 else "red" if net_gamma < 0 else "blue",
+            })
+
+        call_gamma_total = sum(max(0, row["call_gamma"]) for row in rows)
+        put_gamma_total = abs(sum(min(0, row["put_gamma"]) for row in rows))
+        net_gamma_total = call_gamma_total - put_gamma_total
+        total_gamma = call_gamma_total + put_gamma_total
+        net_gamma_ratio = net_gamma_total / total_gamma if total_gamma else 0
+
+        gamma_wall = max(rows, key=lambda row: row["call_gamma"])
+        put_wall = min(rows, key=lambda row: row["put_gamma"])
+        max_abs_wall = max(rows, key=lambda row: row["total_abs_gamma"])
+        nearest_wall = min(
+            sorted(rows, key=lambda row: row["total_abs_gamma"], reverse=True)[:10],
+            key=lambda row: abs(row["distance_pct"]),
+        )
+        positive_walls = sorted([row for row in rows if row["net_gamma"] > 0], key=lambda row: row["net_gamma"], reverse=True)[:4]
+        negative_walls = sorted([row for row in rows if row["net_gamma"] < 0], key=lambda row: row["net_gamma"])[:4]
+        focus_rows = sorted(rows, key=lambda row: row["total_abs_gamma"], reverse=True)[:10]
+        focus_rows = sorted(focus_rows, key=lambda row: row["strike"])
+
+        flip_candidates = []
+        cumulative = 0
+        for row in sorted(rows, key=lambda item: item["strike"]):
+            cumulative += row["net_gamma"]
+            flip_candidates.append((abs(cumulative), row["strike"], cumulative))
+        _, flip_strike, flip_cumulative = min(flip_candidates, key=lambda item: item[0])
+
+        regime, color = gamma_map_regime(net_gamma_ratio, put_wall["distance_pct"])
+        gamma_score = round(clamp(50 - net_gamma_ratio * 85 + max(0, put_wall["distance_pct"] + 2) * 9), 1)
+
+        if regime == "正 Gamma 钉住":
+            summary = f"QQQ 最近到期 gamma 偏正，{gamma_wall['strike']:.0f} 附近是主要上方钉住位，短线波动可能被压低。"
+        elif regime == "轻度钉住":
+            summary = f"QQQ gamma 结构轻度偏正，现价附近 {nearest_wall['strike']:.0f} 的 OI/gamma 可能影响日内路径。"
+        elif regime == "负 Gamma 风险":
+            summary = f"QQQ gamma 结构偏负，下方 put wall 在 {put_wall['strike']:.0f}，跌近该区域时波动可能被放大。"
+        elif regime == "下方凸性":
+            summary = f"QQQ 下方 put gamma 更重，若跌破现价附近支撑，交易台需要关注负 gamma 放大效应。"
+        else:
+            summary = "QQQ gamma 结构接近均衡，单一行权价对 NDX 路径的钉住效应有限。"
+
+        controls = [
+            f"主要 gamma wall：{gamma_wall['strike']:.0f}（距现价 {gamma_wall['distance_pct']:+.2f}%），上破后短线阻力可能重定价。",
+            f"主要 put wall：{put_wall['strike']:.0f}（距现价 {put_wall['distance_pct']:+.2f}%），跌近该位时优先检查保护覆盖。",
+            f"Gamma flip 代理：{flip_strike:.0f}，累计净 gamma 约 {flip_cumulative:+.2f} 百万美元/1%。",
+            "该模块只用公开 OI 和 IV 估算定位压力，不能代表真实做市商库存方向。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "proxy_price": round(price, 2),
+            "expiration": selected_expiration,
+            "days_to_expiration": dte,
+            "gamma_score": gamma_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "net_gamma": round(net_gamma_total, 2),
+            "call_gamma": round(call_gamma_total, 2),
+            "put_gamma": round(put_gamma_total, 2),
+            "net_gamma_ratio": round(net_gamma_ratio, 3),
+            "gamma_wall": gamma_wall,
+            "put_wall": put_wall,
+            "max_abs_wall": max_abs_wall,
+            "nearest_wall": nearest_wall,
+            "flip_strike": round(flip_strike, 2),
+            "flip_cumulative": round(flip_cumulative, 2),
+            "positive_walls": positive_walls,
+            "negative_walls": negative_walls,
+            "strikes": focus_rows,
+            "controls": controls,
+            "methodology": "使用 QQQ 最近未来到期期权链，按公开 IV、未平仓量和 Black-Scholes gamma 估算每个行权价的 call/put gamma notional，并用 call gamma 为正、put gamma 为负构造净 gamma 代理。该模块用于观察行权价定位和短线波动放大/钉住风险，不代表真实做市商库存或交易建议。",
+        }
+        risk_gamma_map_cache["data"] = data
+        risk_gamma_map_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX gamma map updated: {regime}, score {gamma_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX gamma map refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_options_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_options_cache
@@ -5634,6 +5805,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
             ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
             ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60, False),
+            ("gamma", risk_gamma_map_cache, refresh_gamma_map_data, 15 * 60, False),
             ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
             ("vol_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60, False),
             ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60, False),
@@ -5652,6 +5824,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "rate_sensitivity",
             "intraday",
             "hedge",
+            "gamma",
             "vol_premium",
             "vol_term",
             "breadth",
@@ -5685,6 +5858,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
         intraday = risk_intraday_tape_cache.get("data") or {}
         hedge = risk_hedge_overlay_cache.get("data") or {}
+        gamma = risk_gamma_map_cache.get("data") or {}
         vol_premium = risk_vol_premium_cache.get("data") or {}
         vol_term = risk_volatility_term_cache.get("data") or {}
         breadth = risk_breadth_cache.get("data") or {}
@@ -5707,6 +5881,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             rate_sensitivity.get("rate_sensitivity_score"),
             intraday.get("tape_pressure_score"),
             hedge.get("hedge_score"),
+            gamma.get("gamma_score"),
             vol_premium.get("premium_score"),
             vol_term.get("term_score"),
             valuation.get("valuation_score"),
@@ -5781,9 +5956,9 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
                 "key": "vol_hedge",
                 "label": "波动保护",
                 "color": hedge.get("hedge_color", risk_color(safe_float(hedge.get("hedge_score"), 50))),
-                "state": hedge.get("hedge_label", vol_term.get("regime", "等待波动定价")),
-                "readout": f"隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}% / 实现 {safe_float(vol_premium.get('realized_move'), 0):.2f}% / VIX曲线 {vol_term.get('regime', '--')}",
-                "action": "保护覆盖跟随 Playbook 区间，不在波动率快速上行时一次性补足保险。",
+                "state": hedge.get("hedge_label", gamma.get("regime", vol_term.get("regime", "等待波动定价"))),
+                "readout": f"Gamma {gamma.get('regime', '--')} / 隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}% / VIX曲线 {vol_term.get('regime', '--')}",
+                "action": f"保护覆盖跟随 Playbook 区间；若跌近 put wall {safe_float((gamma.get('put_wall') or {}).get('strike'), 0):.0f}，先提高保护再讨论加仓。",
             },
         ]
 
@@ -5818,6 +5993,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "pressure_score": round(pressure_score, 1),
             "alert_score": round(alert_score, 1),
             "tape_pressure_score": round(tape_pressure, 1),
+            "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
             "cash_buffer": cash_label,
@@ -6902,6 +7078,7 @@ def background_worker():
     last_theme_rotation = 0
     last_dispersion = 0
     last_options = 0
+    last_gamma_map = 0
     last_volatility_term = 0
     last_vol_premium = 0
     last_intraday_tape = 0
@@ -6981,6 +7158,11 @@ def background_worker():
             if time.time() - last_options > 1800:
                 refresh_options_data()
                 last_options = time.time()
+
+            # QQQ option gamma map every 30 minutes
+            if time.time() - last_gamma_map > 1800:
+                refresh_gamma_map_data()
+                last_gamma_map = time.time()
 
             # VIX term structure every 30 minutes
             if time.time() - last_volatility_term > 1800:
@@ -7320,6 +7502,14 @@ def get_risk_options():
         refresh_options_data()
 
     data = risk_options_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/gamma-map', methods=['GET'])
+def get_risk_gamma_map():
+    if not cache_is_fresh(risk_gamma_map_cache, 15 * 60) and should_refresh_empty_cache(risk_gamma_map_cache, 60):
+        refresh_gamma_map_data()
+
+    data = risk_gamma_map_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/volatility-term', methods=['GET'])
