@@ -10943,6 +10943,156 @@ def get_risk_position_sizing():
     })
 
 
+def route_json_payload(result):
+    if isinstance(result, tuple):
+        response, status = result[0], result[1]
+        if status and status >= 300:
+            return None
+        return response.get_json(silent=True) if hasattr(response, "get_json") else None
+    return result.get_json(silent=True) if hasattr(result, "get_json") else None
+
+
+@app.route('/api/risk/execution-ticket', methods=['GET'])
+def get_risk_execution_ticket():
+    sizing = route_json_payload(get_risk_position_sizing()) or {}
+    checklist = route_json_payload(get_risk_pre_trade_checklist()) or {}
+    trigger = route_json_payload(get_risk_trigger_monitor()) or {}
+    portfolio = route_json_payload(get_risk_portfolio_actions()) or {}
+    playbook = risk_module_payload("playbook") or {}
+    hedge = risk_module_payload("hedge_overlay") or {}
+    alerts = risk_module_payload("alerts") or {}
+
+    if not sizing or not checklist or not trigger:
+        return jsonify({"error": "Initializing"}), 202
+
+    headline_color = checklist.get("headline_color", sizing.get("headline_color", "blue"))
+    hard_cap = safe_float(sizing.get("hard_cap"), 0)
+    max_tranche = safe_float(sizing.get("max_single_tranche"), 0)
+    initial_tranche = safe_float(sizing.get("initial_tranche"), 0)
+    readiness_score = safe_float(checklist.get("readiness_score"), 0)
+    fail_count = int(checklist.get("fail_count") or 0)
+    watch_count = int(checklist.get("watch_count") or 0)
+    alert_score = safe_float(alerts.get("alert_score"), checklist.get("alert_score", 50))
+    nearest_down = trigger.get("nearest_down") or {}
+    nearest_up = trigger.get("nearest_up") or {}
+    lines = {item.get("key"): item for item in (trigger.get("lines") or []) if isinstance(item, dict)}
+    invalidation = lines.get("invalidation") or nearest_down
+    repair = lines.get("repair") or nearest_up
+    confirmation = lines.get("confirmation") or lines.get("target") or nearest_up
+
+    if fail_count >= 2 or headline_color == "red" or hard_cap <= 0:
+        headline = "不生成新增交易"
+        ticket_color = "red"
+        ticket_type = "No Trade"
+        bias = "防守降档"
+        summary = "投前门槛未通过，交易台只处理降险、现金缓冲和保护覆盖。"
+    elif fail_count >= 1 or watch_count >= 4 or alert_score >= 70:
+        headline = "仅允许观察票据"
+        ticket_color = "amber"
+        ticket_type = "Observation Ticket"
+        bias = "防守观察"
+        summary = "可以做小额观察或再平衡，但新增风险必须绑定失效线和收盘确认。"
+    elif readiness_score >= 78 and max_tranche > 0:
+        headline = "允许分批执行票据"
+        ticket_color = "green"
+        ticket_type = "Staged Long Ticket"
+        bias = "分批恢复"
+        summary = "核心门槛通过，可按修复线、确认线和仓位 sizing 分批释放预算。"
+    else:
+        headline = "允许小额执行票据"
+        ticket_color = "blue"
+        ticket_type = "Small Tranche Ticket"
+        bias = "中性试单"
+        summary = "多数门槛可用，但仍需要用小 tranche 和保护覆盖控制风险。"
+
+    sizing_ladder = sizing.get("sizing_ladder") or []
+    ladder_map = {item.get("key"): item for item in sizing_ladder if isinstance(item, dict)}
+    observe_step = ladder_map.get("observe", {})
+    repair_step = ladder_map.get("repair", {})
+    confirmation_step = ladder_map.get("confirmation", {})
+    stop_step = ladder_map.get("stop", {})
+
+    orders = [
+        {
+            "key": "observe",
+            "label": "观察单",
+            "color": observe_step.get("color", "amber"),
+            "size": observe_step.get("size", f"{initial_tranche:.1f}%"),
+            "trigger": observe_step.get("trigger") or f"NDX 未跌破 {safe_float(invalidation.get('value'), 0):,.0f}，但尚未修复。",
+            "action": observe_step.get("action") or "只测试执行质量，不把观察单外推成趋势确认。",
+            "status": "enabled" if initial_tranche > 0 and ticket_color != "red" else "blocked",
+        },
+        {
+            "key": "repair",
+            "label": "修复加仓",
+            "color": repair_step.get("color", "blue"),
+            "size": repair_step.get("size", f"{max_tranche:.1f}%"),
+            "trigger": repair_step.get("trigger") or f"收盘站上修复线 {safe_float(repair.get('value'), 0):,.0f}。",
+            "action": repair_step.get("action") or "把暴露恢复到目标区间中枢，继续保留保护覆盖。",
+            "status": "waiting" if ticket_color in ("blue", "green", "amber") else "blocked",
+        },
+        {
+            "key": "confirmation",
+            "label": "确认加仓",
+            "color": confirmation_step.get("color", "green"),
+            "size": confirmation_step.get("size", f"{min(max_tranche * 1.2, 10):.1f}%"),
+            "trigger": confirmation_step.get("trigger") or f"站稳确认线 {safe_float(confirmation.get('value'), 0):,.0f}。",
+            "action": confirmation_step.get("action") or "只在总暴露低于硬上限时推向目标区间上沿。",
+            "status": "waiting" if ticket_color == "green" else "locked",
+        },
+        {
+            "key": "stop",
+            "label": "失效降档",
+            "color": stop_step.get("color", "red"),
+            "size": stop_step.get("size", f"-{max_tranche:.1f}%+"),
+            "trigger": stop_step.get("trigger") or f"收盘跌破失效线 {safe_float(invalidation.get('value'), 0):,.0f}。",
+            "action": stop_step.get("action") or "降低新增仓位和超标核心暴露，保护覆盖向上沿靠拢。",
+            "status": "armed",
+        },
+    ]
+
+    hedge_coverage = playbook.get("hedge_coverage") or sizing.get("hedge_coverage") or {}
+    target_exposure = sizing.get("target_exposure") or playbook.get("target_exposure") or {}
+    portfolio_matrix = portfolio.get("matrix") or []
+    top_matrix = portfolio_matrix[0] if portfolio_matrix else {}
+    allowed_actions = checklist.get("allowed_actions") or []
+    blocked_actions = checklist.get("blocked_actions") or []
+    next_confirmations = checklist.get("next_confirmations") or []
+
+    guardrails = [
+        f"总 NDX 暴露不得高于 {hard_cap:.1f}%，目标区间 {target_exposure.get('label', '--')}。",
+        f"单笔 tranche 上限 {max_tranche:.1f}%，初始观察单 {initial_tranche:.1f}%。",
+        f"现金缓冲至少 {safe_float(sizing.get('cash_buffer_min'), playbook.get('cash_buffer_min')):.0f}%+。",
+        f"保护覆盖维持 {hedge_coverage.get('label', hedge.get('hedge_label', '--'))}，建议 {safe_float(hedge.get('protection_lower'), 0):.0f}-{safe_float(hedge.get('protection_upper'), 0):.0f}%。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": ticket_color,
+        "ticket_type": ticket_type,
+        "bias": bias,
+        "summary": summary,
+        "index": sizing.get("index"),
+        "readiness_score": round(readiness_score, 1),
+        "hard_cap": round(hard_cap, 1),
+        "max_single_tranche": round(max_tranche, 1),
+        "initial_tranche": round(initial_tranche, 1),
+        "target_exposure": target_exposure,
+        "binding_constraint": sizing.get("binding_constraint"),
+        "nearest_down": nearest_down,
+        "nearest_up": nearest_up,
+        "orders": orders,
+        "guardrails": guardrails,
+        "allowed_actions": allowed_actions,
+        "blocked_actions": blocked_actions,
+        "next_confirmations": next_confirmations,
+        "risk_control": top_matrix.get("risk_control", portfolio.get("stance", "")),
+        "hedge_note": hedge.get("summary", "保护覆盖用于约束失效线后的组合下行。"),
+        "methodology": "把投前检查、仓位 sizing、触发线监控、组合动作矩阵、Playbook 和保护覆盖压成单张执行票据，用于明确可执行动作、等待条件、失效降档和仓位上限。该模块用于交易台流程和风控记录，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None

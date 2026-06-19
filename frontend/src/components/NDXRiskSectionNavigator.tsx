@@ -27,6 +27,7 @@ const groups: NavGroup[] = [
       { label: "风险回报", target: "risk-reward-section", icon: "scale" },
       { label: "投前检查", target: "pre-trade-checklist-section", icon: "clipboard-check" },
       { label: "仓位Sizing", target: "position-sizing-section", icon: "calculator" },
+      { label: "执行票据", target: "execution-ticket-section", icon: "file-check-2" },
       { label: "动作矩阵", target: "portfolio-actions-section", icon: "table-properties" },
       { label: "数据质量", target: "data-quality-section", icon: "database-zap" },
       { label: "模块趋势", target: "module-trends-section", icon: "activity" },

@@ -11,6 +11,7 @@ import { NDXTriggerMonitorPanel } from "@/components/NDXTriggerMonitorPanel";
 import { NDXRiskRewardPanel } from "@/components/NDXRiskRewardPanel";
 import { NDXPreTradeChecklistPanel } from "@/components/NDXPreTradeChecklistPanel";
 import { NDXPositionSizingPanel } from "@/components/NDXPositionSizingPanel";
+import { NDXExecutionTicketPanel } from "@/components/NDXExecutionTicketPanel";
 import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
 import { NDXModuleTrendPanel } from "@/components/NDXModuleTrendPanel";
@@ -203,6 +204,13 @@ export default function RiskPage() {
           <Icon name="lucide:calculator" className="text-[var(--accent-color)]" /> NDX 仓位 Sizing
         </h3>
         <NDXPositionSizingPanel />
+      </section>
+
+      <section id="execution-ticket-section" className="execution-ticket-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:file-check-2" className="text-[var(--accent-color)]" /> NDX 执行票据
+        </h3>
+        <NDXExecutionTicketPanel />
       </section>
 
       <section id="portfolio-actions-section" className="portfolio-actions-section">
