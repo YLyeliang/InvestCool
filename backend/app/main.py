@@ -66,6 +66,7 @@ risk_budget_cache = {"data": None, "last_update": None}
 risk_concentration_cache = {"data": None, "last_update": None}
 risk_factors_cache = {"data": None, "last_update": None}
 risk_factor_attribution_cache = {"data": None, "last_update": None}
+risk_factor_shock_cache = {"data": None, "last_update": None}
 risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
@@ -316,6 +317,15 @@ def rate_sensitivity_regime(score):
     if score >= 36:
         return "可控敏感", "blue"
     return "利率缓冲", "green"
+
+def factor_shock_regime(score):
+    if score >= 75:
+        return "冲击高敏", "red"
+    if score >= 55:
+        return "冲击偏敏", "amber"
+    if score >= 35:
+        return "冲击可控", "blue"
+    return "冲击低敏", "green"
 
 def vol_premium_regime(underpricing_pressure, carry_cost):
     if underpricing_pressure >= 65:
@@ -2069,6 +2079,247 @@ def refresh_factor_attribution_data():
         logger.info(f"NDX factor attribution updated: {regime}, actual {actual_return:.2f}%")
     except Exception as e:
         logger.error(f"NDX factor attribution refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_factor_shock_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_factor_shock_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "spy": "SPY",
+            "smh": "SMH",
+            "rates": "^TNX",
+            "vix": "^VIX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "2y", min_rows=300, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+        try:
+            close_map["dollar"] = fetch_ohlc_history("DX-Y.NYB", "2y", min_rows=300, attempts=2)["Close"]
+            dollar_symbol = "DX-Y.NYB"
+        except Exception:
+            close_map["dollar"] = fetch_ohlc_history("UUP", "2y", min_rows=300, attempts=3)["Close"]
+            dollar_symbol = "UUP"
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 260:
+            raise ValueError("Insufficient aligned factor shock history")
+
+        returns = pd.DataFrame(index=prices.index)
+        returns["qqq"] = prices["qqq"].pct_change() * 100
+        returns["market"] = prices["spy"].pct_change() * 100
+        returns["semis_active"] = (prices["smh"].pct_change() - prices["spy"].pct_change()) * 100
+        returns["rates"] = prices["rates"].diff() * 100
+        returns["dollar"] = prices["dollar"].pct_change() * 100
+        returns["vix"] = prices["vix"].diff()
+        returns = returns.replace([np.inf, -np.inf], np.nan).dropna()
+        if len(returns) < 240:
+            raise ValueError("Insufficient factor shock returns")
+
+        factor_defs = [
+            {"key": "market", "label": "市场 Beta", "unit": "SPY %"},
+            {"key": "semis_active", "label": "半导体主动", "unit": "SMH-SPY pt"},
+            {"key": "rates", "label": "10Y 利率", "unit": "bps"},
+            {"key": "dollar", "label": "美元指数", "unit": "%"},
+            {"key": "vix", "label": "VIX", "unit": "pts"},
+        ]
+        factor_keys = [item["key"] for item in factor_defs]
+        train = returns.tail(252)
+        y = train["qqq"].to_numpy(dtype=float)
+        x = train[factor_keys].to_numpy(dtype=float)
+        design = np.column_stack([np.ones(len(x)), x])
+        coeffs, *_ = np.linalg.lstsq(design, y, rcond=None)
+        fitted = design @ coeffs
+        ss_res = float(np.sum((y - fitted) ** 2))
+        ss_tot = float(np.sum((y - y.mean()) ** 2))
+        r_squared = 1 - ss_res / ss_tot if ss_tot else 0
+        beta_map = {factor["key"]: float(coeffs[index]) for index, factor in enumerate(factor_defs, start=1)}
+
+        def scenario_move(shocks):
+            contributors = []
+            total = 0.0
+            for factor in factor_defs:
+                key = factor["key"]
+                shock = safe_float(shocks.get(key), 0)
+                beta = beta_map[key]
+                contribution = beta * shock
+                total += contribution
+                if contribution <= -0.75:
+                    color = "red"
+                elif contribution < -0.2:
+                    color = "amber"
+                elif contribution >= 0.75:
+                    color = "green"
+                else:
+                    color = "blue"
+                contributors.append({
+                    "key": key,
+                    "label": factor["label"],
+                    "unit": factor["unit"],
+                    "shock": round(shock, 2),
+                    "beta": round(beta, 3),
+                    "contribution": round(contribution, 2),
+                    "color": color,
+                })
+            return round(total, 2), contributors
+
+        scenario_defs = [
+            {
+                "key": "rates_plus_50",
+                "label": "利率上行 50bps",
+                "description": "10Y 突然上行，测试久期估值承压。",
+                "shocks": {"rates": 50},
+            },
+            {
+                "key": "vix_plus_5",
+                "label": "VIX 上行 5 点",
+                "description": "保护需求升温，测试风险厌恶冲击。",
+                "shocks": {"vix": 5},
+            },
+            {
+                "key": "dollar_plus_2",
+                "label": "美元上行 2%",
+                "description": "美元与全球流动性收紧的折现压力。",
+                "shocks": {"dollar": 2},
+            },
+            {
+                "key": "semis_down_5",
+                "label": "半导体主动 -5pt",
+                "description": "AI/芯片主线相对大盘走弱。",
+                "shocks": {"semis_active": -5},
+            },
+            {
+                "key": "market_down_3",
+                "label": "SPY 下跌 3%",
+                "description": "系统性 beta 压力传导至 QQQ。",
+                "shocks": {"market": -3},
+            },
+            {
+                "key": "stress_combo",
+                "label": "组合压力",
+                "description": "利率、VIX、美元和 beta 同时逆风。",
+                "shocks": {"market": -3, "semis_active": -4, "rates": 35, "dollar": 1.5, "vix": 6},
+            },
+            {
+                "key": "relief_combo",
+                "label": "缓和组合",
+                "description": "利率和波动回落，半导体重新领涨。",
+                "shocks": {"market": 2, "semis_active": 3, "rates": -25, "dollar": -1, "vix": -3},
+            },
+            {
+                "key": "ai_leadership",
+                "label": "AI 主线修复",
+                "description": "半导体主动走强并带动成长风险偏好。",
+                "shocks": {"market": 1.5, "semis_active": 4, "vix": -1},
+            },
+        ]
+
+        proxy_price = float(prices["qqq"].iloc[-1])
+        scenarios = []
+        for definition in scenario_defs:
+            estimated_move, contributors = scenario_move(definition["shocks"])
+            scenarios.append({
+                "key": definition["key"],
+                "label": definition["label"],
+                "description": definition["description"],
+                "estimated_move": estimated_move,
+                "estimated_price": round(proxy_price * (1 + estimated_move / 100), 2),
+                "contributors": contributors,
+                "shocks": {key: round(safe_float(value, 0), 2) for key, value in definition["shocks"].items()},
+                "color": "green" if estimated_move >= 1 else "blue" if estimated_move >= -1 else "amber" if estimated_move >= -2.5 else "red",
+            })
+
+        stress = next(item for item in scenarios if item["key"] == "stress_combo")
+        relief = next(item for item in scenarios if item["key"] == "relief_combo")
+        worst = min(scenarios, key=lambda item: item["estimated_move"])
+        best = max(scenarios, key=lambda item: item["estimated_move"])
+        rates_move = next(item for item in scenarios if item["key"] == "rates_plus_50")
+        vix_move = next(item for item in scenarios if item["key"] == "vix_plus_5")
+        semis_move = next(item for item in scenarios if item["key"] == "semis_down_5")
+
+        shock_score = clamp(
+            30
+            + max(0, -stress["estimated_move"]) * 8
+            + max(0, -worst["estimated_move"]) * 5
+            + max(0, -rates_move["estimated_move"]) * 2.5
+            + max(0, -vix_move["estimated_move"]) * 2
+            + max(0, -semis_move["estimated_move"]) * 1.5
+            - max(0, relief["estimated_move"]) * 2
+            + max(0, 0.55 - safe_float(r_squared, 0)) * 10
+        )
+        regime, color = factor_shock_regime(shock_score)
+
+        if shock_score >= 75:
+            summary = f"NDX 当前对组合因子冲击高度敏感，压力组合估算 {stress['estimated_move']:+.2f}%，最弱情景为 {worst['label']}。"
+        elif shock_score >= 55:
+            summary = f"NDX 因子冲击敏感度偏高，压力组合估算 {stress['estimated_move']:+.2f}%，需要把利率、VIX 与半导体主动收益放在同一张执行表里。"
+        elif shock_score >= 35:
+            summary = f"NDX 因子冲击仍可控，压力组合估算 {stress['estimated_move']:+.2f}%，但若 {worst['label']} 同时出现，应下调新增风险预算。"
+        else:
+            summary = f"NDX 对假设冲击的线性敏感度较低，缓和组合估算 {relief['estimated_move']:+.2f}%，当前更适合观察趋势确认。"
+
+        betas = []
+        for factor in factor_defs:
+            key = factor["key"]
+            beta = beta_map[key]
+            recent_20d = float(returns[key].tail(20).sum())
+            recent_impact = beta * recent_20d
+            if key in ("rates", "vix", "dollar") and recent_impact < -0.4:
+                color_key = "red"
+            elif recent_impact > 0.4:
+                color_key = "green"
+            elif abs(recent_impact) >= 0.4:
+                color_key = "amber"
+            else:
+                color_key = "blue"
+            betas.append({
+                "key": key,
+                "label": factor["label"],
+                "unit": factor["unit"],
+                "beta": round(beta, 3),
+                "recent_20d_move": round(recent_20d, 2),
+                "recent_20d_impact": round(recent_impact, 2),
+                "color": color_key,
+            })
+
+        controls = [
+            f"若 {worst['label']} 开始兑现，优先把新增仓位延后到压力释放后，而不是用均值回归做加仓理由。",
+            f"压力组合线性估算 {stress['estimated_move']:+.2f}%，应与 Playbook 失效线和对冲覆盖一起使用。",
+            f"模型 R2 为 {safe_float(r_squared, 0):.2f}，当解释度下降时，需要用盘中 tape 和期权偏斜确认冲击是否已经转为非线性。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "proxy_symbol": "QQQ",
+            "proxy_price": round(proxy_price, 2),
+            "dollar_symbol": dollar_symbol,
+            "regression_days": len(train),
+            "shock_score": round(shock_score, 1),
+            "regime": regime,
+            "regime_color": color,
+            "stress_move": stress["estimated_move"],
+            "relief_move": relief["estimated_move"],
+            "worst_case_label": worst["label"],
+            "worst_case_move": worst["estimated_move"],
+            "best_case_label": best["label"],
+            "best_case_move": best["estimated_move"],
+            "r_squared": round(float(r_squared), 2),
+            "summary": summary,
+            "scenarios": scenarios,
+            "betas": betas,
+            "controls": controls,
+            "methodology": "使用最近 252 个交易日 QQQ 日收益对 SPY、SMH 主动收益、10Y 利率变化、美元和 VIX 变化做 OLS 回归，再把假设冲击乘以估计 beta 得到线性情景影响。结果用于风险敏感度和执行约束，不构成收益预测。",
+        }
+        risk_factor_shock_cache["data"] = data
+        risk_factor_shock_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX factor shock updated: {regime}, stress {stress['estimated_move']:+.2f}%")
+    except Exception as e:
+        logger.error(f"NDX factor shock refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -6735,6 +6986,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60, True),
             ("analog", risk_regime_analog_cache, refresh_regime_analog_data, 15 * 60, False),
             ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
+            ("factor_shock", risk_factor_shock_cache, refresh_factor_shock_data, 15 * 60, False),
             ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
             ("volume_profile", risk_volume_profile_cache, refresh_volume_profile_data, 5 * 60, False),
             ("cross_asset", risk_cross_asset_cache, refresh_cross_asset_data, 15 * 60, False),
@@ -6758,6 +7010,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "recovery",
             "analog",
             "rate_sensitivity",
+            "factor_shock",
             "intraday",
             "volume_profile",
             "cross_asset",
@@ -6796,6 +7049,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         recovery = risk_recovery_path_cache.get("data") or {}
         analog = risk_regime_analog_cache.get("data") or {}
         rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
+        factor_shock = risk_factor_shock_cache.get("data") or {}
         intraday = risk_intraday_tape_cache.get("data") or {}
         volume_profile = risk_volume_profile_cache.get("data") or {}
         cross_asset = risk_cross_asset_cache.get("data") or {}
@@ -6823,6 +7077,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             contribution.get("risk_contribution_score"),
             100 - safe_float(analog.get("analog_score"), 50),
             rate_sensitivity.get("rate_sensitivity_score"),
+            factor_shock.get("shock_score"),
             intraday.get("tape_pressure_score"),
             volume_profile.get("profile_score"),
             100 - safe_float(cross_asset.get("confirmation_score"), 50),
@@ -6888,10 +7143,10 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             {
                 "key": "macro_valuation",
                 "label": "估值利率",
-                "color": risk_color(safe_float(rate_sensitivity.get("rate_sensitivity_score"), 50)),
-                "state": rate_sensitivity.get("rate_sensitivity_regime", valuation.get("valuation_label", "等待估值")),
-                "readout": f"10Y {safe_float(rate_sensitivity.get('rate_change_20d_bps'), 0):+.1f}bps / FPE {safe_float(rate_sensitivity.get('weighted_forward_pe'), safe_float(valuation.get('weighted_forward_pe'), 0)):.1f}x / 50bps 风险 {safe_float(rate_sensitivity.get('ndx_multiple_risk'), 0):.1f}%",
-                "action": "利率继续上行时，把估值扩张假设切换为盈利兑现假设，减少远端成长暴露。",
+                "color": risk_color(avg([rate_sensitivity.get("rate_sensitivity_score"), factor_shock.get("shock_score")])),
+                "state": f"{rate_sensitivity.get('rate_sensitivity_regime', valuation.get('valuation_label', '等待估值'))} / {factor_shock.get('regime', '等待冲击')}",
+                "readout": f"10Y {safe_float(rate_sensitivity.get('rate_change_20d_bps'), 0):+.1f}bps / FPE {safe_float(rate_sensitivity.get('weighted_forward_pe'), safe_float(valuation.get('weighted_forward_pe'), 0)):.1f}x / Stress {safe_float(factor_shock.get('stress_move'), 0):+.2f}%",
+                "action": "利率继续上行或因子冲击转敏时，把估值扩张假设切换为盈利兑现假设，减少远端成长暴露。",
             },
             {
                 "key": "historical_analog",
@@ -6953,6 +7208,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "profile_score": round(safe_float(volume_profile.get("profile_score"), 50), 1),
             "cross_asset_score": round(safe_float(cross_asset.get("confirmation_score"), 50), 1),
             "analog_score": round(safe_float(analog.get("analog_score"), 50), 1),
+            "factor_shock_score": round(safe_float(factor_shock.get("shock_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "skew_score": round(safe_float(skew.get("skew_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
@@ -6964,7 +7220,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、因子冲击、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -8035,6 +8291,7 @@ def background_worker():
     last_concentration = 0
     last_factors = 0
     last_factor_attribution = 0
+    last_factor_shock = 0
     last_condition_matrix = 0
     last_funding_conditions = 0
     last_cross_asset = 0
@@ -8087,6 +8344,11 @@ def background_worker():
             if time.time() - last_factor_attribution > 1800:
                 refresh_factor_attribution_data()
                 last_factor_attribution = time.time()
+
+            # NDX factor shock lab every 30 minutes
+            if time.time() - last_factor_shock > 1800:
+                refresh_factor_shock_data()
+                last_factor_shock = time.time()
 
             # NDX condition matrix every 30 minutes
             if time.time() - last_condition_matrix > 1800:
@@ -8355,6 +8617,14 @@ def get_risk_attribution():
         refresh_factor_attribution_data()
 
     data = risk_factor_attribution_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/factor-shock', methods=['GET'])
+def get_risk_factor_shock():
+    if not cache_is_fresh(risk_factor_shock_cache, 15 * 60) and should_refresh_empty_cache(risk_factor_shock_cache, 60):
+        refresh_factor_shock_data()
+
+    data = risk_factor_shock_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/condition-matrix', methods=['GET'])

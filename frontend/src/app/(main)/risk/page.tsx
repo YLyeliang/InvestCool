@@ -15,6 +15,7 @@ import { NDXRiskDiagnosticsPanel } from "@/components/NDXRiskDiagnosticsPanel";
 import { NDXContributionPanel } from "@/components/NDXContributionPanel";
 import { NDXCapacityGatePanel } from "@/components/NDXCapacityGatePanel";
 import { NDXFactorPressurePanel } from "@/components/NDXFactorPressurePanel";
+import { NDXFactorShockPanel } from "@/components/NDXFactorShockPanel";
 import { NDXRateSensitivityPanel } from "@/components/NDXRateSensitivityPanel";
 import { NDXConditionMatrixPanel } from "@/components/NDXConditionMatrixPanel";
 import { NDXFundingConditionsPanel } from "@/components/NDXFundingConditionsPanel";
@@ -228,6 +229,13 @@ export default function RiskPage() {
           <Icon name="lucide:line-chart" className="text-[var(--accent-color)]" /> 宏观因子压力
         </h3>
         <NDXFactorPressurePanel />
+      </section>
+
+      <section className="factor-shock-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:flask-conical" className="text-[var(--accent-color)]" /> NDX 因子冲击实验室
+        </h3>
+        <NDXFactorShockPanel />
       </section>
 
       <section className="rate-sensitivity-section">
