@@ -290,6 +290,58 @@ DASHBOARD_MODULES = {
     "concentration": "concentration",
 }
 
+RISK_MODULE_LABELS = {
+    "diagnostics": "风险诊断",
+    "scenarios": "情景分析",
+    "budget": "风险预算",
+    "concentration": "集中度",
+    "factors": "宏观因子",
+    "attribution": "因子归因",
+    "factor_shock": "因子冲击",
+    "levels": "技术位",
+    "tail": "尾部风险",
+    "relative": "相对强弱",
+    "dispersion": "MAG7 分化",
+    "correlation_stress": "相关性压力",
+    "options": "期权定价",
+    "gamma_map": "Gamma 定位",
+    "option_skew": "期权偏斜",
+    "vol_premium": "波动溢价",
+    "volatility_cone": "波动锥",
+    "intraday_tape": "盘中 Tape",
+    "volume_profile": "成交分布",
+    "liquidity": "流动性",
+    "valuation": "估值压力",
+    "quality": "盈利质量",
+    "breadth": "等权广度",
+    "volatility_term": "波动曲线",
+    "earnings": "财报催化",
+    "theme_rotation": "主题轮动",
+    "hedge_overlay": "对冲覆盖",
+    "condition_matrix": "条件矩阵",
+    "funding_conditions": "融资条件",
+    "cross_asset": "跨资产确认",
+    "regime_compass": "市场状态罗盘",
+    "alerts": "风险预警",
+    "scenario_map": "情景概率图",
+    "recovery_path": "修复路径",
+    "contribution": "风险贡献",
+    "capacity": "承受力闸门",
+    "playbook": "执行 Playbook",
+    "desk_brief": "Desk Brief",
+    "rate_sensitivity": "估值利率敏感度",
+    "regime_analog": "历史类比",
+}
+
+DEFAULT_RISK_MODULE_SLA_SECONDS = 45 * 60
+RISK_MODULE_SLA_SECONDS = {
+    "intraday_tape": 10 * 60,
+    "volume_profile": 10 * 60,
+    "valuation": 8 * 60 * 60,
+    "quality": 8 * 60 * 60,
+    "earnings": 8 * 60 * 60,
+}
+
 
 def persist_risk_module_snapshot(module_key, data):
     if not data:
@@ -9142,6 +9194,92 @@ def get_risk_dashboard():
     modules["available_modules"] = available
     modules["total_modules"] = total_modules
     return jsonify(modules)
+
+
+@app.route('/api/risk/data-quality', methods=['GET'])
+def get_risk_data_quality():
+    now = datetime.utcnow()
+    snapshots = {
+        snapshot.module_key: snapshot
+        for snapshot in RiskModuleSnapshot.query.all()
+    }
+    modules = []
+    fresh_count = 0
+    stale_count = 0
+    missing_count = 0
+    updated_times = []
+
+    for module_key in RISK_MODULE_CACHES:
+        snapshot = snapshots.get(module_key)
+        sla_seconds = RISK_MODULE_SLA_SECONDS.get(module_key, DEFAULT_RISK_MODULE_SLA_SECONDS)
+        if not snapshot:
+            missing_count += 1
+            modules.append({
+                "key": module_key,
+                "label": RISK_MODULE_LABELS.get(module_key, module_key),
+                "status": "missing",
+                "status_label": "缺失",
+                "updated_at": None,
+                "age_minutes": None,
+                "sla_minutes": round(sla_seconds / 60),
+            })
+            continue
+
+        updated_times.append(snapshot.updated_at)
+        age_seconds = max(0, (now - snapshot.updated_at).total_seconds())
+        is_fresh = age_seconds <= sla_seconds
+        if is_fresh:
+            fresh_count += 1
+        else:
+            stale_count += 1
+
+        modules.append({
+            "key": module_key,
+            "label": RISK_MODULE_LABELS.get(module_key, module_key),
+            "status": "fresh" if is_fresh else "stale",
+            "status_label": "新鲜" if is_fresh else "陈旧",
+            "updated_at": snapshot.updated_at.isoformat(),
+            "age_minutes": round(age_seconds / 60, 1),
+            "sla_minutes": round(sla_seconds / 60),
+        })
+
+    total_modules = len(RISK_MODULE_CACHES)
+    coverage_score = (len(updated_times) / total_modules * 100) if total_modules else 0
+    freshness_score = (fresh_count / total_modules * 100) if total_modules else 0
+    health_score = round(coverage_score * 0.4 + freshness_score * 0.6, 1)
+    if health_score >= 90:
+        status = "数据健康"
+        status_color = "green"
+    elif health_score >= 70:
+        status = "可用观察"
+        status_color = "blue"
+    elif health_score >= 45:
+        status = "部分陈旧"
+        status_color = "amber"
+    else:
+        status = "覆盖不足"
+        status_color = "red"
+
+    latest_brief = latest_risk_payload()
+    modules.sort(key=lambda item: (
+        {"stale": 0, "missing": 1, "fresh": 2}.get(item["status"], 3),
+        -(item["age_minutes"] or 0),
+    ))
+    return jsonify({
+        "as_of": now.isoformat(),
+        "status": status,
+        "status_color": status_color,
+        "health_score": health_score,
+        "total_modules": total_modules,
+        "snapshot_modules": len(updated_times),
+        "fresh_modules": fresh_count,
+        "stale_modules": stale_count,
+        "missing_modules": missing_count,
+        "newest_update": max(updated_times).isoformat() if updated_times else None,
+        "oldest_update": min(updated_times).isoformat() if updated_times else None,
+        "latest_brief_at": latest_brief.get("created_at") if latest_brief else None,
+        "modules": modules,
+    })
 
 
 @app.route('/api/risk/latest', methods=['GET'])
