@@ -9397,6 +9397,270 @@ def get_risk_positioning_summary():
     })
 
 
+@app.route('/api/risk/key-takeaways', methods=['GET'])
+def get_risk_key_takeaways():
+    latest = latest_risk_payload() or {}
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    contribution = risk_module_payload("contribution") or {}
+    breadth = risk_module_payload("breadth") or {}
+    liquidity = risk_module_payload("liquidity") or {}
+    quality = risk_module_payload("quality") or {}
+    valuation = risk_module_payload("valuation") or {}
+    earnings = risk_module_payload("earnings") or {}
+    options = risk_module_payload("options") or {}
+    gamma = risk_module_payload("gamma_map") or {}
+    skew = risk_module_payload("option_skew") or {}
+    cross_asset = risk_module_payload("cross_asset") or {}
+    playbook = risk_module_payload("playbook") or {}
+    data_quality = get_risk_data_quality().get_json(silent=True) or {}
+
+    if not latest and not alerts and not regime:
+        return jsonify({"error": "Initializing"}), 202
+
+    takeaways = []
+
+    def add_takeaway(key, category, title, tone, value, detail, action, source, priority):
+        takeaways.append({
+            "key": key,
+            "category": category,
+            "title": title,
+            "tone": tone,
+            "value": value,
+            "detail": detail,
+            "action": action,
+            "source": source,
+            "priority": priority,
+        })
+
+    active_alerts = alerts.get("alerts") or []
+    if active_alerts:
+        top_alert = active_alerts[0]
+        add_takeaway(
+            "top_alert",
+            "风险压力",
+            top_alert.get("title", "最高优先级预警"),
+            top_alert.get("color", "amber"),
+            top_alert.get("value", alerts.get("alert_level", "--")),
+            top_alert.get("evidence", top_alert.get("trigger", "预警模块提示需要优先处理。")),
+            top_alert.get("action", "先处理仓位上限、失效线和保护覆盖。"),
+            "风险预警",
+            100 + safe_float(top_alert.get("score"), alerts.get("alert_score", 50)),
+        )
+
+    net_pressure = safe_float(contribution.get("net_pressure"), 0)
+    if abs(net_pressure) >= 4:
+        add_takeaway(
+            "net_pressure",
+            "风险贡献",
+            "净压力偏高" if net_pressure > 0 else "缓冲占优",
+            "amber" if net_pressure > 0 else "green",
+            f"{net_pressure:+.1f}",
+            contribution.get("summary", "风险贡献模块显示压力和缓冲项出现明显偏斜。"),
+            "净压力为正时控制新增风险预算；净压力转负时再考虑恢复到目标区间。",
+            "风险贡献",
+            88 + abs(net_pressure),
+        )
+
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    if regime_score >= 58:
+        add_takeaway(
+            "regime_support",
+            "正面支撑",
+            regime.get("regime", "市场状态支撑"),
+            "green",
+            f"{regime_score:.1f}",
+            regime.get("summary", "市场状态罗盘显示趋势、内部结构或基本面支撑仍在。"),
+            "只在预警未升温且触发线确认时分批释放风险预算。",
+            "市场状态罗盘",
+            80 + regime_score / 5,
+        )
+    elif regime_score <= 42:
+        add_takeaway(
+            "regime_weakness",
+            "风险压力",
+            regime.get("regime", "市场状态转弱"),
+            "red",
+            f"{regime_score:.1f}",
+            regime.get("summary", "市场状态罗盘显示支撑不足。"),
+            "先降低目标上沿，等待罗盘、广度和流动性重新确认。",
+            "市场状态罗盘",
+            86 + (50 - regime_score),
+        )
+
+    breadth_score = safe_float(breadth.get("breadth_score"), 50)
+    if breadth_score >= 60:
+        add_takeaway(
+            "breadth_support",
+            "正面支撑",
+            breadth.get("breadth_label", "广度扩散"),
+            "green",
+            f"{breadth_score:.1f}",
+            breadth.get("summary", "等权参与改善，指数上涨质量更有扩散支撑。"),
+            "若价格站上确认线，允许核心仓位向目标中枢靠拢。",
+            "市场广度",
+            72 + breadth_score / 6,
+        )
+    elif breadth_score <= 42:
+        add_takeaway(
+            "breadth_risk",
+            "风险压力",
+            breadth.get("breadth_label", "广度不足"),
+            "amber",
+            f"{breadth_score:.1f}",
+            breadth.get("summary", "上涨更依赖少数大权重，内部参与度不足。"),
+            "避免追高，把确认要求从指数价格扩展到等权参与。",
+            "市场广度",
+            74 + (50 - breadth_score),
+        )
+
+    liquidity_score = safe_float(liquidity.get("flow_score"), 50)
+    if liquidity_score >= 58:
+        add_takeaway(
+            "liquidity_support",
+            "正面支撑",
+            liquidity.get("regime", "流动性确认"),
+            "green",
+            f"{liquidity_score:.1f}",
+            liquidity.get("summary", "成交和资金流确认未明显破坏价格信号。"),
+            "保留分批执行，不在缩量冲高时一次性上调仓位。",
+            "流动性",
+            70 + liquidity_score / 7,
+        )
+
+    quality_score = safe_float(quality.get("quality_score"), 50)
+    valuation_score = safe_float(valuation.get("valuation_score"), 50)
+    if valuation_score >= 58 and quality_score < 58:
+        add_takeaway(
+            "valuation_quality_gap",
+            "基本面约束",
+            "估值高于质量支撑",
+            "amber",
+            f"估值 {valuation_score:.1f} / 质量 {quality_score:.1f}",
+            "权重股估值压力高于盈利质量支撑，指数上行需要更强业绩兑现。",
+            "财报前后降低单一权重股集中暴露，避免把估值扩张当成默认假设。",
+            "估值与质量",
+            82 + valuation_score / 6,
+        )
+    elif quality_score >= 58:
+        add_takeaway(
+            "quality_support",
+            "正面支撑",
+            quality.get("quality_label", "盈利质量稳健"),
+            "green",
+            f"{quality_score:.1f}",
+            quality.get("summary", "权重股现金流和利润率对估值形成部分支撑。"),
+            "质量支撑只提高容错，不替代失效线和保护覆盖。",
+            "盈利质量",
+            66 + quality_score / 8,
+        )
+
+    option_pressure = max(
+        safe_float(skew.get("skew_score"), 0),
+        safe_float(gamma.get("gamma_score"), 0),
+        safe_float(options.get("put_call_oi_ratio"), 0) * 25,
+    )
+    if option_pressure >= 65:
+        add_takeaway(
+            "options_pressure",
+            "衍生品压力",
+            skew.get("regime") or gamma.get("regime") or options.get("regime", "期权压力升温"),
+            "red" if option_pressure >= 85 else "amber",
+            f"{option_pressure:.1f}",
+            f"偏斜 {safe_float(skew.get('skew_score'), 0):.1f}，Gamma {safe_float(gamma.get('gamma_score'), 0):.1f}，PCR {safe_float(options.get('put_call_oi_ratio'), 0):.2f}。",
+            "保护成本升温时不要提前撤保护；若现货跌破隐含下沿，应快速收缩战术仓位。",
+            "期权/Gamma",
+            84 + option_pressure / 5,
+        )
+
+    event_score = safe_float(earnings.get("event_score"), 50)
+    if event_score >= 55:
+        add_takeaway(
+            "earnings_window",
+            "事件窗口",
+            earnings.get("event_label", "财报窗口"),
+            "amber",
+            f"{event_score:.1f}",
+            earnings.get("summary", "MAG7 财报事件会影响 NDX 跳空风险和估值兑现。"),
+            "财报窗口内保留现金缓冲，避免方向性仓位集中在单一权重股。",
+            "财报催化",
+            70 + event_score / 6,
+        )
+
+    confirmation = safe_float(cross_asset.get("confirmation_score"), 50)
+    if confirmation >= 62:
+        add_takeaway(
+            "cross_asset_confirmation",
+            "正面支撑",
+            cross_asset.get("regime", "跨资产确认"),
+            "green",
+            f"{confirmation:.1f}",
+            cross_asset.get("summary", "外部资产对 QQQ/NDX 信号形成共同确认。"),
+            "跨资产确认能提高执行信心，但仍需配合预警和触发线。",
+            "跨资产确认",
+            68 + confirmation / 8,
+        )
+
+    levels = playbook.get("levels") or []
+    repair = next((item for item in levels if item.get("key") == "repair"), None)
+    invalidation = next((item for item in levels if item.get("key") == "invalidation"), None)
+    if repair or invalidation:
+        add_takeaway(
+            "trigger_lines",
+            "观察触发项",
+            "执行触发线",
+            "blue",
+            f"修复 {repair.get('value', '--') if repair else '--'} / 失效 {invalidation.get('value', '--') if invalidation else '--'}",
+            "交易动作应围绕收盘确认线、失效线和风险预算目标上沿执行。",
+            "收复修复线才恢复风险预算；跌破失效线先降低暴露和提高保护覆盖。",
+            "执行 Playbook",
+            76,
+        )
+
+    if data_quality.get("health_score", 0) < 90:
+        add_takeaway(
+            "data_quality",
+            "观察触发项",
+            data_quality.get("status", "数据覆盖不足"),
+            data_quality.get("status_color", "amber"),
+            f"{safe_float(data_quality.get('health_score'), 0):.1f}",
+            f"新鲜 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}，陈旧 {data_quality.get('stale_modules', 0)}。",
+            "数据质量低于 90 时，所有结论应降级为观察而非执行依据。",
+            "数据质量",
+            92,
+        )
+
+    if not takeaways:
+        add_takeaway(
+            "baseline",
+            "观察触发项",
+            "暂无极端单点信号",
+            "blue",
+            "中性",
+            "当前模块未发现需要立即升级的单一风险或支撑项。",
+            "维持既定仓位框架，等待价格、广度、预警或财报窗口给出新确认。",
+            "系统综合",
+            50,
+        )
+
+    takeaways = sorted(takeaways, key=lambda item: item["priority"], reverse=True)
+    headline = latest.get("summary") or (takeaways[0]["detail"] if takeaways else "等待 NDX 风险引擎完成聚合。")
+    pressure_count = len([item for item in takeaways if item["category"] in ("风险压力", "衍生品压力", "基本面约束")])
+    support_count = len([item for item in takeaways if item["category"] == "正面支撑"])
+    watch_count = len([item for item in takeaways if item["category"] in ("观察触发项", "事件窗口")])
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "pressure_count": pressure_count,
+        "support_count": support_count,
+        "watch_count": watch_count,
+        "primary": takeaways[0] if takeaways else None,
+        "takeaways": takeaways[:9],
+        "methodology": "从风险预警、市场状态、风险贡献、广度、流动性、估值质量、期权、财报、跨资产确认和执行触发线中挑选最高优先级信号，压缩为晨会式关键看点。该模块用于阅读优先级和情景沟通，不构成买卖指令。",
+    })
+
+
 @app.route('/api/risk/latest', methods=['GET'])
 def get_risk_latest():
     global risk_latest_cache
