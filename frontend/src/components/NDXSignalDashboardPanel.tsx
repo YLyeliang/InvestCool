@@ -74,6 +74,15 @@ interface PlaybookPayload {
   };
 }
 
+interface RegimeAnalogPayload {
+  analog_score: number;
+  regime: string;
+  forward_20d_avg: number;
+  win_rate_20d: number;
+  downside_tail_20d: number;
+  analog_count: number;
+}
+
 interface DeskBriefPayload {
   desk_score: number;
   stance: string;
@@ -278,6 +287,7 @@ interface DashboardData {
   contribution: ContributionPayload | null;
   capacity: CapacityPayload | null;
   playbook: PlaybookPayload | null;
+  regimeAnalog: RegimeAnalogPayload | null;
   deskBrief: DeskBriefPayload | null;
   factors: FactorPayload | null;
   rateSensitivity: RateSensitivityPayload | null;
@@ -431,6 +441,7 @@ export const NDXSignalDashboardPanel = () => {
           contribution,
           capacity,
           playbook,
+          regimeAnalog,
           deskBrief,
           factors,
           rateSensitivity,
@@ -463,6 +474,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ContributionPayload>("/api/risk/contribution"),
           fetchJson<CapacityPayload>("/api/risk/capacity"),
           fetchJson<PlaybookPayload>("/api/risk/playbook", 15000),
+          fetchJson<RegimeAnalogPayload>("/api/risk/regime-analog", 15000),
           fetchJson<DeskBriefPayload>("/api/risk/desk-brief", 15000),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
@@ -489,7 +501,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, regimeAnalog, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -528,6 +540,7 @@ export const NDXSignalDashboardPanel = () => {
       data.quality?.quality_score ?? 50,
       data.regimeCompass?.regime_score ?? 50,
       data.recoveryPath?.recovery_score ?? 50,
+      data.regimeAnalog?.analog_score ?? 50,
       data.capacity?.capacity_score ?? 50,
       data.playbook?.playbook_score ?? 50,
       data.deskBrief?.desk_score ?? 50,
@@ -589,6 +602,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.playbook ? `暴露 ${data.playbook.target_exposure.label} · 现金 ${data.playbook.cash_buffer_min.toFixed(0)}%+ · 保护 ${data.playbook.hedge_coverage.label}` : "等待执行手册",
         color: data.playbook ? scoreColor(data.playbook.playbook_score) : "blue",
         icon: "clipboard-list",
+      },
+      {
+        label: "历史类比",
+        value: data.regimeAnalog ? data.regimeAnalog.regime : "--",
+        detail: data.regimeAnalog ? `20D ${formatSignedPct(data.regimeAnalog.forward_20d_avg)} · 胜率 ${data.regimeAnalog.win_rate_20d.toFixed(1)}% · 样本 ${data.regimeAnalog.analog_count}` : "等待相似窗口",
+        color: data.regimeAnalog ? scoreColor(data.regimeAnalog.analog_score) : "blue",
+        icon: "history",
       },
       {
         label: "Desk Brief",
@@ -772,7 +792,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 30 }).map((_, index) => (
+          {Array.from({ length: 31 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

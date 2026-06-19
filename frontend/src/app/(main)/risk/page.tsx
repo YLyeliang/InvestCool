@@ -4,6 +4,7 @@ import React, { useState, useEffect } from "react";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXDeskBriefPanel } from "@/components/NDXDeskBriefPanel";
 import { NDXExecutionPlaybookPanel } from "@/components/NDXExecutionPlaybookPanel";
+import { NDXRegimeAnalogPanel } from "@/components/NDXRegimeAnalogPanel";
 import { NDXIntradayTapePanel } from "@/components/NDXIntradayTapePanel";
 import { NDXVolumeProfilePanel } from "@/components/NDXVolumeProfilePanel";
 import { NDXRegimeCompassPanel } from "@/components/NDXRegimeCompassPanel";
@@ -149,6 +150,13 @@ export default function RiskPage() {
           <Icon name="lucide:clipboard-list" className="text-[var(--accent-color)]" /> NDX 执行 Playbook
         </h3>
         <NDXExecutionPlaybookPanel />
+      </section>
+
+      <section className="regime-analog-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:history" className="text-[var(--accent-color)]" /> NDX 历史相似情景
+        </h3>
+        <NDXRegimeAnalogPanel />
       </section>
 
       <section className="intraday-tape-section">

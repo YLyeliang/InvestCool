@@ -96,6 +96,7 @@ risk_capacity_cache = {"data": None, "last_update": None}
 risk_playbook_cache = {"data": None, "last_update": None}
 risk_desk_brief_cache = {"data": None, "last_update": None}
 risk_rate_sensitivity_cache = {"data": None, "last_update": None}
+risk_regime_analog_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
 
@@ -245,6 +246,15 @@ def recovery_path_regime(score):
     if score >= 34:
         return "支撑测试", "amber"
     return "破位恢复", "red"
+
+def regime_analog_label(score, win_rate_20d):
+    if score >= 68 and win_rate_20d >= 58:
+        return "历史顺风", "green"
+    if score >= 52:
+        return "正偏类比", "blue"
+    if score >= 38:
+        return "中性类比", "amber"
+    return "负偏类比", "red"
 
 def contribution_regime(net_pressure):
     if net_pressure >= 18:
@@ -3952,6 +3962,284 @@ def refresh_option_skew_data():
         logger.error(traceback.format_exc())
 
 
+def analog_feature_metric(key, label, value, percentile, detail, higher_is_support=True):
+    percentile = round(clamp(percentile), 1)
+    if higher_is_support:
+        color = constructive_color(percentile)
+        state = constructive_state(percentile)
+    else:
+        color = risk_color(percentile)
+        if percentile >= 75:
+            state = "偏高"
+        elif percentile >= 55:
+            state = "抬升"
+        elif percentile >= 35:
+            state = "中性"
+        else:
+            state = "温和"
+    return {
+        "key": key,
+        "label": label,
+        "value": value,
+        "percentile": percentile,
+        "state": state,
+        "color": color,
+        "detail": detail,
+    }
+
+
+def refresh_regime_analog_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_regime_analog_cache
+
+    try:
+        symbols = {
+            "qqq": "QQQ",
+            "spy": "SPY",
+            "smh": "SMH",
+            "vix": "^VIX",
+            "rates": "^TNX",
+        }
+        close_map = {
+            key: fetch_ohlc_history(symbol, "5y", min_rows=700, attempts=3)["Close"]
+            for key, symbol in symbols.items()
+        }
+        try:
+            close_map["dollar"] = fetch_ohlc_history("DX-Y.NYB", "5y", min_rows=700, attempts=3)["Close"]
+            dollar_symbol = "DXY"
+        except Exception as e:
+            logger.error(f"DXY fetch failed for regime analogs, falling back to UUP: {e}")
+            close_map["dollar"] = fetch_ohlc_history("UUP", "5y", min_rows=700, attempts=3)["Close"]
+            dollar_symbol = "UUP"
+
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 700:
+            raise ValueError("Insufficient aligned history for regime analogs")
+
+        qqq_returns = prices["qqq"].pct_change() * 100
+        spy_returns = prices["spy"].pct_change() * 100
+        smh_returns = prices["smh"].pct_change() * 100
+
+        features = pd.DataFrame(index=prices.index)
+        features["qqq_return_20d"] = prices["qqq"].pct_change(20) * 100
+        features["qqq_return_60d"] = prices["qqq"].pct_change(60) * 100
+        features["realized_vol_20d"] = qqq_returns.rolling(20).std() * (252 ** 0.5)
+        features["drawdown_60d"] = (prices["qqq"] / prices["qqq"].rolling(60).max() - 1) * 100
+        features["vix_level"] = prices["vix"]
+        features["vix_change_20d"] = prices["vix"].diff(20)
+        features["rates_change_20d_bps"] = prices["rates"].diff(20) * 100
+        features["dollar_return_20d"] = prices["dollar"].pct_change(20) * 100
+        features["qqq_spy_20d"] = (prices["qqq"].pct_change(20) - prices["spy"].pct_change(20)) * 100
+        features["smh_spy_20d"] = (prices["smh"].pct_change(20) - prices["spy"].pct_change(20)) * 100
+        features["corr_spy_60d"] = qqq_returns.rolling(60).corr(spy_returns)
+        features["corr_smh_60d"] = qqq_returns.rolling(60).corr(smh_returns)
+        features["forward_5d"] = (prices["qqq"].shift(-5) / prices["qqq"] - 1) * 100
+        features["forward_10d"] = (prices["qqq"].shift(-10) / prices["qqq"] - 1) * 100
+        features["forward_20d"] = (prices["qqq"].shift(-20) / prices["qqq"] - 1) * 100
+
+        feature_cols = [
+            "qqq_return_20d",
+            "qqq_return_60d",
+            "realized_vol_20d",
+            "drawdown_60d",
+            "vix_level",
+            "vix_change_20d",
+            "rates_change_20d_bps",
+            "dollar_return_20d",
+            "qqq_spy_20d",
+            "smh_spy_20d",
+            "corr_spy_60d",
+            "corr_smh_60d",
+        ]
+        feature_frame = features[feature_cols].dropna()
+        if len(feature_frame) < 400:
+            raise ValueError("Insufficient feature rows for regime analogs")
+
+        current = feature_frame.iloc[-1]
+        forward_cols = ["forward_5d", "forward_10d", "forward_20d"]
+        candidates = features.loc[feature_frame.index, feature_cols + forward_cols].dropna()
+        current_date = feature_frame.index[-1]
+        candidates = candidates[candidates.index <= current_date - pd.Timedelta(days=30)]
+        if len(candidates) < 180:
+            raise ValueError("Insufficient historical analog candidates")
+
+        means = candidates[feature_cols].mean()
+        stds = candidates[feature_cols].std().replace(0, 1)
+        weights = pd.Series({
+            "qqq_return_20d": 1.10,
+            "qqq_return_60d": 0.90,
+            "realized_vol_20d": 1.05,
+            "drawdown_60d": 0.90,
+            "vix_level": 1.10,
+            "vix_change_20d": 0.80,
+            "rates_change_20d_bps": 0.95,
+            "dollar_return_20d": 0.80,
+            "qqq_spy_20d": 0.95,
+            "smh_spy_20d": 1.00,
+            "corr_spy_60d": 0.55,
+            "corr_smh_60d": 0.55,
+        })
+        current_z = (current - means) / stds
+        candidate_z = (candidates[feature_cols] - means) / stds
+        distances = (((candidate_z - current_z) ** 2) * weights).sum(axis=1) ** 0.5
+        top_n = min(24, len(distances))
+        analog_index = distances.nsmallest(top_n).index
+        analogs = candidates.loc[analog_index].copy()
+        analogs["distance"] = distances.loc[analog_index]
+        analogs = analogs.sort_values("distance")
+
+        f5 = analogs["forward_5d"]
+        f10 = analogs["forward_10d"]
+        f20 = analogs["forward_20d"]
+        forward_5d_avg = safe_float(f5.mean(), 0)
+        forward_10d_avg = safe_float(f10.mean(), 0)
+        forward_20d_avg = safe_float(f20.mean(), 0)
+        forward_20d_median = safe_float(f20.median(), 0)
+        win_rate_20d = safe_float((f20 > 0).mean() * 100, 0)
+        downside_tail_20d = safe_float(f20.quantile(0.20), 0)
+        upside_tail_20d = safe_float(f20.quantile(0.80), 0)
+        avg_distance = safe_float(analogs["distance"].mean(), 0)
+
+        analog_score = round(clamp(
+            50
+            + forward_20d_avg * 3.0
+            + (win_rate_20d - 50) * 0.35
+            + downside_tail_20d * 1.8
+            + max(0, upside_tail_20d) * 0.9
+            - avg_distance * 2.2
+        ), 1)
+        regime, color = regime_analog_label(analog_score, win_rate_20d)
+
+        current_percentiles = {}
+        for col in feature_cols:
+            series = candidates[col].dropna()
+            current_percentiles[col] = safe_float((series <= current[col]).mean() * 100, 50) if len(series) else 50
+
+        metrics = [
+            analog_feature_metric(
+                "trend_20d",
+                "QQQ 20日趋势",
+                f"{current['qqq_return_20d']:+.2f}%",
+                current_percentiles["qqq_return_20d"],
+                "当前 QQQ 20 日收益在历史候选窗口中的相对位置。",
+            ),
+            analog_feature_metric(
+                "volatility",
+                "20日实现波动",
+                f"{current['realized_vol_20d']:.1f}%",
+                current_percentiles["realized_vol_20d"],
+                "实现波动率越高，历史类比的尾部误差通常越大。",
+                higher_is_support=False,
+            ),
+            analog_feature_metric(
+                "vix",
+                "VIX 水位",
+                f"{current['vix_level']:.1f}",
+                current_percentiles["vix_level"],
+                "VIX 水位用于匹配期权市场风险定价环境。",
+                higher_is_support=False,
+            ),
+            analog_feature_metric(
+                "semis_active",
+                "半导体超额",
+                f"{current['smh_spy_20d']:+.2f}pt",
+                current_percentiles["smh_spy_20d"],
+                "SMH 相对 SPY 的 20 日超额用于识别 NDX 成长链条强弱。",
+            ),
+            analog_feature_metric(
+                "rates",
+                "10Y 变化",
+                f"{current['rates_change_20d_bps']:+.1f}bps",
+                current_percentiles["rates_change_20d_bps"],
+                "10Y 利率上行会改变成长股估值容错。",
+                higher_is_support=False,
+            ),
+            analog_feature_metric(
+                "dollar",
+                dollar_symbol,
+                f"{current['dollar_return_20d']:+.2f}%",
+                current_percentiles["dollar_return_20d"],
+                "美元走强通常压制全球风险偏好和远端成长估值。",
+                higher_is_support=False,
+            ),
+        ]
+
+        analog_rows = []
+        for date, row in analogs.head(10).iterrows():
+            analog_rows.append({
+                "date": date.date().isoformat(),
+                "distance": round(safe_float(row["distance"], 0), 2),
+                "qqq_return_20d": round(safe_float(row["qqq_return_20d"], 0), 2),
+                "realized_vol_20d": round(safe_float(row["realized_vol_20d"], 0), 1),
+                "vix_level": round(safe_float(row["vix_level"], 0), 1),
+                "rates_change_20d_bps": round(safe_float(row["rates_change_20d_bps"], 0), 1),
+                "forward_5d": round(safe_float(row["forward_5d"], 0), 2),
+                "forward_10d": round(safe_float(row["forward_10d"], 0), 2),
+                "forward_20d": round(safe_float(row["forward_20d"], 0), 2),
+                "color": "green" if row["forward_20d"] > 1 else "red" if row["forward_20d"] < -1 else "blue",
+            })
+
+        if regime == "历史顺风":
+            summary = f"当前 NDX/QQQ 环境与过去偏正收益窗口相似，前 {top_n} 个类比样本 20 日平均 {forward_20d_avg:+.2f}%，胜率 {win_rate_20d:.1f}%。"
+        elif regime == "正偏类比":
+            summary = f"历史相似窗口给出温和正偏，20 日中位数 {forward_20d_median:+.2f}%，但仍需用风险预算控制尾部误差。"
+        elif regime == "中性类比":
+            summary = f"历史相似窗口接近中性，20 日平均 {forward_20d_avg:+.2f}%，上行和下行分布没有明显单边优势。"
+        else:
+            summary = f"历史相似窗口偏负，20 日平均 {forward_20d_avg:+.2f}%，20% 分位 {downside_tail_20d:+.2f}%，应降低追高速度。"
+
+        controls = [
+            f"若后续 5 日走势低于类比 20% 分位，应把当前环境从 {regime} 下调一个风险档位。",
+            f"若 QQQ 继续上涨但 VIX/利率环境脱离相似样本区间，历史类比权重应降低。",
+            f"类比样本只保留距离最近的 {top_n} 个窗口，避免用全样本平均掩盖当前结构。",
+            "历史类比是条件分布，不是预测模型；必须与技术位、期权和资金流模块交叉验证。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": current_date.date().isoformat(),
+            "proxy_symbol": "QQQ",
+            "proxy_price": round(safe_float(prices["qqq"].iloc[-1], 0), 2),
+            "regime": regime,
+            "regime_color": color,
+            "analog_score": analog_score,
+            "summary": summary,
+            "lookback_years": 5,
+            "candidate_count": int(len(candidates)),
+            "analog_count": int(top_n),
+            "avg_distance": round(avg_distance, 2),
+            "forward_5d_avg": round(forward_5d_avg, 2),
+            "forward_10d_avg": round(forward_10d_avg, 2),
+            "forward_20d_avg": round(forward_20d_avg, 2),
+            "forward_20d_median": round(forward_20d_median, 2),
+            "win_rate_20d": round(win_rate_20d, 1),
+            "downside_tail_20d": round(downside_tail_20d, 2),
+            "upside_tail_20d": round(upside_tail_20d, 2),
+            "current_features": {
+                "qqq_return_20d": round(safe_float(current["qqq_return_20d"], 0), 2),
+                "qqq_return_60d": round(safe_float(current["qqq_return_60d"], 0), 2),
+                "realized_vol_20d": round(safe_float(current["realized_vol_20d"], 0), 1),
+                "drawdown_60d": round(safe_float(current["drawdown_60d"], 0), 2),
+                "vix_level": round(safe_float(current["vix_level"], 0), 1),
+                "vix_change_20d": round(safe_float(current["vix_change_20d"], 0), 1),
+                "rates_change_20d_bps": round(safe_float(current["rates_change_20d_bps"], 0), 1),
+                "dollar_return_20d": round(safe_float(current["dollar_return_20d"], 0), 2),
+                "qqq_spy_20d": round(safe_float(current["qqq_spy_20d"], 0), 2),
+                "smh_spy_20d": round(safe_float(current["smh_spy_20d"], 0), 2),
+            },
+            "metrics": metrics,
+            "analogs": analog_rows,
+            "controls": controls,
+            "methodology": "使用 QQQ、SPY、SMH、VIX、10Y 利率和美元近 5 年日线，构造趋势、实现波动、回撤、宏观和半导体超额等特征；将当前特征标准化后与历史窗口计算加权欧氏距离，并用最相似窗口的 5/10/20 日后续收益形成条件分布。该模块用于历史类比和风险预算，不构成收益预测或买卖建议。",
+        }
+        risk_regime_analog_cache["data"] = data
+        risk_regime_analog_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX regime analog updated: {regime}, score {analog_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX regime analog refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_volatility_term_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_volatility_term_cache
@@ -6445,6 +6733,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("contribution", risk_contribution_cache, refresh_contribution_data, 15 * 60, True),
             ("capacity", risk_capacity_cache, refresh_capacity_data, 15 * 60, True),
             ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60, True),
+            ("analog", risk_regime_analog_cache, refresh_regime_analog_data, 15 * 60, False),
             ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
             ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
             ("volume_profile", risk_volume_profile_cache, refresh_volume_profile_data, 5 * 60, False),
@@ -6467,6 +6756,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "contribution",
             "capacity",
             "recovery",
+            "analog",
             "rate_sensitivity",
             "intraday",
             "volume_profile",
@@ -6504,6 +6794,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         contribution = risk_contribution_cache.get("data") or {}
         capacity = risk_capacity_cache.get("data") or {}
         recovery = risk_recovery_path_cache.get("data") or {}
+        analog = risk_regime_analog_cache.get("data") or {}
         rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
         intraday = risk_intraday_tape_cache.get("data") or {}
         volume_profile = risk_volume_profile_cache.get("data") or {}
@@ -6530,6 +6821,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         pressure_score = avg([
             alerts.get("alert_score"),
             contribution.get("risk_contribution_score"),
+            100 - safe_float(analog.get("analog_score"), 50),
             rate_sensitivity.get("rate_sensitivity_score"),
             intraday.get("tape_pressure_score"),
             volume_profile.get("profile_score"),
@@ -6547,6 +6839,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             regime.get("regime_score"),
             capacity.get("capacity_score"),
             recovery.get("recovery_score"),
+            analog.get("analog_score"),
             breadth.get("breadth_score"),
             liquidity.get("flow_score"),
             cross_asset.get("confirmation_score"),
@@ -6601,6 +6894,14 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
                 "action": "利率继续上行时，把估值扩张假设切换为盈利兑现假设，减少远端成长暴露。",
             },
             {
+                "key": "historical_analog",
+                "label": "历史类比",
+                "color": analog.get("regime_color", constructive_color(safe_float(analog.get("analog_score"), 50))),
+                "state": analog.get("regime", "等待类比"),
+                "readout": f"20D 均值 {safe_float(analog.get('forward_20d_avg'), 0):+.2f}% / 胜率 {safe_float(analog.get('win_rate_20d'), 0):.1f}% / 样本 {safe_float(analog.get('analog_count'), 0):.0f}",
+                "action": "若当前路径跌出历史相似窗口的 20% 分位，应把执行 Playbook 下调一档。",
+            },
+            {
                 "key": "internals",
                 "label": "内部结构",
                 "color": constructive_color(avg([breadth.get("breadth_score"), liquidity.get("flow_score"), regime.get("support_score")])),
@@ -6651,6 +6952,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "tape_pressure_score": round(tape_pressure, 1),
             "profile_score": round(safe_float(volume_profile.get("profile_score"), 50), 1),
             "cross_asset_score": round(safe_float(cross_asset.get("confirmation_score"), 50), 1),
+            "analog_score": round(safe_float(analog.get("analog_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "skew_score": round(safe_float(skew.get("skew_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
@@ -6662,7 +6964,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -7763,6 +8065,7 @@ def background_worker():
     last_playbook = 0
     last_desk_brief = 0
     last_rate_sensitivity = 0
+    last_regime_analog = 0
     while True:
         try:
             update_market_index()
@@ -7944,6 +8247,11 @@ def background_worker():
             if time.time() - last_playbook > 1800:
                 refresh_playbook_data()
                 last_playbook = time.time()
+
+            # NDX historical regime analogs every 30 minutes
+            if time.time() - last_regime_analog > 1800:
+                refresh_regime_analog_data()
+                last_regime_analog = time.time()
 
             # NDX institutional desk brief every 30 minutes
             if time.time() - last_desk_brief > 1800:
@@ -8127,6 +8435,14 @@ def get_risk_playbook():
         refresh_playbook_data(allow_dependency_refresh="light")
 
     data = risk_playbook_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/regime-analog', methods=['GET'])
+def get_risk_regime_analog():
+    if not cache_is_fresh(risk_regime_analog_cache, 15 * 60) and should_refresh_empty_cache(risk_regime_analog_cache, 60):
+        refresh_regime_analog_data()
+
+    data = risk_regime_analog_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/desk-brief', methods=['GET'])
