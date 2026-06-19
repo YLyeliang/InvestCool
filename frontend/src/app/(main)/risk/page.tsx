@@ -8,6 +8,7 @@ import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
 import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPanel";
 import { NDXRiskTemperatureTimelinePanel } from "@/components/NDXRiskTemperatureTimelinePanel";
 import { NDXTriggerMonitorPanel } from "@/components/NDXTriggerMonitorPanel";
+import { NDXRiskRewardPanel } from "@/components/NDXRiskRewardPanel";
 import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
 import { NDXModuleTrendPanel } from "@/components/NDXModuleTrendPanel";
@@ -179,6 +180,13 @@ export default function RiskPage() {
           <Icon name="lucide:crosshair" className="text-[var(--accent-color)]" /> NDX 触发线监控
         </h3>
         <NDXTriggerMonitorPanel />
+      </section>
+
+      <section id="risk-reward-section" className="risk-reward-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:scale" className="text-[var(--accent-color)]" /> NDX 风险回报框架
+        </h3>
+        <NDXRiskRewardPanel />
       </section>
 
       <section id="portfolio-actions-section" className="portfolio-actions-section">

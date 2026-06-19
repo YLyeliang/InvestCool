@@ -10257,6 +10257,158 @@ def get_risk_trigger_monitor():
     })
 
 
+@app.route('/api/risk/risk-reward', methods=['GET'])
+def get_risk_reward_framework():
+    latest = latest_risk_payload() or {}
+    scenario_map = risk_module_payload("scenario_map") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    volatility_cone = risk_module_payload("volatility_cone") or {}
+    budget = risk_module_payload("budget") or {}
+    playbook = risk_module_payload("playbook") or {}
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+
+    index_value = safe_float(
+        scenario_map.get("index"),
+        safe_float(recovery.get("index"), safe_float(playbook.get("index"), safe_float(latest.get("index_position"), 0)))
+    )
+    scenarios = scenario_map.get("scenarios") or []
+    if not index_value or not scenarios:
+        return jsonify({"error": "Initializing"}), 202
+
+    rows = []
+    for scenario in scenarios:
+        low = safe_float(scenario.get("range_low"), safe_float((scenario.get("ndx_range") or {}).get("low"), 0))
+        high = safe_float(scenario.get("range_high"), safe_float((scenario.get("ndx_range") or {}).get("high"), 0))
+        if not low or not high:
+            continue
+        midpoint = (low + high) / 2
+        midpoint_return = pct_change(midpoint, index_value)
+        downside = min(0, pct_change(low, index_value))
+        upside = max(0, pct_change(high, index_value))
+        probability = safe_float(scenario.get("probability_pct"), 0)
+        rows.append({
+            "key": scenario.get("key", scenario.get("name", "scenario")),
+            "name": scenario.get("name", "--"),
+            "category": scenario.get("category", "Scenario"),
+            "color": scenario.get("color", "blue"),
+            "probability_pct": round(probability, 1),
+            "range_low": round(low, 2),
+            "range_high": round(high, 2),
+            "range_label": f"{low:,.0f} - {high:,.0f}",
+            "midpoint_return": round(midpoint_return, 2),
+            "downside_pct": round(downside, 2),
+            "upside_pct": round(upside, 2),
+            "expected_contribution": round(safe_float(scenario.get("expected_contribution"), probability * midpoint_return / 100), 2),
+            "response": scenario.get("response", "用情景概率约束仓位和再平衡动作。"),
+            "rationale": scenario.get("rationale", ""),
+        })
+
+    if not rows:
+        return jsonify({"error": "Initializing"}), 202
+
+    expected_move = safe_float(scenario_map.get("expected_move"), sum(row["expected_contribution"] for row in rows))
+    weighted_low = safe_float(scenario_map.get("probability_weighted_low"), index_value * (1 + expected_move / 100))
+    weighted_high = safe_float(scenario_map.get("probability_weighted_high"), index_value * (1 + max(expected_move, 0) / 100))
+    weighted_low_pct = pct_change(weighted_low, index_value)
+    weighted_high_pct = pct_change(weighted_high, index_value)
+    downside_probability = safe_float(scenario_map.get("downside_probability"), 50)
+    upside_probability = safe_float(scenario_map.get("upside_probability"), 50)
+    base_case = max(rows, key=lambda row: row["probability_pct"])
+    side_rows = [row for row in rows if row["key"] != base_case["key"]] or rows
+    bear_case = min(side_rows, key=lambda row: row["downside_pct"])
+    bull_case = max(side_rows, key=lambda row: row["upside_pct"])
+    downside_risk = abs(bear_case["downside_pct"])
+    upside_reward = bull_case["upside_pct"]
+    reward_to_risk = round(upside_reward / downside_risk, 2) if downside_risk else 0
+    alert_score = safe_float(alerts.get("alert_score"), 50)
+
+    if expected_move <= -2.5 or downside_probability >= 58 or alert_score >= 78:
+        headline = "风险回报偏防守"
+        headline_color = "red" if alert_score >= 78 or downside_probability >= 62 else "amber"
+        stance = "概率加权路径仍偏下行，新增风险预算应等待失效线和预警压力缓和。"
+    elif reward_to_risk >= 1.25 and upside_probability >= 55 and alert_score < 62:
+        headline = "风险回报开始改善"
+        headline_color = "green"
+        stance = "上行情景补偿已超过下行风险，可在确认线和广度改善后分批释放预算。"
+    elif expected_move < 0 or alert_score >= 65:
+        headline = "回报空间需等待确认"
+        headline_color = "amber"
+        stance = "上方空间存在，但预警和加权路径不足以支持主动追高，重点看修复线和确认线。"
+    else:
+        headline = "风险回报接近平衡"
+        headline_color = "blue"
+        stance = "情景回报与压力风险接近平衡，适合用再平衡和触发条件管理暴露。"
+
+    levels = recovery.get("levels") or playbook.get("levels") or []
+    level_map = {item.get("key"): item for item in levels if isinstance(item, dict)}
+    profiles = budget.get("profiles") or []
+    budget_rows = []
+    for profile in profiles[:3]:
+        exposure = profile.get("exposure") or {}
+        budget_rows.append({
+            "key": profile.get("key"),
+            "name": profile.get("name"),
+            "color": profile.get("color", "blue"),
+            "exposure": exposure.get("label", "--"),
+            "cash_buffer": profile.get("cash_buffer", "--"),
+            "max_loss_budget": profile.get("max_loss_budget", "--"),
+            "fit": "优先" if headline_color == "red" and profile.get("key") == "defensive" else "可用" if profile.get("key") == "balanced" else "观察",
+            "action": profile.get("rebalance_trigger", "按风险预算和触发线再平衡。"),
+        })
+
+    risk_bands = []
+    for item in (volatility_cone.get("ranges") or [])[:4]:
+        risk_bands.append({
+            "key": item.get("key"),
+            "label": item.get("label"),
+            "days": item.get("days"),
+            "one_sigma_pct": round(safe_float(item.get("one_sigma_pct"), 0), 2),
+            "two_sigma_pct": round(safe_float(item.get("two_sigma_pct"), 0), 2),
+            "blended_vol": round(safe_float(item.get("blended_vol"), 0), 1),
+        })
+
+    controls = [
+        f"熊市情景 {bear_case['name']} 下沿 {bear_case['range_low']:,.0f}，对应 {bear_case['downside_pct']:.1f}%。",
+        f"基准情景 {base_case['name']} 概率 {base_case['probability_pct']:.1f}%，中点回报 {base_case['midpoint_return']:+.1f}%。",
+        f"牛市情景 {bull_case['name']} 上沿 {bull_case['range_high']:,.0f}，对应 +{bull_case['upside_pct']:.1f}%。",
+    ]
+    if playbook.get("headline_action"):
+        controls.append(playbook.get("headline_action"))
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "stance": stance,
+        "index": round(index_value, 2),
+        "expected_move": round(expected_move, 2),
+        "downside_probability": round(downside_probability, 1),
+        "upside_probability": round(upside_probability, 1),
+        "probability_weighted_low": round(weighted_low, 2),
+        "probability_weighted_high": round(weighted_high, 2),
+        "weighted_low_pct": round(weighted_low_pct, 2),
+        "weighted_high_pct": round(weighted_high_pct, 2),
+        "reward_to_risk": reward_to_risk,
+        "bear_case": bear_case,
+        "base_case": base_case,
+        "bull_case": bull_case,
+        "scenarios": sorted(rows, key=lambda row: row["probability_pct"], reverse=True),
+        "risk_bands": risk_bands,
+        "budget_rows": budget_rows,
+        "levels": {
+            "invalidation": level_map.get("invalidation"),
+            "repair": level_map.get("repair"),
+            "confirmation": level_map.get("confirmation"),
+        },
+        "regime": regime.get("regime", "--"),
+        "alert_level": alerts.get("alert_level", "--"),
+        "alert_score": round(alert_score, 1),
+        "controls": controls[:5],
+        "methodology": "把 NDX 情景概率、概率加权路径、回撤修复线、波动锥区间、风险预算和 Playbook 压成机构式风险回报框架，用于比较上行补偿、下行风险和仓位预算约束。该模块用于研究阅读和风控框架，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
