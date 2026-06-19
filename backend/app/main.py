@@ -210,6 +210,19 @@ class RiskModuleSnapshot(db.Model):
         return json.loads(self.payload_json)
 
 
+class RiskModuleHistory(db.Model):
+    __tablename__ = "risk_module_history"
+
+    id = db.Column(db.Integer, primary_key=True)
+    module_key = db.Column(db.String(80), nullable=False, index=True)
+    payload_hash = db.Column(db.String(64), nullable=False, index=True)
+    payload_json = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False, index=True)
+
+    def to_payload(self):
+        return json.loads(self.payload_json)
+
+
 RISK_MODULE_CACHES = {
     "diagnostics": risk_diagnostics_cache,
     "scenarios": risk_scenarios_cache,
@@ -343,6 +356,25 @@ RISK_MODULE_SLA_SECONDS = {
     "earnings": 8 * 60 * 60,
 }
 
+RISK_TREND_MODULES = [
+    {"key": "alerts", "score": "alert_score", "label": "alert_level", "color": "alert_color", "direction": "risk"},
+    {"key": "regime_compass", "score": "regime_score", "label": "regime", "color": "regime_color", "direction": "support"},
+    {"key": "contribution", "score": "net_pressure", "label": "contribution_regime", "color": "contribution_color", "direction": "risk"},
+    {"key": "playbook", "score": "playbook_score", "label": "posture", "color": "posture_color", "direction": "support"},
+    {"key": "recovery_path", "score": "recovery_score", "label": "recovery_regime", "color": "recovery_color", "direction": "support"},
+    {"key": "tail", "score": "tail_score", "label": "tail_label", "color": "tail_color", "direction": "risk"},
+    {"key": "hedge_overlay", "score": "hedge_score", "label": "hedge_label", "color": "hedge_color", "direction": "neutral"},
+    {"key": "valuation", "score": "valuation_score", "label": "valuation_label", "color": "valuation_color", "direction": "risk"},
+    {"key": "quality", "score": "quality_score", "label": "quality_label", "color": "quality_color", "direction": "support"},
+    {"key": "breadth", "score": "breadth_score", "label": "breadth_label", "color": "breadth_color", "direction": "support"},
+    {"key": "liquidity", "score": "flow_score", "label": "regime", "color": "regime_color", "direction": "support"},
+    {"key": "options", "score": "put_call_oi_ratio", "label": "regime", "color": "regime_color", "direction": "risk"},
+    {"key": "gamma_map", "score": "gamma_score", "label": "regime", "color": "regime_color", "direction": "risk"},
+    {"key": "option_skew", "score": "skew_score", "label": "regime", "color": "regime_color", "direction": "risk"},
+    {"key": "funding_conditions", "score": "funding_score", "label": "regime", "color": "regime_color", "direction": "support"},
+    {"key": "cross_asset", "score": "confirmation_score", "label": "regime", "color": "regime_color", "direction": "support"},
+]
+
 
 def persist_risk_module_snapshot(module_key, data):
     if not data:
@@ -365,10 +397,35 @@ def persist_risk_module_snapshot(module_key, data):
         logger.warning(f"Unable to stage risk snapshot for {module_key}: {e}")
 
 
+def persist_risk_module_history(module_key, data):
+    if not data:
+        return
+    try:
+        now = datetime.utcnow()
+        payload_json = json.dumps(data, ensure_ascii=False, sort_keys=True, default=str)
+        payload_hash = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()
+        latest = RiskModuleHistory.query.filter_by(module_key=module_key).order_by(RiskModuleHistory.created_at.desc()).first()
+        if latest and latest.payload_hash == payload_hash:
+            return
+        db.session.add(RiskModuleHistory(
+            module_key=module_key,
+            payload_hash=payload_hash,
+            payload_json=payload_json,
+            created_at=now,
+        ))
+    except Exception as e:
+        logger.warning(f"Unable to stage risk history for {module_key}: {e}")
+
+
 def persist_risk_snapshots():
     try:
         for module_key, cache in RISK_MODULE_CACHES.items():
-            persist_risk_module_snapshot(module_key, cache.get("data"))
+            data = cache.get("data")
+            persist_risk_module_snapshot(module_key, data)
+            persist_risk_module_history(module_key, data)
+        RiskModuleHistory.query.filter(
+            RiskModuleHistory.created_at < datetime.utcnow() - timedelta(days=14)
+        ).delete(synchronize_session=False)
         db.session.commit()
     except Exception as e:
         db.session.rollback()
@@ -9280,6 +9337,156 @@ def get_risk_data_quality():
         "oldest_update": min(updated_times).isoformat() if updated_times else None,
         "latest_brief_at": latest_brief.get("created_at") if latest_brief else None,
         "modules": modules,
+    })
+
+
+def risk_history_payload_hash(payload):
+    return hashlib.sha256(
+        json.dumps(payload, ensure_ascii=False, sort_keys=True, default=str).encode("utf-8")
+    ).hexdigest()
+
+
+def extract_trend_metric(payload, config):
+    if not payload:
+        return None
+    score = safe_float(payload.get(config["score"]), None)
+    if score is None:
+        return None
+    return {
+        "score": round(score, 2),
+        "label": payload.get(config["label"]) or RISK_MODULE_LABELS.get(config["key"], config["key"]),
+        "color": payload.get(config["color"]) or risk_color(score),
+        "summary": payload.get("summary", ""),
+        "as_of": payload.get("as_of") or payload.get("price_date"),
+    }
+
+
+@app.route('/api/risk/module-trends', methods=['GET'])
+def get_risk_module_trends():
+    modules = []
+    warming_count = 0
+    cooling_count = 0
+    stable_count = 0
+    now = datetime.utcnow()
+
+    for config in RISK_TREND_MODULES:
+        module_key = config["key"]
+        current_payload = risk_module_payload(module_key) or {}
+        current_metric = extract_trend_metric(current_payload, config)
+        if not current_metric:
+            continue
+
+        current_hash = risk_history_payload_hash(current_payload)
+        histories = RiskModuleHistory.query.filter_by(module_key=module_key).order_by(
+            RiskModuleHistory.created_at.desc()
+        ).limit(8).all()
+        previous_metric = None
+        previous_at = None
+        sample_count = RiskModuleHistory.query.filter_by(module_key=module_key).count()
+
+        for history in histories:
+            if history.payload_hash == current_hash:
+                continue
+            try:
+                metric = extract_trend_metric(history.to_payload(), config)
+            except Exception:
+                metric = None
+            if metric:
+                previous_metric = metric
+                previous_at = history.created_at
+                break
+
+        delta = None
+        abs_delta = None
+        direction_label = "等待历史"
+        tone = "blue"
+        action = "等待下一次模块快照后再确认趋势，当前只使用最新读数。"
+        priority = 40
+
+        if previous_metric:
+            delta = round(current_metric["score"] - previous_metric["score"], 2)
+            abs_delta = abs(delta)
+            if abs_delta < 1:
+                stable_count += 1
+                direction_label = "基本稳定"
+                tone = "blue"
+                action = "变化幅度较小，维持当前模块权重，不单独改变风险预算。"
+                priority = 45 + abs_delta
+            else:
+                if config["direction"] == "risk":
+                    is_warming = delta > 0
+                elif config["direction"] == "support":
+                    is_warming = delta < 0
+                else:
+                    is_warming = False
+
+                if is_warming:
+                    warming_count += 1
+                    direction_label = "风险升温"
+                    tone = "red" if abs_delta >= 8 else "amber"
+                    action = "把该模块作为下一次仓位审查的前置约束，确认是否需要降低目标上沿。"
+                    priority = 80 + abs_delta
+                else:
+                    cooling_count += 1
+                    direction_label = "风险缓和"
+                    tone = "green"
+                    action = "若预警和触发线同步改善，可把该模块从压力清单降级为观察项。"
+                    priority = 70 + abs_delta
+
+        age_minutes = None
+        if current_metric.get("as_of"):
+            try:
+                age_minutes = round(max(0, (now - datetime.fromisoformat(current_metric["as_of"])).total_seconds()) / 60, 1)
+            except Exception:
+                age_minutes = None
+
+        modules.append({
+            "key": module_key,
+            "label": RISK_MODULE_LABELS.get(module_key, module_key),
+            "direction": config["direction"],
+            "current_score": current_metric["score"],
+            "current_label": current_metric["label"],
+            "current_color": current_metric["color"],
+            "previous_score": previous_metric["score"] if previous_metric else None,
+            "previous_label": previous_metric["label"] if previous_metric else None,
+            "delta": delta,
+            "abs_delta": abs_delta,
+            "trend": direction_label,
+            "tone": tone,
+            "summary": current_metric["summary"],
+            "action": action,
+            "sample_count": sample_count,
+            "previous_at": previous_at.isoformat() if previous_at else None,
+            "current_as_of": current_metric.get("as_of"),
+            "age_minutes": age_minutes,
+            "priority": round(priority, 2),
+        })
+
+    modules.sort(key=lambda item: item["priority"], reverse=True)
+    available = len(modules)
+    history_ready = len([item for item in modules if item["previous_score"] is not None])
+    headline_tone = "red" if warming_count >= 4 else "amber" if warming_count >= 2 else "green" if cooling_count > warming_count else "blue"
+    if warming_count >= 2:
+        headline = f"{warming_count} 个模块显示风险升温"
+    elif cooling_count > warming_count:
+        headline = f"{cooling_count} 个模块显示风险缓和"
+    elif history_ready:
+        headline = "模块趋势整体稳定"
+    else:
+        headline = "模块历史正在积累"
+
+    return jsonify({
+        "as_of": now.isoformat(),
+        "headline": headline,
+        "headline_color": headline_tone,
+        "available_modules": available,
+        "history_ready_modules": history_ready,
+        "warming_count": warming_count,
+        "cooling_count": cooling_count,
+        "stable_count": stable_count,
+        "modules": modules[:12],
+        "watchlist": modules[:5],
+        "methodology": "为关键 NDX 风险模块保存变化后的历史快照，并比较当前读数与上一条不同快照的分数。对风险型模块，分数上升代表升温；对支撑型模块，分数下降代表升温。该模块用于识别连续变化方向，不构成买卖指令。",
     })
 
 

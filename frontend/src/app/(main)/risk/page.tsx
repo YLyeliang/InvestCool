@@ -8,6 +8,7 @@ import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
 import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPanel";
 import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
+import { NDXModuleTrendPanel } from "@/components/NDXModuleTrendPanel";
 import { NDXPositioningSummaryPanel } from "@/components/NDXPositioningSummaryPanel";
 import { NDXDeskBriefPanel } from "@/components/NDXDeskBriefPanel";
 import { NDXExecutionPlaybookPanel } from "@/components/NDXExecutionPlaybookPanel";
@@ -176,6 +177,13 @@ export default function RiskPage() {
           <Icon name="lucide:database-zap" className="text-[var(--accent-color)]" /> NDX 数据质量与覆盖
         </h3>
         <NDXDataQualityPanel />
+      </section>
+
+      <section id="module-trends-section" className="module-trends-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> NDX 模块趋势监控
+        </h3>
+        <NDXModuleTrendPanel />
       </section>
 
       <section id="positioning-summary-section" className="positioning-summary-section">
