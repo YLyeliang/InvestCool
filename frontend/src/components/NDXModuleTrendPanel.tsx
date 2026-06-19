@@ -35,6 +35,7 @@ interface ModuleTrendPayload {
   warming_count: number;
   cooling_count: number;
   stable_count: number;
+  baseline_ready_count: number;
   modules: TrendModule[];
   watchlist: TrendModule[];
   methodology: string;
@@ -154,10 +155,11 @@ export const NDXModuleTrendPanel = () => {
             追踪关键风险模块的上一条不同快照，识别风险升温、缓和和稳定项。历史覆盖不足时，面板会明确标记等待下一次快照。
           </p>
 
-          <div className="grid grid-cols-3 gap-2 text-center">
+          <div className="grid grid-cols-4 gap-2 text-center">
             <Counter label="升温" value={payload.warming_count} tone="red" />
             <Counter label="缓和" value={payload.cooling_count} tone="green" />
             <Counter label="稳定" value={payload.stable_count} tone="blue" />
+            <Counter label="基线" value={payload.baseline_ready_count} tone="blue" />
           </div>
         </div>
       </div>

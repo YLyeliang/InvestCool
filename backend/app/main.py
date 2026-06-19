@@ -9367,6 +9367,8 @@ def get_risk_module_trends():
     warming_count = 0
     cooling_count = 0
     stable_count = 0
+    baseline_count = 0
+    baseline_staged = False
     now = datetime.utcnow()
 
     for config in RISK_TREND_MODULES:
@@ -9383,6 +9385,11 @@ def get_risk_module_trends():
         previous_metric = None
         previous_at = None
         sample_count = RiskModuleHistory.query.filter_by(module_key=module_key).count()
+        if sample_count == 0:
+            persist_risk_module_history(module_key, current_payload)
+            baseline_count += 1
+            baseline_staged = True
+            sample_count = 1
 
         for history in histories:
             if history.payload_hash == current_hash:
@@ -9398,9 +9405,9 @@ def get_risk_module_trends():
 
         delta = None
         abs_delta = None
-        direction_label = "等待历史"
+        direction_label = "已建立基线" if sample_count > 0 else "等待历史"
         tone = "blue"
-        action = "等待下一次模块快照后再确认趋势，当前只使用最新读数。"
+        action = "已记录当前模块基线；下一次不同快照出现后再确认趋势。" if sample_count > 0 else "等待下一次模块快照后再确认趋势，当前只使用最新读数。"
         priority = 40
 
         if previous_metric:
@@ -9462,9 +9469,17 @@ def get_risk_module_trends():
             "priority": round(priority, 2),
         })
 
+    if baseline_staged:
+        try:
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.warning(f"Risk module trend baseline commit skipped: {e}")
+
     modules.sort(key=lambda item: item["priority"], reverse=True)
     available = len(modules)
     history_ready = len([item for item in modules if item["previous_score"] is not None])
+    baseline_ready = len([item for item in modules if item["previous_score"] is None and item["sample_count"] > 0])
     headline_tone = "red" if warming_count >= 4 else "amber" if warming_count >= 2 else "green" if cooling_count > warming_count else "blue"
     if warming_count >= 2:
         headline = f"{warming_count} 个模块显示风险升温"
@@ -9484,6 +9499,8 @@ def get_risk_module_trends():
         "warming_count": warming_count,
         "cooling_count": cooling_count,
         "stable_count": stable_count,
+        "baseline_count": baseline_count,
+        "baseline_ready_count": baseline_ready,
         "modules": modules[:12],
         "watchlist": modules[:5],
         "methodology": "为关键 NDX 风险模块保存变化后的历史快照，并比较当前读数与上一条不同快照的分数。对风险型模块，分数上升代表升温；对支撑型模块，分数下降代表升温。该模块用于识别连续变化方向，不构成买卖指令。",
