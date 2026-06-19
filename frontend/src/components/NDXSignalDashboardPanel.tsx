@@ -74,6 +74,21 @@ interface PlaybookPayload {
   };
 }
 
+interface DeskBriefPayload {
+  desk_score: number;
+  stance: string;
+  support_score: number;
+  pressure_score: number;
+  alert_score: number;
+  target_exposure: {
+    label: string;
+  };
+  cash_buffer: string;
+  hedge_coverage: {
+    label: string;
+  };
+}
+
 interface FactorPayload {
   pressure_score: number;
   pressure_label: string;
@@ -223,6 +238,7 @@ interface DashboardData {
   contribution: ContributionPayload | null;
   capacity: CapacityPayload | null;
   playbook: PlaybookPayload | null;
+  deskBrief: DeskBriefPayload | null;
   factors: FactorPayload | null;
   rateSensitivity: RateSensitivityPayload | null;
   conditionMatrix: ConditionMatrixPayload | null;
@@ -279,22 +295,33 @@ const colorMap = {
   },
 };
 
-const fetchJson = async <T,>(path: string, timeoutMs = 8000): Promise<T | null> => {
-  const request = (async () => {
+const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+const fetchJson = async <T,>(path: string, timeoutMs = 12000): Promise<T | null> => {
+  const requestOnce = async () => {
     const response = await fetch(path);
     const payload = await response.json();
     return response.ok && !payload.error ? payload as T : null;
-  })();
+  };
 
-  const timeout = new Promise<null>((resolve) => {
-    window.setTimeout(() => resolve(null), timeoutMs);
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const timeout = new Promise<null>((resolve) => {
+      window.setTimeout(() => resolve(null), timeoutMs);
+    });
 
-  try {
-    return await Promise.race([request, timeout]);
-  } catch {
-    return null;
+    try {
+      const result = await Promise.race([requestOnce(), timeout]);
+      if (result) return result;
+    } catch {
+      // Retry once below; cold PM2 reloads can return 202 while caches initialize.
+    }
+
+    if (attempt === 0) {
+      await sleep(2500);
+    }
   }
+
+  return null;
 };
 
 const scoreColor = (score: number, inverse = false): ColorKey => {
@@ -360,6 +387,7 @@ export const NDXSignalDashboardPanel = () => {
           contribution,
           capacity,
           playbook,
+          deskBrief,
           factors,
           rateSensitivity,
           conditionMatrix,
@@ -387,6 +415,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ContributionPayload>("/api/risk/contribution"),
           fetchJson<CapacityPayload>("/api/risk/capacity"),
           fetchJson<PlaybookPayload>("/api/risk/playbook", 15000),
+          fetchJson<DeskBriefPayload>("/api/risk/desk-brief", 15000),
           fetchJson<FactorPayload>("/api/risk/factors"),
           fetchJson<RateSensitivityPayload>("/api/risk/rate-sensitivity"),
           fetchJson<ConditionMatrixPayload>("/api/risk/condition-matrix"),
@@ -408,7 +437,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volPremium, intradayTape, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, deskBrief, factors, rateSensitivity, conditionMatrix, funding, attribution, breadth, themeRotation, liquidity, valuation, quality, earnings, options, volPremium, intradayTape, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -445,6 +474,7 @@ export const NDXSignalDashboardPanel = () => {
       data.recoveryPath?.recovery_score ?? 50,
       data.capacity?.capacity_score ?? 50,
       data.playbook?.playbook_score ?? 50,
+      data.deskBrief?.desk_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
     const pressureScores = [riskScore, contributionScore, rateSensitivityScore, volPremiumScore, intradayTapeScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
@@ -503,6 +533,13 @@ export const NDXSignalDashboardPanel = () => {
         detail: data.playbook ? `暴露 ${data.playbook.target_exposure.label} · 现金 ${data.playbook.cash_buffer_min.toFixed(0)}%+ · 保护 ${data.playbook.hedge_coverage.label}` : "等待执行手册",
         color: data.playbook ? scoreColor(data.playbook.playbook_score) : "blue",
         icon: "clipboard-list",
+      },
+      {
+        label: "Desk Brief",
+        value: data.deskBrief ? data.deskBrief.stance : "--",
+        detail: data.deskBrief ? `支撑 ${data.deskBrief.support_score.toFixed(1)} · 压力 ${data.deskBrief.pressure_score.toFixed(1)} · 暴露 ${data.deskBrief.target_exposure.label}` : "等待机构晨会",
+        color: data.deskBrief ? scoreColor(data.deskBrief.desk_score) : "blue",
+        icon: "newspaper",
       },
       {
         label: "宏观压力",
@@ -651,7 +688,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 25 }).map((_, index) => (
+          {Array.from({ length: 26 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>

@@ -90,6 +90,7 @@ risk_recovery_path_cache = {"data": None, "last_update": None}
 risk_contribution_cache = {"data": None, "last_update": None}
 risk_capacity_cache = {"data": None, "last_update": None}
 risk_playbook_cache = {"data": None, "last_update": None}
+risk_desk_brief_cache = {"data": None, "last_update": None}
 risk_rate_sensitivity_cache = {"data": None, "last_update": None}
 
 RISK_BRIEF_STATUSES = ("风险偏高", "谨慎观察", "中性震荡", "防守观察", "机会窗口")
@@ -332,6 +333,15 @@ def playbook_regime(score, alert_score, net_pressure):
     if score >= 38:
         return "降档观察", "amber"
     return "防守执行", "red"
+
+def desk_brief_regime(score, alert_score, tape_pressure):
+    if score >= 68 and alert_score < 58 and tape_pressure < 58:
+        return "增配窗口", "green"
+    if score >= 52 and alert_score < 72:
+        return "持仓审查", "blue"
+    if score >= 38:
+        return "谨慎降速", "amber"
+    return "防守晨会", "red"
 
 def hedge_overlay_regime(score):
     if score >= 72:
@@ -5610,6 +5620,223 @@ def refresh_playbook_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_desk_brief_data(allow_dependency_refresh=True):
+    global risk_desk_brief_cache
+
+    try:
+        dependencies = [
+            ("playbook", risk_playbook_cache, refresh_playbook_data, 15 * 60, True),
+            ("regime", risk_regime_compass_cache, refresh_regime_compass_data, 15 * 60, True),
+            ("alerts", risk_alerts_cache, refresh_alerts_data, 15 * 60, True),
+            ("contribution", risk_contribution_cache, refresh_contribution_data, 15 * 60, True),
+            ("capacity", risk_capacity_cache, refresh_capacity_data, 15 * 60, True),
+            ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60, True),
+            ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
+            ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
+            ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60, False),
+            ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
+            ("vol_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60, False),
+            ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60, False),
+            ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60, False),
+            ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60, False),
+            ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60, False),
+            ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60, False),
+        ]
+        light_dependencies = {
+            "playbook",
+            "regime",
+            "alerts",
+            "contribution",
+            "capacity",
+            "recovery",
+            "rate_sensitivity",
+            "intraday",
+            "hedge",
+            "vol_premium",
+            "vol_term",
+            "breadth",
+            "liquidity",
+        }
+        dependency_status = []
+        for key, cache, refresher, ttl, accepts_light in dependencies:
+            try:
+                can_refresh = allow_dependency_refresh is True or (
+                    allow_dependency_refresh == "light" and key in light_dependencies
+                )
+                if can_refresh and not cache_is_fresh(cache, ttl):
+                    if accepts_light:
+                        refresher(allow_dependency_refresh="light" if allow_dependency_refresh == "light" else True)
+                    else:
+                        refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Desk brief dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        if dependency_status.count("ok") < 8:
+            return
+
+        playbook = risk_playbook_cache.get("data") or {}
+        regime = risk_regime_compass_cache.get("data") or {}
+        alerts = risk_alerts_cache.get("data") or {}
+        contribution = risk_contribution_cache.get("data") or {}
+        capacity = risk_capacity_cache.get("data") or {}
+        recovery = risk_recovery_path_cache.get("data") or {}
+        rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
+        intraday = risk_intraday_tape_cache.get("data") or {}
+        hedge = risk_hedge_overlay_cache.get("data") or {}
+        vol_premium = risk_vol_premium_cache.get("data") or {}
+        vol_term = risk_volatility_term_cache.get("data") or {}
+        breadth = risk_breadth_cache.get("data") or {}
+        liquidity = risk_liquidity_cache.get("data") or {}
+        valuation = risk_valuation_cache.get("data") or {}
+        quality = risk_quality_cache.get("data") or {}
+        earnings = risk_earnings_cache.get("data") or {}
+
+        def avg(scores, default=50):
+            valid = [safe_float(score, None) for score in scores]
+            valid = [score for score in valid if score is not None]
+            return sum(valid) / len(valid) if valid else default
+
+        alert_score = safe_float(alerts.get("alert_score"), 50)
+        tape_pressure = safe_float(intraday.get("tape_pressure_score"), 50)
+        net_pressure = safe_float(contribution.get("net_pressure"), 0)
+        pressure_score = avg([
+            alerts.get("alert_score"),
+            contribution.get("risk_contribution_score"),
+            rate_sensitivity.get("rate_sensitivity_score"),
+            intraday.get("tape_pressure_score"),
+            hedge.get("hedge_score"),
+            vol_premium.get("premium_score"),
+            vol_term.get("term_score"),
+            valuation.get("valuation_score"),
+            earnings.get("event_score"),
+        ])
+        support_score = avg([
+            playbook.get("playbook_score"),
+            regime.get("regime_score"),
+            capacity.get("capacity_score"),
+            recovery.get("recovery_score"),
+            breadth.get("breadth_score"),
+            liquidity.get("flow_score"),
+            quality.get("quality_score"),
+        ])
+        desk_score = round(clamp(50 + support_score * 0.38 - pressure_score * 0.34 - max(0, net_pressure) * 0.45), 1)
+        stance, stance_color = desk_brief_regime(desk_score, alert_score, tape_pressure)
+
+        target_exposure = playbook.get("target_exposure", capacity.get("target_exposure", {})) or {}
+        hedge_coverage = playbook.get("hedge_coverage", capacity.get("hedge_coverage", {})) or {}
+        target_label = target_exposure.get("label", "--")
+        hedge_label = hedge_coverage.get("label", "--")
+        cash_buffer = safe_float(playbook.get("cash_buffer_min", capacity.get("cash_buffer_min")), None)
+        cash_label = f"{cash_buffer:.0f}%+" if cash_buffer is not None else "--"
+
+        if stance == "增配窗口":
+            summary = f"NDX Desk Brief 倾向增配窗口，执行上限仍以 Playbook 暴露 {target_label}、现金 {cash_label} 和保护 {hedge_label} 为边界。"
+            opening_action = "允许把新增风险预算分批推进到目标区间中上部，但必须绑定盘中 tape 和确认线。"
+        elif stance == "持仓审查":
+            summary = f"NDX Desk Brief 倾向持仓审查，核心暴露可保留，新增资金应等待技术位、广度或利率条件确认。"
+            opening_action = "维持核心仓位，先检查超配行业、MAG7 集中度和保护覆盖是否仍匹配账户承受力。"
+        elif stance == "谨慎降速":
+            summary = f"NDX Desk Brief 进入谨慎降速，净压力 {net_pressure:+.1f}，不宜让单日上涨自动转化为更高仓位上限。"
+            opening_action = "把超过目标上沿的暴露降回区间内，新增资金只做确认后的分批执行。"
+        else:
+            summary = f"NDX Desk Brief 进入防守晨会，预警分 {alert_score:.1f}，优先处理现金、保护和失效线。"
+            opening_action = "暂停进攻性加仓，先把最大亏损预算、对冲覆盖和技术失效线写进执行票据。"
+
+        top_priorities = [
+            {
+                "key": "risk_budget",
+                "label": "风险预算",
+                "color": playbook.get("posture_color", capacity.get("capacity_color", "blue")),
+                "state": playbook.get("posture", capacity.get("capacity_regime", "等待预算")),
+                "readout": f"目标暴露 {target_label} / 现金 {cash_label} / 保护 {hedge_label}",
+                "action": playbook.get("headline_action", capacity.get("summary", "先确认目标暴露、现金和保护覆盖。")),
+            },
+            {
+                "key": "market_tape",
+                "label": "盘中 tape",
+                "color": risk_color(tape_pressure),
+                "state": intraday.get("regime", "等待盘中确认"),
+                "readout": f"日内 {safe_float(intraday.get('daily_return'), 0):+.2f}% / VWAP {safe_float(intraday.get('vwap_distance'), 0):+.2f}% / 量能 {safe_float(intraday.get('volume_pace'), 0):.2f}x",
+                "action": "若价格站上 VWAP 且量能确认，才允许执行靠近目标上沿；否则保持分批和等待。",
+            },
+            {
+                "key": "macro_valuation",
+                "label": "估值利率",
+                "color": risk_color(safe_float(rate_sensitivity.get("rate_sensitivity_score"), 50)),
+                "state": rate_sensitivity.get("rate_sensitivity_regime", valuation.get("valuation_label", "等待估值")),
+                "readout": f"10Y {safe_float(rate_sensitivity.get('rate_change_20d_bps'), 0):+.1f}bps / FPE {safe_float(rate_sensitivity.get('weighted_forward_pe'), safe_float(valuation.get('weighted_forward_pe'), 0)):.1f}x / 50bps 风险 {safe_float(rate_sensitivity.get('ndx_multiple_risk'), 0):.1f}%",
+                "action": "利率继续上行时，把估值扩张假设切换为盈利兑现假设，减少远端成长暴露。",
+            },
+            {
+                "key": "internals",
+                "label": "内部结构",
+                "color": constructive_color(avg([breadth.get("breadth_score"), liquidity.get("flow_score"), regime.get("support_score")])),
+                "state": f"{breadth.get('breadth_label', '广度待确认')} / {liquidity.get('regime', '流动性待确认')}",
+                "readout": f"广度 {safe_float(breadth.get('breadth_score'), 50):.1f} / 流动性 {safe_float(liquidity.get('flow_score'), 50):.1f} / 支撑 {safe_float(regime.get('support_score'), 50):.1f}",
+                "action": "若等权和成交承接没有跟上，指数上涨更像权重股驱动，新增仓位应低于目标中位。",
+            },
+            {
+                "key": "vol_hedge",
+                "label": "波动保护",
+                "color": hedge.get("hedge_color", risk_color(safe_float(hedge.get("hedge_score"), 50))),
+                "state": hedge.get("hedge_label", vol_term.get("regime", "等待波动定价")),
+                "readout": f"隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}% / 实现 {safe_float(vol_premium.get('realized_move'), 0):.2f}% / VIX曲线 {vol_term.get('regime', '--')}",
+                "action": "保护覆盖跟随 Playbook 区间，不在波动率快速上行时一次性补足保险。",
+            },
+        ]
+
+        top_alerts = alerts.get("alerts") or [{}]
+        bull_case = [
+            f"Playbook 分数 {safe_float(playbook.get('playbook_score'), 50):.1f}，目标暴露仍有明确区间，说明组合动作可以规则化执行。",
+            f"市场罗盘 {regime.get('regime', '中性')}，支撑分 {safe_float(regime.get('support_score'), 50):.1f}，若广度和流动性同步改善，可增强反弹质量。",
+            f"MAG7 质量分 {safe_float(quality.get('quality_score'), 50):.1f}，若财报窗口没有放大事件风险，估值溢价更容易被基本面吸收。",
+        ]
+        bear_case = [
+            f"预警分 {alert_score:.1f}，最高优先级仍需先看 {top_alerts[0].get('title', '红色/观察预警')}。",
+            f"估值利率敏感度 {safe_float(rate_sensitivity.get('rate_sensitivity_score'), 50):.1f}，若 10Y 上行，FPE {safe_float(rate_sensitivity.get('weighted_forward_pe'), safe_float(valuation.get('weighted_forward_pe'), 0)):.1f}x 的容错会下降。",
+            f"净压力 {net_pressure:+.1f}，若压力贡献继续超过缓冲贡献，指数创新高也不等于组合承受力提高。",
+        ]
+        change_mind = [
+            "确认线：NDX 收盘站上 Playbook 确认线，且盘中 tape 不是缩量上行。",
+            "失效线：跌破 Playbook 失效线或 VIX 曲线转为 backwardation，直接把仓位降回目标下沿。",
+            "基本面：MAG7 质量分跌破 50 或财报事件权重大幅上升，降低估值扩张假设权重。",
+            "宏观：10Y 与美元压力同步上行时，暂停新增远端成长风险预算。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "index": round_optional(safe_float(playbook.get("index"), safe_float(intraday.get("index"), None)), 2),
+            "desk_score": desk_score,
+            "stance": stance,
+            "stance_color": stance_color,
+            "summary": summary,
+            "opening_action": opening_action,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "support_score": round(support_score, 1),
+            "pressure_score": round(pressure_score, 1),
+            "alert_score": round(alert_score, 1),
+            "tape_pressure_score": round(tape_pressure, 1),
+            "net_pressure": round(net_pressure, 1),
+            "target_exposure": target_exposure,
+            "cash_buffer": cash_label,
+            "hedge_coverage": hedge_coverage,
+            "top_priorities": top_priorities,
+            "bull_case": bull_case,
+            "bear_case": bear_case,
+            "change_mind": change_mind,
+            "levels": playbook.get("levels", []),
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、盘中 tape、估值利率敏感度、广度/流动性、MAG7 质量/财报、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+        }
+        risk_desk_brief_cache["data"] = data
+        risk_desk_brief_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX desk brief updated: {stance}, score {desk_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX desk brief refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_rate_sensitivity_data(allow_dependency_refresh=True):
     global risk_rate_sensitivity_cache
 
@@ -6691,6 +6918,7 @@ def background_worker():
     last_contribution = 0
     last_capacity = 0
     last_playbook = 0
+    last_desk_brief = 0
     last_rate_sensitivity = 0
     while True:
         try:
@@ -6853,6 +7081,11 @@ def background_worker():
             if time.time() - last_playbook > 1800:
                 refresh_playbook_data()
                 last_playbook = time.time()
+
+            # NDX institutional desk brief every 30 minutes
+            if time.time() - last_desk_brief > 1800:
+                refresh_desk_brief_data()
+                last_desk_brief = time.time()
 
             # NDX valuation-rate sensitivity every 30 minutes
             if time.time() - last_rate_sensitivity > 1800:
@@ -7023,6 +7256,14 @@ def get_risk_playbook():
         refresh_playbook_data(allow_dependency_refresh="light")
 
     data = risk_playbook_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/desk-brief', methods=['GET'])
+def get_risk_desk_brief():
+    if not cache_is_fresh(risk_desk_brief_cache, 15 * 60) and should_refresh_empty_cache(risk_desk_brief_cache, 60):
+        refresh_desk_brief_data(allow_dependency_refresh="light")
+
+    data = risk_desk_brief_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/rate-sensitivity', methods=['GET'])
