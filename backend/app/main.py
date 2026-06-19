@@ -71,6 +71,7 @@ risk_levels_cache = {"data": None, "last_update": None}
 risk_tail_cache = {"data": None, "last_update": None}
 risk_relative_cache = {"data": None, "last_update": None}
 risk_dispersion_cache = {"data": None, "last_update": None}
+risk_correlation_stress_cache = {"data": None, "last_update": None}
 risk_options_cache = {"data": None, "last_update": None}
 risk_gamma_map_cache = {"data": None, "last_update": None}
 risk_option_skew_cache = {"data": None, "last_update": None}
@@ -300,6 +301,15 @@ def build_contribution_driver(key, label, direction, score, weight, evidence, ac
         "evidence": evidence,
         "action": action,
     }
+
+def correlation_stress_regime(score):
+    if score >= 75:
+        return "同涨同跌", "red"
+    if score >= 55:
+        return "相关升温", "amber"
+    if score >= 35:
+        return "分化可用", "blue"
+    return "分散良好", "green"
 
 def capacity_regime(score):
     if score >= 70:
@@ -3735,6 +3745,153 @@ def refresh_dispersion_data():
         logger.info(f"MAG7 dispersion updated: {regime}")
     except Exception as e:
         logger.error(f"MAG7 dispersion refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
+def refresh_correlation_stress_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_correlation_stress_cache
+
+    try:
+        names = {
+            "AAPL": "Apple",
+            "MSFT": "Microsoft",
+            "GOOGL": "Alphabet",
+            "AMZN": "Amazon",
+            "NVDA": "NVIDIA",
+            "META": "Meta",
+            "TSLA": "Tesla",
+        }
+        symbols = list(names.keys())
+        market_symbols = {
+            "QQQ": "QQQ",
+            "SPY": "SPY",
+            "SMH": "SMH",
+            "IWM": "IWM",
+        }
+        close_map = {
+            symbol: fetch_ohlc_history(symbol, "1y", min_rows=180, attempts=3)["Close"]
+            for symbol in symbols + list(market_symbols.keys())
+        }
+        prices = pd.concat(close_map, axis=1, join="inner").dropna()
+        if len(prices) < 180:
+            raise ValueError("Insufficient aligned history for correlation stress")
+
+        returns = prices.pct_change().dropna() * 100
+        if len(returns) < 160:
+            raise ValueError("Insufficient return history for correlation stress")
+
+        mag7_returns = returns[symbols]
+        corr20_matrix = mag7_returns.tail(20).corr()
+        corr60_matrix = mag7_returns.tail(60).corr()
+        corr20 = average_pairwise_correlation(mag7_returns.tail(20))
+        corr60 = average_pairwise_correlation(mag7_returns.tail(60))
+        rolling_corr = mag7_returns.rolling(20).corr()
+        rolling_avg = []
+        for date in mag7_returns.index[24:]:
+            try:
+                matrix = rolling_corr.loc[date]
+                rolling_avg.append(average_pairwise_correlation(matrix))
+            except Exception:
+                continue
+        rolling_avg_series = pd.Series(rolling_avg).dropna()
+        corr_percentile = safe_float((rolling_avg_series <= corr20).mean() * 100, 50) if not rolling_avg_series.empty else 50
+
+        qqq_spy_corr = safe_float(returns["QQQ"].tail(60).corr(returns["SPY"].tail(60)), 0)
+        qqq_smh_corr = safe_float(returns["QQQ"].tail(60).corr(returns["SMH"].tail(60)), 0)
+        qqq_iwm_corr = safe_float(returns["QQQ"].tail(60).corr(returns["IWM"].tail(60)), 0)
+        mag7_dispersion = safe_float(mag7_returns.tail(20).std(axis=1).mean(), 0)
+        qqq_realized_vol_20d = safe_float(returns["QQQ"].tail(20).std() * (252 ** 0.5), 0)
+        qqq_return_20d = pct_change(prices["QQQ"].iloc[-1], prices["QQQ"].iloc[-21]) if len(prices) >= 21 else 0
+
+        pair_rows = []
+        for i, left in enumerate(symbols):
+            for right in symbols[i + 1:]:
+                corr = safe_float(corr20_matrix.loc[left, right], 0)
+                pair_corr60 = safe_float(corr60_matrix.loc[left, right], 0)
+                pair_rows.append({
+                    "pair": f"{left}/{right}",
+                    "left": left,
+                    "right": right,
+                    "corr_20d": round(corr, 2),
+                    "corr_60d": round(pair_corr60, 2),
+                    "delta": round(corr - pair_corr60, 2),
+                    "color": "red" if corr >= 0.78 else "amber" if corr >= 0.62 else "blue" if corr >= 0.35 else "green",
+                })
+        top_pairs = sorted(pair_rows, key=lambda item: item["corr_20d"], reverse=True)[:8]
+        low_pairs = sorted(pair_rows, key=lambda item: item["corr_20d"])[:4]
+
+        securities = []
+        qqq_returns = returns["QQQ"].tail(60)
+        qqq_var = safe_float(qqq_returns.var(), 0)
+        for symbol in symbols:
+            stock_returns = returns[symbol].tail(60)
+            beta = safe_float(stock_returns.cov(qqq_returns) / qqq_var, 0) if qqq_var else 0
+            corr_to_qqq = safe_float(stock_returns.corr(qqq_returns), 0)
+            return_20d = pct_change(prices[symbol].iloc[-1], prices[symbol].iloc[-21]) if len(prices) >= 21 else 0
+            securities.append({
+                "symbol": symbol,
+                "name": names[symbol],
+                "corr_to_qqq": round(corr_to_qqq, 2),
+                "beta_to_qqq": round(beta, 2),
+                "return_20d": round(return_20d, 2),
+                "active_20d": round(return_20d - qqq_return_20d, 2),
+                "color": "red" if corr_to_qqq >= 0.82 else "amber" if corr_to_qqq >= 0.68 else "blue",
+            })
+
+        stress_score = round(clamp(
+            max(0, corr20 - 0.42) * 95
+            + max(0, corr_percentile - 55) * 0.55
+            + max(0, qqq_spy_corr - 0.78) * 45
+            + max(0, qqq_smh_corr - 0.72) * 38
+            + max(0, qqq_realized_vol_20d - 24) * 0.7
+            - max(0, 1.15 - mag7_dispersion) * 7
+        ), 1)
+        regime, color = correlation_stress_regime(stress_score)
+
+        if regime == "同涨同跌":
+            summary = f"MAG7 相关性进入同涨同跌风险区，20D 平均相关 {corr20:.2f}，单股分散化对 NDX 保护作用明显下降。"
+        elif regime == "相关升温":
+            summary = f"MAG7 相关性升温，20D 平均相关 {corr20:.2f}、历史分位 {corr_percentile:.1f}%，NDX 更容易被系统性 beta 驱动。"
+        elif regime == "分散良好":
+            summary = f"MAG7 相关性较低，20D 平均相关 {corr20:.2f}，权重股之间仍保留较强分散化空间。"
+        else:
+            summary = f"MAG7 相关性处于可用分化区，20D 平均相关 {corr20:.2f}，需要观察 QQQ 与 SMH/SPY 的同步程度。"
+
+        controls = [
+            f"若平均相关维持在 {corr20:.2f} 附近且 QQQ/SPY 相关 {qqq_spy_corr:.2f} 继续上行，单股轮动不能替代组合降杠杆。",
+            f"当前最高相关配对为 {top_pairs[0]['pair']}（{top_pairs[0]['corr_20d']:.2f}），同类风险暴露应合并计算。",
+            f"最低相关配对为 {low_pairs[0]['pair']}（{low_pairs[0]['corr_20d']:.2f}），若这些配对也开始上行，说明分散化正在失效。",
+            "相关性压力用于组合风险聚合和分散化评估，不构成单股交易建议。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": prices.index[-1].date().isoformat(),
+            "stress_score": stress_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "avg_corr_20d": round(corr20, 2),
+            "avg_corr_60d": round(corr60, 2),
+            "corr_percentile": round(corr_percentile, 1),
+            "qqq_spy_corr": round(qqq_spy_corr, 2),
+            "qqq_smh_corr": round(qqq_smh_corr, 2),
+            "qqq_iwm_corr": round(qqq_iwm_corr, 2),
+            "mag7_dispersion": round(mag7_dispersion, 2),
+            "qqq_realized_vol_20d": round(qqq_realized_vol_20d, 1),
+            "qqq_return_20d": round(qqq_return_20d, 2),
+            "top_pairs": top_pairs,
+            "low_pairs": low_pairs,
+            "securities": sorted(securities, key=lambda item: item["corr_to_qqq"], reverse=True),
+            "controls": controls,
+            "methodology": "使用 QQQ、SPY、SMH、IWM 与 MAG7 最近 1 年日收益，计算 MAG7 20/60 日成对相关、滚动相关历史分位、QQQ 与主要风险资产相关性、单股对 QQQ beta 和高相关配对，用于判断 NDX 分散化是否失效。该模块用于组合风险聚合，不构成单股建议。",
+        }
+        risk_correlation_stress_cache["data"] = data
+        risk_correlation_stress_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX correlation stress updated: {regime}, score {stress_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX correlation stress refresh failed: {e}")
         logger.error(traceback.format_exc())
 
 
@@ -7206,6 +7363,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("vol_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60, False),
             ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60, False),
             ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60, False),
+            ("correlation", risk_correlation_stress_cache, refresh_correlation_stress_data, 15 * 60, False),
             ("valuation", risk_valuation_cache, refresh_valuation_data, 6 * 60 * 60, False),
             ("quality", risk_quality_cache, refresh_quality_data, 6 * 60 * 60, False),
             ("earnings", risk_earnings_cache, refresh_earnings_catalyst_data, 6 * 60 * 60, False),
@@ -7231,6 +7389,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "vol_term",
             "breadth",
             "liquidity",
+            "correlation",
         }
         dependency_status = []
         for key, cache, refresher, ttl, accepts_light in dependencies:
@@ -7271,6 +7430,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         vol_term = risk_volatility_term_cache.get("data") or {}
         breadth = risk_breadth_cache.get("data") or {}
         liquidity = risk_liquidity_cache.get("data") or {}
+        correlation = risk_correlation_stress_cache.get("data") or {}
         valuation = risk_valuation_cache.get("data") or {}
         quality = risk_quality_cache.get("data") or {}
         earnings = risk_earnings_cache.get("data") or {}
@@ -7298,6 +7458,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             vol_premium.get("premium_score"),
             vol_cone.get("cone_score"),
             vol_term.get("term_score"),
+            correlation.get("stress_score"),
             valuation.get("valuation_score"),
             earnings.get("event_score"),
         ])
@@ -7371,9 +7532,9 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             {
                 "key": "internals",
                 "label": "内部结构",
-                "color": constructive_color(avg([breadth.get("breadth_score"), liquidity.get("flow_score"), regime.get("support_score")])),
-                "state": f"{breadth.get('breadth_label', '广度待确认')} / {liquidity.get('regime', '流动性待确认')}",
-                "readout": f"广度 {safe_float(breadth.get('breadth_score'), 50):.1f} / 流动性 {safe_float(liquidity.get('flow_score'), 50):.1f} / 跨资产 {safe_float(cross_asset.get('confirmation_score'), 50):.1f}",
+                "color": constructive_color(avg([breadth.get("breadth_score"), liquidity.get("flow_score"), regime.get("support_score"), 100 - safe_float(correlation.get("stress_score"), 50)])),
+                "state": f"{breadth.get('breadth_label', '广度待确认')} / {correlation.get('regime', '相关待确认')}",
+                "readout": f"广度 {safe_float(breadth.get('breadth_score'), 50):.1f} / 流动性 {safe_float(liquidity.get('flow_score'), 50):.1f} / Corr {safe_float(correlation.get('avg_corr_20d'), 0):.2f}",
                 "action": "若等权和成交承接没有跟上，指数上涨更像权重股驱动，新增仓位应低于目标中位。",
             },
             {
@@ -7424,6 +7585,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "skew_score": round(safe_float(skew.get("skew_score"), 50), 1),
             "volatility_cone_score": round(safe_float(vol_cone.get("cone_score"), 50), 1),
+            "correlation_stress_score": round(safe_float(correlation.get("stress_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
             "cash_buffer": cash_label,
@@ -7433,7 +7595,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、因子冲击、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动锥、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、因子冲击、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、相关性压力、MAG7 质量/财报、期权偏斜、波动锥、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -8513,6 +8675,7 @@ def background_worker():
     last_relative = 0
     last_theme_rotation = 0
     last_dispersion = 0
+    last_correlation_stress = 0
     last_options = 0
     last_gamma_map = 0
     last_option_skew = 0
@@ -8603,6 +8766,11 @@ def background_worker():
             if time.time() - last_dispersion > 1800:
                 refresh_dispersion_data()
                 last_dispersion = time.time()
+
+            # NDX/MAG7 correlation stress every 30 minutes
+            if time.time() - last_correlation_stress > 1800:
+                refresh_correlation_stress_data()
+                last_correlation_stress = time.time()
 
             # QQQ options-implied move every 30 minutes
             if time.time() - last_options > 1800:
@@ -8988,6 +9156,14 @@ def get_risk_dispersion():
         refresh_dispersion_data()
 
     data = risk_dispersion_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/correlation-stress', methods=['GET'])
+def get_risk_correlation_stress():
+    if not cache_is_fresh(risk_correlation_stress_cache, 15 * 60) and should_refresh_empty_cache(risk_correlation_stress_cache, 60):
+        refresh_correlation_stress_data()
+
+    data = risk_correlation_stress_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/options', methods=['GET'])

@@ -39,6 +39,7 @@ import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePane
 import { MAG7QualityPanel } from "@/components/MAG7QualityPanel";
 import { NDXEarningsCatalystPanel } from "@/components/NDXEarningsCatalystPanel";
 import { MAG7DispersionPanel } from "@/components/MAG7DispersionPanel";
+import { NDXCorrelationStressPanel } from "@/components/NDXCorrelationStressPanel";
 import { NDXScenarioMapPanel } from "@/components/NDXScenarioMapPanel";
 import { NDXRecoveryPathPanel } from "@/components/NDXRecoveryPathPanel";
 import { NDXScenarioStressPanel } from "@/components/NDXScenarioStressPanel";
@@ -398,6 +399,13 @@ export default function RiskPage() {
           <Icon name="lucide:scatter-chart" className="text-[var(--accent-color)]" /> MAG7 相关性与离散度
         </h3>
         <MAG7DispersionPanel />
+      </section>
+
+      <section className="correlation-stress-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:git-merge" className="text-[var(--accent-color)]" /> NDX 相关性压力与分散化
+        </h3>
+        <NDXCorrelationStressPanel />
       </section>
 
       <section className="scenario-map-section">
