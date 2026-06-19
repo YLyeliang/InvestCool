@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from "react";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
+import { NDXPortfolioActionMatrixPanel } from "@/components/NDXPortfolioActionMatrixPanel";
 import { NDXDataQualityPanel } from "@/components/NDXDataQualityPanel";
 import { NDXPositioningSummaryPanel } from "@/components/NDXPositioningSummaryPanel";
 import { NDXDeskBriefPanel } from "@/components/NDXDeskBriefPanel";
@@ -149,6 +150,13 @@ export default function RiskPage() {
           <Icon name="lucide:list-checks" className="text-[var(--accent-color)]" /> NDX 关键看点
         </h3>
         <NDXKeyTakeawaysPanel />
+      </section>
+
+      <section className="portfolio-actions-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:table-properties" className="text-[var(--accent-color)]" /> NDX 组合动作矩阵
+        </h3>
+        <NDXPortfolioActionMatrixPanel />
       </section>
 
       <section className="data-quality-section">

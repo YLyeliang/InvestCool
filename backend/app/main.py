@@ -9661,6 +9661,211 @@ def get_risk_key_takeaways():
     })
 
 
+@app.route('/api/risk/portfolio-actions', methods=['GET'])
+def get_risk_portfolio_actions():
+    latest = latest_risk_payload() or {}
+    playbook = risk_module_payload("playbook") or {}
+    capacity = risk_module_payload("capacity") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    alerts = risk_module_payload("alerts") or {}
+    contribution = risk_module_payload("contribution") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    hedge = risk_module_payload("hedge_overlay") or {}
+    tail = risk_module_payload("tail") or {}
+    valuation = risk_module_payload("valuation") or {}
+    quality = risk_module_payload("quality") or {}
+    intraday = risk_module_payload("intraday_tape") or {}
+    data_quality = get_risk_data_quality().get_json(silent=True) or {}
+
+    if not playbook and not capacity and not latest:
+        return jsonify({"error": "Initializing"}), 202
+
+    playbook_score = safe_float(playbook.get("playbook_score"), safe_float(capacity.get("capacity_score"), 50))
+    regime_score = safe_float(regime.get("regime_score"), 50)
+    alert_score = safe_float(alerts.get("alert_score"), 50)
+    recovery_score = safe_float(recovery.get("recovery_score"), 50)
+    hedge_score = safe_float(hedge.get("hedge_score"), 50)
+    tail_score = safe_float(tail.get("tail_score"), 50)
+    valuation_score = safe_float(valuation.get("valuation_score"), 50)
+    quality_score = safe_float(quality.get("quality_score"), 50)
+    net_pressure = safe_float(contribution.get("net_pressure"), 0)
+    health_score = safe_float(data_quality.get("health_score"), 0)
+
+    valuation_penalty = max(0, valuation_score - quality_score) * 0.12
+    pressure_penalty = max(0, net_pressure) * 0.8
+    readiness_score = round(clamp(
+        playbook_score * 0.30
+        + regime_score * 0.20
+        + recovery_score * 0.15
+        + (100 - alert_score) * 0.16
+        + (100 - tail_score) * 0.08
+        + hedge_score * 0.06
+        + quality_score * 0.05
+        - valuation_penalty
+        - pressure_penalty
+    ), 1)
+
+    if readiness_score >= 68 and alert_score < 62:
+        headline = "允许分批进攻"
+        headline_color = "green"
+        stance = "用确认线释放风险预算，核心暴露可向目标区间上沿靠拢。"
+    elif readiness_score >= 52:
+        headline = "均衡持有"
+        headline_color = "blue"
+        stance = "保留核心暴露，把新增资金和追高动作拆成触发条件。"
+    elif readiness_score >= 38:
+        headline = "防守观察"
+        headline_color = "amber"
+        stance = "先控制新增风险预算，等待罗盘、预警和修复路径同步改善。"
+    else:
+        headline = "降险优先"
+        headline_color = "red"
+        stance = "降低目标暴露上沿，优先现金缓冲、对冲覆盖和失效线纪律。"
+
+    target_exposure = playbook.get("target_exposure") or capacity.get("target_exposure") or {}
+    hedge_coverage = playbook.get("hedge_coverage") or capacity.get("hedge_coverage") or {}
+    cash_buffer_min = safe_float(playbook.get("cash_buffer_min"), safe_float(capacity.get("cash_buffer_min"), 0))
+    max_loss_budget = safe_float(playbook.get("max_loss_budget"), safe_float(capacity.get("max_loss_budget"), 0))
+    levels = playbook.get("levels") or []
+    level_map = {item.get("key"): item for item in levels if isinstance(item, dict)}
+
+    repair_line = level_map.get("repair", {})
+    confirmation_line = level_map.get("confirmation", {})
+    invalidation_line = level_map.get("invalidation", {})
+    stress_line = level_map.get("stress", {})
+    active_alerts = alerts.get("alerts") or []
+    top_alert = active_alerts[0] if active_alerts else {}
+
+    def line_value(item):
+        value = item.get("value")
+        if value is None:
+            return "--"
+        return f"{safe_float(value):,.0f}"
+
+    def exposure_label(default_label):
+        return target_exposure.get("label") or default_label
+
+    def hedge_label(default_label):
+        return hedge_coverage.get("label") or hedge.get("hedge_label") or default_label
+
+    if headline_color == "green":
+        tactical_action = f"收盘站稳 {line_value(confirmation_line)} 后分批加到目标中上沿；跌回修复线下方暂停新增。"
+        core_action = f"核心 NDX 暴露可维持 {exposure_label('目标区间')}，用回踩而不是突破追价补足。"
+        defensive_action = "保留基础保护，但不主动扩大保护成本，除非期权或失效线重新恶化。"
+        new_money_action = "新增资金拆成 3-4 笔，只在确认线和广度同步改善时释放。"
+    elif headline_color == "blue":
+        tactical_action = f"短线只围绕 {line_value(repair_line)} 修复线和 VWAP 做分批动作，避免盘中一次性追高。"
+        core_action = f"核心 NDX 暴露维持 {exposure_label('中性区间')}，超过上沿的仓位优先再平衡。"
+        defensive_action = f"保护覆盖维持 {hedge_label('中性保护')}，不要在波动溢价升温时提前撤保护。"
+        new_money_action = "新增资金先放在等待队列，只有预警分回落且修复路径确认后再执行。"
+    elif headline_color == "amber":
+        tactical_action = f"短线风险预算降档，跌破 {line_value(invalidation_line)} 先收缩，不用盘中反弹修正判断。"
+        core_action = f"核心 NDX 暴露控制在 {exposure_label('目标区间')} 的中下沿，现金缓冲至少 {cash_buffer_min:.0f}%。"
+        defensive_action = f"保护覆盖保持 {hedge_label('偏高保护')}，关注尾部风险分 {tail_score:.1f} 和最高预警。"
+        new_money_action = "新增资金只做观察单，等待预警、罗盘和净压力三项至少两项改善。"
+    else:
+        tactical_action = f"暂停新增战术暴露；若跌破 {line_value(stress_line)} 压力下沿，先执行止损和现金纪律。"
+        core_action = f"核心 NDX 暴露降到 {exposure_label('防守区间')} 下半段，避免权重股集中风险继续放大。"
+        defensive_action = f"保护覆盖上调到 {hedge_label('高保护')}，现金缓冲至少 {cash_buffer_min:.0f}%。"
+        new_money_action = "新增资金暂停入场，直到数据质量、预警和修复路径都回到可执行状态。"
+
+    matrix = [
+        {
+            "key": "tactical",
+            "profile": "战术交易",
+            "horizon": "1-3 日",
+            "tone": "green" if headline_color == "green" else "amber" if headline_color in ("blue", "amber") else "red",
+            "target": "只做触发线内的分批动作",
+            "action": tactical_action,
+            "trigger": intraday.get("regime", playbook.get("headline_action", "等待盘中 tape 和修复线确认")),
+            "risk_control": f"最大损失预算 {max_loss_budget:.1f}%；最高预警：{top_alert.get('title', alerts.get('alert_level', '--'))}。",
+        },
+        {
+            "key": "core",
+            "profile": "核心配置",
+            "horizon": "1-4 周",
+            "tone": headline_color,
+            "target": exposure_label("目标区间"),
+            "action": core_action,
+            "trigger": regime.get("summary", latest.get("summary", "用市场状态罗盘和修复路径确认核心仓位。")),
+            "risk_control": f"净压力 {net_pressure:+.1f}；跌破失效线 {line_value(invalidation_line)} 不扩大核心暴露。",
+        },
+        {
+            "key": "hedged",
+            "profile": "保护型组合",
+            "horizon": "压力情景",
+            "tone": "red" if alert_score >= 75 else "amber" if alert_score >= 60 or tail_score >= 55 else "blue",
+            "target": hedge_label("保护覆盖"),
+            "action": defensive_action,
+            "trigger": hedge.get("summary", tail.get("summary", "用尾部风险、期权定价和保护覆盖约束组合下行。")),
+            "risk_control": f"尾部风险 {tail_score:.1f}；对冲分 {hedge_score:.1f}；预警分 {alert_score:.1f}。",
+        },
+        {
+            "key": "new_money",
+            "profile": "新增资金",
+            "horizon": "等待窗口",
+            "tone": "green" if readiness_score >= 70 and health_score >= 90 else "blue" if readiness_score >= 55 else "amber",
+            "target": f"现金缓冲 {cash_buffer_min:.0f}%+",
+            "action": new_money_action,
+            "trigger": f"修复线 {line_value(repair_line)}，确认线 {line_value(confirmation_line)}，数据健康 {health_score:.1f}。",
+            "risk_control": "数据质量低于 90 或预警升温时，新增资金信号自动降级为观察。",
+        },
+    ]
+
+    risk_drivers = [
+        {
+            "label": "预警压力",
+            "value": f"{alert_score:.1f}",
+            "tone": "red" if alert_score >= 75 else "amber" if alert_score >= 60 else "blue",
+            "detail": alerts.get("summary", "预警模块用于控制仓位上限和保护覆盖。"),
+        },
+        {
+            "label": "状态罗盘",
+            "value": f"{regime_score:.1f}",
+            "tone": "green" if regime_score >= 62 else "blue" if regime_score >= 50 else "amber",
+            "detail": regime.get("summary", "市场状态决定能否把核心暴露推向目标区间。"),
+        },
+        {
+            "label": "估值质量差",
+            "value": f"{valuation_score - quality_score:+.1f}",
+            "tone": "amber" if valuation_score > quality_score else "green",
+            "detail": f"估值 {valuation_score:.1f} / 质量 {quality_score:.1f}，用于判断溢价是否有基本面支撑。",
+        },
+        {
+            "label": "数据可信度",
+            "value": f"{health_score:.1f}",
+            "tone": data_quality.get("status_color", "blue"),
+            "detail": f"新鲜模块 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}，陈旧 {data_quality.get('stale_modules', 0)}。",
+        },
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "readiness_score": readiness_score,
+        "stance": stance,
+        "index": playbook.get("index") or latest.get("index_position"),
+        "target_exposure": target_exposure,
+        "cash_buffer_min": cash_buffer_min,
+        "hedge_coverage": hedge_coverage,
+        "max_loss_budget": max_loss_budget,
+        "alert_score": round(alert_score, 1),
+        "regime_score": round(regime_score, 1),
+        "tail_score": round(tail_score, 1),
+        "net_pressure": round(net_pressure, 1),
+        "levels": {
+            "stress": stress_line,
+            "invalidation": invalidation_line,
+            "repair": repair_line,
+            "confirmation": confirmation_line,
+        },
+        "matrix": matrix,
+        "risk_drivers": risk_drivers,
+        "methodology": "把执行 Playbook、市场状态罗盘、风险预警、尾部风险、对冲覆盖、估值质量、修复路径和数据质量压成四类读者的组合动作矩阵。该模块用于风控框架和阅读决策，不构成个性化投资建议或买卖指令。",
+    })
+
+
 @app.route('/api/risk/latest', methods=['GET'])
 def get_risk_latest():
     global risk_latest_cache
