@@ -99,7 +99,7 @@ export const NDXRiskSectionNavigator = () => {
 
   useEffect(() => {
     const elements = targets
-      .map((target) => document.querySelector<HTMLElement>(`.${target}`))
+      .map((target) => document.getElementById(target))
       .filter(Boolean) as HTMLElement[];
 
     if (!elements.length) return;
@@ -125,10 +125,11 @@ export const NDXRiskSectionNavigator = () => {
   }, [targets]);
 
   const scrollToSection = (target: string) => {
-    const element = document.querySelector<HTMLElement>(`.${target}`);
+    const element = document.getElementById(target);
     if (!element) return;
     element.scrollIntoView({ behavior: "smooth", block: "start" });
     setActiveTarget(target);
+    window.history.replaceState(null, "", `#${target}`);
   };
 
   return (

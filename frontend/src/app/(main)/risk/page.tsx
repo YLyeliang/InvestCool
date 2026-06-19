@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
+import { NDXLazyRiskPanel } from "@/components/NDXLazyRiskPanel";
 import { NDXRiskSectionNavigator } from "@/components/NDXRiskSectionNavigator";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
@@ -141,334 +142,334 @@ export default function RiskPage() {
 
       <NDXRiskSectionNavigator />
 
-      <section className="signal-dashboard-section">
+      <section id="signal-dashboard-section" className="signal-dashboard-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:layout-dashboard" className="text-[var(--accent-color)]" /> 机构信号总览
         </h3>
         <NDXSignalDashboardPanel />
       </section>
 
-      <section className="key-takeaways-section">
+      <section id="key-takeaways-section" className="key-takeaways-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:list-checks" className="text-[var(--accent-color)]" /> NDX 关键看点
         </h3>
         <NDXKeyTakeawaysPanel />
       </section>
 
-      <section className="portfolio-actions-section">
+      <section id="portfolio-actions-section" className="portfolio-actions-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:table-properties" className="text-[var(--accent-color)]" /> NDX 组合动作矩阵
         </h3>
         <NDXPortfolioActionMatrixPanel />
       </section>
 
-      <section className="data-quality-section">
+      <section id="data-quality-section" className="data-quality-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:database-zap" className="text-[var(--accent-color)]" /> NDX 数据质量与覆盖
         </h3>
         <NDXDataQualityPanel />
       </section>
 
-      <section className="positioning-summary-section">
+      <section id="positioning-summary-section" className="positioning-summary-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:route" className="text-[var(--accent-color)]" /> NDX 仓位动作摘要
         </h3>
         <NDXPositioningSummaryPanel />
       </section>
 
-      <section className="desk-brief-section">
+      <section id="desk-brief-section" className="desk-brief-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:newspaper" className="text-[var(--accent-color)]" /> NDX 机构 Desk Brief
         </h3>
         <NDXDeskBriefPanel />
       </section>
 
-      <section className="execution-playbook-section">
+      <section id="execution-playbook-section" className="execution-playbook-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:clipboard-list" className="text-[var(--accent-color)]" /> NDX 执行 Playbook
         </h3>
         <NDXExecutionPlaybookPanel />
       </section>
 
-      <section className="regime-analog-section">
+      <section id="regime-analog-section" className="regime-analog-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:history" className="text-[var(--accent-color)]" /> NDX 历史相似情景
         </h3>
-        <NDXRegimeAnalogPanel />
+        <NDXLazyRiskPanel label="NDX 历史相似情景"><NDXRegimeAnalogPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="intraday-tape-section">
+      <section id="intraday-tape-section" className="intraday-tape-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:scan-line" className="text-[var(--accent-color)]" /> NDX 盘中交易台脉冲
         </h3>
-        <NDXIntradayTapePanel />
+        <NDXLazyRiskPanel label="NDX 盘中交易台脉冲"><NDXIntradayTapePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="volume-profile-section">
+      <section id="volume-profile-section" className="volume-profile-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> QQQ 成交量价格分布
         </h3>
-        <NDXVolumeProfilePanel />
+        <NDXLazyRiskPanel label="QQQ 成交量价格分布"><NDXVolumeProfilePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="regime-compass-section">
+      <section id="regime-compass-section" className="regime-compass-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:compass" className="text-[var(--accent-color)]" /> NDX 市场状态罗盘
         </h3>
-        <NDXRegimeCompassPanel />
+        <NDXLazyRiskPanel label="NDX 市场状态罗盘"><NDXRegimeCompassPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="alerts-section">
+      <section id="alerts-section" className="alerts-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:bell-ring" className="text-[var(--accent-color)]" /> NDX 风险预警
         </h3>
-        <NDXRiskAlertsPanel />
+        <NDXLazyRiskPanel label="NDX 风险预警"><NDXRiskAlertsPanel /></NDXLazyRiskPanel>
       </section>
 
       {/* Real-time NDX risk brief */}
-      <section className="strategy-section">
+      <section id="strategy-section" className="strategy-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:radar" className="text-[var(--accent-color)]" /> 实时 NDX 风险简报
         </h3>
-        <NDXRiskBriefCard />
+        <NDXLazyRiskPanel label="实时 NDX 风险简报"><NDXRiskBriefCard /></NDXLazyRiskPanel>
       </section>
 
-      <section className="committee-section">
+      <section id="committee-section" className="committee-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:clipboard-list" className="text-[var(--accent-color)]" /> 投委会摘要
         </h3>
-        <NDXCommitteeMemoPanel />
+        <NDXLazyRiskPanel label="投委会摘要"><NDXCommitteeMemoPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="diagnostics-section">
+      <section id="diagnostics-section" className="diagnostics-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> 机构式风险诊断
         </h3>
-        <NDXRiskDiagnosticsPanel />
+        <NDXLazyRiskPanel label="机构式风险诊断"><NDXRiskDiagnosticsPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="contribution-section">
+      <section id="contribution-section" className="contribution-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:chart-no-axes-combined" className="text-[var(--accent-color)]" /> NDX 风险贡献拆解
         </h3>
-        <NDXContributionPanel />
+        <NDXLazyRiskPanel label="NDX 风险贡献拆解"><NDXContributionPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="capacity-section">
+      <section id="capacity-section" className="capacity-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:gauge" className="text-[var(--accent-color)]" /> NDX 风险承受力闸门
         </h3>
-        <NDXCapacityGatePanel />
+        <NDXLazyRiskPanel label="NDX 风险承受力闸门"><NDXCapacityGatePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="factor-section">
+      <section id="factor-section" className="factor-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:line-chart" className="text-[var(--accent-color)]" /> 宏观因子压力
         </h3>
-        <NDXFactorPressurePanel />
+        <NDXLazyRiskPanel label="宏观因子压力"><NDXFactorPressurePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="factor-shock-section">
+      <section id="factor-shock-section" className="factor-shock-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:flask-conical" className="text-[var(--accent-color)]" /> NDX 因子冲击实验室
         </h3>
-        <NDXFactorShockPanel />
+        <NDXLazyRiskPanel label="NDX 因子冲击实验室"><NDXFactorShockPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="rate-sensitivity-section">
+      <section id="rate-sensitivity-section" className="rate-sensitivity-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:percent" className="text-[var(--accent-color)]" /> NDX 估值-利率敏感度
         </h3>
-        <NDXRateSensitivityPanel />
+        <NDXLazyRiskPanel label="NDX 估值-利率敏感度"><NDXRateSensitivityPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="condition-matrix-section">
+      <section id="condition-matrix-section" className="condition-matrix-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:grid-3x3" className="text-[var(--accent-color)]" /> NDX 条件风险矩阵
         </h3>
-        <NDXConditionMatrixPanel />
+        <NDXLazyRiskPanel label="NDX 条件风险矩阵"><NDXConditionMatrixPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="funding-conditions-section">
+      <section id="funding-conditions-section" className="funding-conditions-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:landmark" className="text-[var(--accent-color)]" /> NDX 信用与融资条件
         </h3>
-        <NDXFundingConditionsPanel />
+        <NDXLazyRiskPanel label="NDX 信用与融资条件"><NDXFundingConditionsPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="cross-asset-section">
+      <section id="cross-asset-section" className="cross-asset-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:git-compare-arrows" className="text-[var(--accent-color)]" /> NDX 跨资产确认
         </h3>
-        <NDXCrossAssetPanel />
+        <NDXLazyRiskPanel label="NDX 跨资产确认"><NDXCrossAssetPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="attribution-section">
+      <section id="attribution-section" className="attribution-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:split" className="text-[var(--accent-color)]" /> NDX 因子归因
         </h3>
-        <NDXFactorAttributionPanel />
+        <NDXLazyRiskPanel label="NDX 因子归因"><NDXFactorAttributionPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="relative-section">
+      <section id="relative-section" className="relative-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> 相对强弱与 Beta
         </h3>
-        <NDXRelativeStrengthPanel />
+        <NDXLazyRiskPanel label="相对强弱与 Beta"><NDXRelativeStrengthPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="theme-rotation-section">
+      <section id="theme-rotation-section" className="theme-rotation-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:layers-3" className="text-[var(--accent-color)]" /> NDX 主题轮动
         </h3>
-        <NDXThemeRotationPanel />
+        <NDXLazyRiskPanel label="NDX 主题轮动"><NDXThemeRotationPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="breadth-section">
+      <section id="breadth-section" className="breadth-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:network" className="text-[var(--accent-color)]" /> 市场广度与等权参与
         </h3>
-        <NDXBreadthParticipationPanel />
+        <NDXLazyRiskPanel label="市场广度与等权参与"><NDXBreadthParticipationPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="levels-section">
+      <section id="levels-section" className="levels-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:milestone" className="text-[var(--accent-color)]" /> 技术位监控
         </h3>
-        <NDXTechnicalLevelsPanel />
+        <NDXLazyRiskPanel label="技术位监控"><NDXTechnicalLevelsPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="tail-section">
+      <section id="tail-section" className="tail-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:waves" className="text-[var(--accent-color)]" /> 回撤与尾部风险
         </h3>
-        <NDXTailRiskPanel />
+        <NDXLazyRiskPanel label="回撤与尾部风险"><NDXTailRiskPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="options-section">
+      <section id="options-section" className="options-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> 期权隐含定价
         </h3>
-        <NDXOptionsPricingPanel />
+        <NDXLazyRiskPanel label="期权隐含定价"><NDXOptionsPricingPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="option-skew-section">
+      <section id="option-skew-section" className="option-skew-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:shield-alert" className="text-[var(--accent-color)]" /> QQQ 期权偏斜与尾部保护
         </h3>
-        <NDXOptionSkewPanel />
+        <NDXLazyRiskPanel label="QQQ 期权偏斜与尾部保护"><NDXOptionSkewPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="gamma-map-section">
+      <section id="gamma-map-section" className="gamma-map-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:crosshair" className="text-[var(--accent-color)]" /> QQQ Gamma 定位图
         </h3>
-        <NDXGammaMapPanel />
+        <NDXLazyRiskPanel label="QQQ Gamma 定位图"><NDXGammaMapPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="vol-premium-section">
+      <section id="vol-premium-section" className="vol-premium-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> NDX 波动风险溢价
         </h3>
-        <NDXVolPremiumPanel />
+        <NDXLazyRiskPanel label="NDX 波动风险溢价"><NDXVolPremiumPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="volatility-cone-section">
+      <section id="volatility-cone-section" className="volatility-cone-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:chart-spline" className="text-[var(--accent-color)]" /> NDX 波动锥与风险区间
         </h3>
-        <NDXVolatilityConePanel />
+        <NDXLazyRiskPanel label="NDX 波动锥与风险区间"><NDXVolatilityConePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="volatility-term-section">
+      <section id="volatility-term-section" className="volatility-term-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:waves" className="text-[var(--accent-color)]" /> 波动率期限结构
         </h3>
-        <NDXVolatilityTermPanel />
+        <NDXLazyRiskPanel label="波动率期限结构"><NDXVolatilityTermPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="hedge-overlay-section">
+      <section id="hedge-overlay-section" className="hedge-overlay-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:shield-check" className="text-[var(--accent-color)]" /> NDX 对冲覆盖建议
         </h3>
-        <NDXHedgeOverlayPanel />
+        <NDXLazyRiskPanel label="NDX 对冲覆盖建议"><NDXHedgeOverlayPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="liquidity-section">
+      <section id="liquidity-section" className="liquidity-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> 流动性与成交确认
         </h3>
-        <NDXLiquidityFlowPanel />
+        <NDXLazyRiskPanel label="流动性与成交确认"><NDXLiquidityFlowPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="concentration-section">
+      <section id="concentration-section" className="concentration-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:pie-chart" className="text-[var(--accent-color)]" /> 权重股集中度
         </h3>
-        <NDXConcentrationPanel />
+        <NDXLazyRiskPanel label="权重股集中度"><NDXConcentrationPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="valuation-section">
+      <section id="valuation-section" className="valuation-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:badge-dollar-sign" className="text-[var(--accent-color)]" /> MAG7 估值压力
         </h3>
-        <NDXValuationPressurePanel />
+        <NDXLazyRiskPanel label="MAG7 估值压力"><NDXValuationPressurePanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="quality-section">
+      <section id="quality-section" className="quality-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:badge-check" className="text-[var(--accent-color)]" /> MAG7 盈利质量
         </h3>
-        <MAG7QualityPanel />
+        <NDXLazyRiskPanel label="MAG7 盈利质量"><MAG7QualityPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="earnings-section">
+      <section id="earnings-section" className="earnings-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:calendar-clock" className="text-[var(--accent-color)]" /> MAG7 财报催化风险
         </h3>
-        <NDXEarningsCatalystPanel />
+        <NDXLazyRiskPanel label="MAG7 财报催化风险"><NDXEarningsCatalystPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="dispersion-section">
+      <section id="dispersion-section" className="dispersion-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:scatter-chart" className="text-[var(--accent-color)]" /> MAG7 相关性与离散度
         </h3>
-        <MAG7DispersionPanel />
+        <NDXLazyRiskPanel label="MAG7 相关性与离散度"><MAG7DispersionPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="correlation-stress-section">
+      <section id="correlation-stress-section" className="correlation-stress-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:git-merge" className="text-[var(--accent-color)]" /> NDX 相关性压力与分散化
         </h3>
-        <NDXCorrelationStressPanel />
+        <NDXLazyRiskPanel label="NDX 相关性压力与分散化"><NDXCorrelationStressPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="scenario-map-section">
+      <section id="scenario-map-section" className="scenario-map-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:workflow" className="text-[var(--accent-color)]" /> NDX 情景概率图
         </h3>
-        <NDXScenarioMapPanel />
+        <NDXLazyRiskPanel label="NDX 情景概率图"><NDXScenarioMapPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="recovery-path-section">
+      <section id="recovery-path-section" className="recovery-path-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:route" className="text-[var(--accent-color)]" /> NDX 回撤修复路径
         </h3>
-        <NDXRecoveryPathPanel />
+        <NDXLazyRiskPanel label="NDX 回撤修复路径"><NDXRecoveryPathPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="scenario-section">
+      <section id="scenario-section" className="scenario-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:git-branch" className="text-[var(--accent-color)]" /> NDX 情景压力测试
         </h3>
-        <NDXScenarioStressPanel />
+        <NDXLazyRiskPanel label="NDX 情景压力测试"><NDXScenarioStressPanel /></NDXLazyRiskPanel>
       </section>
 
-      <section className="budget-section">
+      <section id="budget-section" className="budget-section">
         <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
           <Icon name="lucide:scale" className="text-[var(--accent-color)]" /> NDX 风险预算矩阵
         </h3>
-        <NDXRiskBudgetPanel />
+        <NDXLazyRiskPanel label="NDX 风险预算矩阵"><NDXRiskBudgetPanel /></NDXLazyRiskPanel>
       </section>
 
       <div className="main-content-layout grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-10">
