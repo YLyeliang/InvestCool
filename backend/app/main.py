@@ -12,6 +12,7 @@ import hashlib
 import hmac
 import io
 import json
+import inspect
 from glob import glob
 from logging.handlers import RotatingFileHandler
 from PIL import Image, UnidentifiedImageError
@@ -116,6 +117,17 @@ def cache_is_fresh(cache, ttl_seconds):
     last_update = cache.get("last_update")
     return bool(last_update and datetime.utcnow() - last_update < timedelta(seconds=ttl_seconds))
 
+def refresh_accepts_dependency_flag(refresh_fn):
+    try:
+        return "allow_dependency_refresh" in inspect.signature(refresh_fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+def call_refresh(refresh_fn, allow_dependency_refresh=False):
+    if refresh_accepts_dependency_flag(refresh_fn):
+        return refresh_fn(allow_dependency_refresh=allow_dependency_refresh)
+    return refresh_fn()
+
 # Models
 class PageView(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -185,6 +197,158 @@ class RiskBrief(db.Model):
             "index_position": round(self.index_position, 2) if self.index_position else None,
             "created_at": self.created_at.isoformat()
         }
+
+class RiskModuleSnapshot(db.Model):
+    __tablename__ = "risk_module_snapshot"
+
+    module_key = db.Column(db.String(80), primary_key=True)
+    payload_json = db.Column(db.Text, nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_payload(self):
+        return json.loads(self.payload_json)
+
+
+RISK_MODULE_CACHES = {
+    "diagnostics": risk_diagnostics_cache,
+    "scenarios": risk_scenarios_cache,
+    "budget": risk_budget_cache,
+    "concentration": risk_concentration_cache,
+    "factors": risk_factors_cache,
+    "attribution": risk_factor_attribution_cache,
+    "factor_shock": risk_factor_shock_cache,
+    "levels": risk_levels_cache,
+    "tail": risk_tail_cache,
+    "relative": risk_relative_cache,
+    "dispersion": risk_dispersion_cache,
+    "correlation_stress": risk_correlation_stress_cache,
+    "options": risk_options_cache,
+    "gamma_map": risk_gamma_map_cache,
+    "option_skew": risk_option_skew_cache,
+    "vol_premium": risk_vol_premium_cache,
+    "volatility_cone": risk_volatility_cone_cache,
+    "intraday_tape": risk_intraday_tape_cache,
+    "volume_profile": risk_volume_profile_cache,
+    "liquidity": risk_liquidity_cache,
+    "valuation": risk_valuation_cache,
+    "quality": risk_quality_cache,
+    "breadth": risk_breadth_cache,
+    "volatility_term": risk_volatility_term_cache,
+    "earnings": risk_earnings_cache,
+    "theme_rotation": risk_theme_rotation_cache,
+    "hedge_overlay": risk_hedge_overlay_cache,
+    "condition_matrix": risk_condition_matrix_cache,
+    "funding_conditions": risk_funding_conditions_cache,
+    "cross_asset": risk_cross_asset_cache,
+    "regime_compass": risk_regime_compass_cache,
+    "alerts": risk_alerts_cache,
+    "scenario_map": risk_scenario_map_cache,
+    "recovery_path": risk_recovery_path_cache,
+    "contribution": risk_contribution_cache,
+    "capacity": risk_capacity_cache,
+    "playbook": risk_playbook_cache,
+    "desk_brief": risk_desk_brief_cache,
+    "rate_sensitivity": risk_rate_sensitivity_cache,
+    "regime_analog": risk_regime_analog_cache,
+}
+
+
+DASHBOARD_MODULES = {
+    "diagnostics": "diagnostics",
+    "regimeCompass": "regime_compass",
+    "alerts": "alerts",
+    "contribution": "contribution",
+    "capacity": "capacity",
+    "playbook": "playbook",
+    "regimeAnalog": "regime_analog",
+    "deskBrief": "desk_brief",
+    "factors": "factors",
+    "rateSensitivity": "rate_sensitivity",
+    "conditionMatrix": "condition_matrix",
+    "funding": "funding_conditions",
+    "crossAsset": "cross_asset",
+    "attribution": "attribution",
+    "factorShock": "factor_shock",
+    "breadth": "breadth",
+    "themeRotation": "theme_rotation",
+    "correlationStress": "correlation_stress",
+    "liquidity": "liquidity",
+    "valuation": "valuation",
+    "quality": "quality",
+    "earnings": "earnings",
+    "options": "options",
+    "gammaMap": "gamma_map",
+    "optionSkew": "option_skew",
+    "volPremium": "vol_premium",
+    "volatilityCone": "volatility_cone",
+    "intradayTape": "intraday_tape",
+    "volumeProfile": "volume_profile",
+    "volatilityTerm": "volatility_term",
+    "hedgeOverlay": "hedge_overlay",
+    "recoveryPath": "recovery_path",
+    "tail": "tail",
+    "concentration": "concentration",
+}
+
+
+def persist_risk_module_snapshot(module_key, data):
+    if not data:
+        return
+    try:
+        now = datetime.utcnow()
+        payload_json = json.dumps(data, ensure_ascii=False, default=str)
+        snapshot = db.session.get(RiskModuleSnapshot, module_key)
+        if snapshot:
+            snapshot.payload_json = payload_json
+            snapshot.updated_at = now
+        else:
+            snapshot = RiskModuleSnapshot(
+                module_key=module_key,
+                payload_json=payload_json,
+                updated_at=now,
+            )
+            db.session.add(snapshot)
+    except Exception as e:
+        logger.warning(f"Unable to stage risk snapshot for {module_key}: {e}")
+
+
+def persist_risk_snapshots():
+    try:
+        for module_key, cache in RISK_MODULE_CACHES.items():
+            persist_risk_module_snapshot(module_key, cache.get("data"))
+        db.session.commit()
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Risk module snapshot persist failed: {e}")
+
+
+def hydrate_risk_module_from_snapshot(module_key):
+    cache = RISK_MODULE_CACHES.get(module_key)
+    if not cache:
+        return None
+
+    if cache.get("data"):
+        return cache.get("data")
+
+    try:
+        snapshot = db.session.get(RiskModuleSnapshot, module_key)
+        if not snapshot:
+            return None
+        payload = snapshot.to_payload()
+        cache["data"] = payload
+        cache["last_update"] = snapshot.updated_at
+        return payload
+    except Exception as e:
+        logger.warning(f"Unable to load risk snapshot for {module_key}: {e}")
+        return None
+
+
+def risk_module_payload(module_key):
+    cache = RISK_MODULE_CACHES.get(module_key)
+    if not cache:
+        return None
+    return cache.get("data") or hydrate_risk_module_from_snapshot(module_key)
+
 
 # Auth Decorator
 def require_admin(f):
@@ -8916,6 +9080,8 @@ def background_worker():
             if time.time() - last_cleanup > 86400:
                 cleanup_old_data()
                 last_cleanup = time.time()
+
+            persist_risk_snapshots()
         except Exception as e:
             logger.error(f"Worker loop error: {e}")
             
@@ -8934,60 +9100,41 @@ def latest_risk_payload():
     return None
 
 
-def serve_cached_risk_module(cache, refresh_fn=None, ttl=15 * 60, empty_refresh_interval=60):
+def serve_risk_module(module_key, refresh_fn=None, ttl=15 * 60, empty_refresh_interval=60):
+    cache = RISK_MODULE_CACHES[module_key]
     data = cache.get("data")
     if cache_is_fresh(cache, ttl) and data:
         return jsonify(data)
+
+    if not data:
+        data = hydrate_risk_module_from_snapshot(module_key)
 
     if data:
         return jsonify(data)
 
     if refresh_fn and should_refresh_empty_cache(cache, empty_refresh_interval):
-        refresh_fn(allow_dependency_refresh=False)
+        call_refresh(refresh_fn, allow_dependency_refresh=False)
 
     data = cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    if data:
+        try:
+            persist_risk_module_snapshot(module_key, data)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            logger.warning(f"Risk module snapshot commit skipped for {module_key}: {e}")
+        return jsonify(data)
+
+    return jsonify({"error": "Initializing"}), 202
 
 
 @app.route('/api/risk/dashboard', methods=['GET'])
 def get_risk_dashboard():
-    modules = {
-        "latest": latest_risk_payload(),
-        "diagnostics": risk_diagnostics_cache.get("data"),
-        "regimeCompass": risk_regime_compass_cache.get("data"),
-        "alerts": risk_alerts_cache.get("data"),
-        "contribution": risk_contribution_cache.get("data"),
-        "capacity": risk_capacity_cache.get("data"),
-        "playbook": risk_playbook_cache.get("data"),
-        "regimeAnalog": risk_regime_analog_cache.get("data"),
-        "deskBrief": risk_desk_brief_cache.get("data"),
-        "factors": risk_factors_cache.get("data"),
-        "rateSensitivity": risk_rate_sensitivity_cache.get("data"),
-        "conditionMatrix": risk_condition_matrix_cache.get("data"),
-        "funding": risk_funding_conditions_cache.get("data"),
-        "crossAsset": risk_cross_asset_cache.get("data"),
-        "attribution": risk_factor_attribution_cache.get("data"),
-        "factorShock": risk_factor_shock_cache.get("data"),
-        "breadth": risk_breadth_cache.get("data"),
-        "themeRotation": risk_theme_rotation_cache.get("data"),
-        "correlationStress": risk_correlation_stress_cache.get("data"),
-        "liquidity": risk_liquidity_cache.get("data"),
-        "valuation": risk_valuation_cache.get("data"),
-        "quality": risk_quality_cache.get("data"),
-        "earnings": risk_earnings_cache.get("data"),
-        "options": risk_options_cache.get("data"),
-        "gammaMap": risk_gamma_map_cache.get("data"),
-        "optionSkew": risk_option_skew_cache.get("data"),
-        "volPremium": risk_vol_premium_cache.get("data"),
-        "volatilityCone": risk_volatility_cone_cache.get("data"),
-        "intradayTape": risk_intraday_tape_cache.get("data"),
-        "volumeProfile": risk_volume_profile_cache.get("data"),
-        "volatilityTerm": risk_volatility_term_cache.get("data"),
-        "hedgeOverlay": risk_hedge_overlay_cache.get("data"),
-        "recoveryPath": risk_recovery_path_cache.get("data"),
-        "tail": risk_tail_cache.get("data"),
-        "concentration": risk_concentration_cache.get("data"),
-    }
+    modules = {"latest": latest_risk_payload()}
+    modules.update({
+        response_key: risk_module_payload(module_key)
+        for response_key, module_key in DASHBOARD_MODULES.items()
+    })
     available = sum(1 for value in modules.values() if value)
     total_modules = len(modules)
     modules["as_of"] = datetime.utcnow().isoformat()
@@ -9021,287 +9168,163 @@ def get_risk_history():
 
 @app.route('/api/risk/diagnostics', methods=['GET'])
 def get_risk_diagnostics():
-    if not cache_is_fresh(risk_diagnostics_cache, 15 * 60) and should_refresh_empty_cache(risk_diagnostics_cache, 60):
-        refresh_risk_diagnostics()
-
-    data = risk_diagnostics_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("diagnostics", refresh_risk_diagnostics)
 
 @app.route('/api/risk/scenarios', methods=['GET'])
 def get_risk_scenarios():
-    if not cache_is_fresh(risk_scenarios_cache, 15 * 60) and should_refresh_empty_cache(risk_scenarios_cache, 60):
-        refresh_risk_scenarios()
-
-    data = risk_scenarios_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("scenarios", refresh_risk_scenarios)
 
 @app.route('/api/risk/budget', methods=['GET'])
 def get_risk_budget():
-    if not cache_is_fresh(risk_budget_cache, 15 * 60) and should_refresh_empty_cache(risk_budget_cache, 60):
-        refresh_risk_budget()
-
-    data = risk_budget_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("budget", refresh_risk_budget)
 
 @app.route('/api/risk/hedge-overlay', methods=['GET'])
 def get_risk_hedge_overlay():
-    if not cache_is_fresh(risk_hedge_overlay_cache, 15 * 60) and should_refresh_empty_cache(risk_hedge_overlay_cache, 60):
-        refresh_hedge_overlay_data()
-
-    data = risk_hedge_overlay_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("hedge_overlay", refresh_hedge_overlay_data)
 
 @app.route('/api/risk/concentration', methods=['GET'])
 def get_risk_concentration():
-    if not cache_is_fresh(risk_concentration_cache, 15 * 60) and should_refresh_empty_cache(risk_concentration_cache, 60):
-        refresh_concentration_data()
-
-    data = risk_concentration_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("concentration", refresh_concentration_data)
 
 @app.route('/api/risk/factors', methods=['GET'])
 def get_risk_factors():
-    if not cache_is_fresh(risk_factors_cache, 15 * 60) and should_refresh_empty_cache(risk_factors_cache, 60):
-        refresh_factor_data()
-
-    data = risk_factors_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("factors", refresh_factor_data)
 
 @app.route('/api/risk/attribution', methods=['GET'])
 def get_risk_attribution():
-    if not cache_is_fresh(risk_factor_attribution_cache, 15 * 60) and should_refresh_empty_cache(risk_factor_attribution_cache, 60):
-        refresh_factor_attribution_data()
-
-    data = risk_factor_attribution_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("attribution", refresh_factor_attribution_data)
 
 @app.route('/api/risk/factor-shock', methods=['GET'])
 def get_risk_factor_shock():
-    if not cache_is_fresh(risk_factor_shock_cache, 15 * 60) and should_refresh_empty_cache(risk_factor_shock_cache, 60):
-        refresh_factor_shock_data()
-
-    data = risk_factor_shock_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("factor_shock", refresh_factor_shock_data)
 
 @app.route('/api/risk/condition-matrix', methods=['GET'])
 def get_risk_condition_matrix():
-    if not cache_is_fresh(risk_condition_matrix_cache, 15 * 60) and should_refresh_empty_cache(risk_condition_matrix_cache, 60):
-        refresh_condition_matrix_data()
-
-    data = risk_condition_matrix_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("condition_matrix", refresh_condition_matrix_data)
 
 @app.route('/api/risk/funding-conditions', methods=['GET'])
 def get_risk_funding_conditions():
-    if not cache_is_fresh(risk_funding_conditions_cache, 15 * 60) and should_refresh_empty_cache(risk_funding_conditions_cache, 60):
-        refresh_funding_conditions_data()
-
-    data = risk_funding_conditions_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("funding_conditions", refresh_funding_conditions_data)
 
 @app.route('/api/risk/cross-asset', methods=['GET'])
 def get_risk_cross_asset():
-    if not cache_is_fresh(risk_cross_asset_cache, 15 * 60) and should_refresh_empty_cache(risk_cross_asset_cache, 60):
-        refresh_cross_asset_data()
-
-    data = risk_cross_asset_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("cross_asset", refresh_cross_asset_data)
 
 @app.route('/api/risk/regime-compass', methods=['GET'])
 def get_risk_regime_compass():
-    return serve_cached_risk_module(risk_regime_compass_cache, refresh_regime_compass_data)
+    return serve_risk_module("regime_compass", refresh_regime_compass_data)
 
 @app.route('/api/risk/alerts', methods=['GET'])
 def get_risk_alerts():
-    return serve_cached_risk_module(risk_alerts_cache, refresh_alerts_data)
+    return serve_risk_module("alerts", refresh_alerts_data)
 
 @app.route('/api/risk/scenario-map', methods=['GET'])
 def get_risk_scenario_map():
-    return serve_cached_risk_module(risk_scenario_map_cache, refresh_scenario_map_data)
+    return serve_risk_module("scenario_map", refresh_scenario_map_data)
 
 @app.route('/api/risk/recovery-path', methods=['GET'])
 def get_risk_recovery_path():
-    return serve_cached_risk_module(risk_recovery_path_cache, refresh_recovery_path_data)
+    return serve_risk_module("recovery_path", refresh_recovery_path_data)
 
 @app.route('/api/risk/contribution', methods=['GET'])
 def get_risk_contribution():
-    return serve_cached_risk_module(risk_contribution_cache, refresh_contribution_data)
+    return serve_risk_module("contribution", refresh_contribution_data)
 
 @app.route('/api/risk/capacity', methods=['GET'])
 def get_risk_capacity():
-    return serve_cached_risk_module(risk_capacity_cache, refresh_capacity_data)
+    return serve_risk_module("capacity", refresh_capacity_data)
 
 @app.route('/api/risk/playbook', methods=['GET'])
 def get_risk_playbook():
-    return serve_cached_risk_module(risk_playbook_cache, refresh_playbook_data)
+    return serve_risk_module("playbook", refresh_playbook_data)
 
 @app.route('/api/risk/regime-analog', methods=['GET'])
 def get_risk_regime_analog():
-    if not cache_is_fresh(risk_regime_analog_cache, 15 * 60) and should_refresh_empty_cache(risk_regime_analog_cache, 60):
-        refresh_regime_analog_data()
-
-    data = risk_regime_analog_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("regime_analog", refresh_regime_analog_data)
 
 @app.route('/api/risk/desk-brief', methods=['GET'])
 def get_risk_desk_brief():
-    return serve_cached_risk_module(risk_desk_brief_cache, refresh_desk_brief_data)
+    return serve_risk_module("desk_brief", refresh_desk_brief_data)
 
 @app.route('/api/risk/rate-sensitivity', methods=['GET'])
 def get_risk_rate_sensitivity():
-    return serve_cached_risk_module(risk_rate_sensitivity_cache, refresh_rate_sensitivity_data)
+    return serve_risk_module("rate_sensitivity", refresh_rate_sensitivity_data)
 
 @app.route('/api/risk/levels', methods=['GET'])
 def get_risk_levels():
-    if not cache_is_fresh(risk_levels_cache, 15 * 60) and should_refresh_empty_cache(risk_levels_cache, 60):
-        refresh_technical_levels()
-
-    data = risk_levels_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("levels", refresh_technical_levels)
 
 @app.route('/api/risk/tail', methods=['GET'])
 def get_risk_tail():
-    if not cache_is_fresh(risk_tail_cache, 15 * 60) and should_refresh_empty_cache(risk_tail_cache, 60):
-        refresh_tail_risk_data()
-
-    data = risk_tail_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("tail", refresh_tail_risk_data)
 
 @app.route('/api/risk/relative', methods=['GET'])
 def get_risk_relative():
-    if not cache_is_fresh(risk_relative_cache, 15 * 60) and should_refresh_empty_cache(risk_relative_cache, 60):
-        refresh_relative_strength_data()
-
-    data = risk_relative_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("relative", refresh_relative_strength_data)
 
 @app.route('/api/risk/theme-rotation', methods=['GET'])
 def get_risk_theme_rotation():
-    if not cache_is_fresh(risk_theme_rotation_cache, 15 * 60) and should_refresh_empty_cache(risk_theme_rotation_cache, 60):
-        refresh_theme_rotation_data()
-
-    data = risk_theme_rotation_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("theme_rotation", refresh_theme_rotation_data)
 
 @app.route('/api/risk/dispersion', methods=['GET'])
 def get_risk_dispersion():
-    if not cache_is_fresh(risk_dispersion_cache, 15 * 60) and should_refresh_empty_cache(risk_dispersion_cache, 60):
-        refresh_dispersion_data()
-
-    data = risk_dispersion_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("dispersion", refresh_dispersion_data)
 
 @app.route('/api/risk/correlation-stress', methods=['GET'])
 def get_risk_correlation_stress():
-    if not cache_is_fresh(risk_correlation_stress_cache, 15 * 60) and should_refresh_empty_cache(risk_correlation_stress_cache, 60):
-        refresh_correlation_stress_data()
-
-    data = risk_correlation_stress_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("correlation_stress", refresh_correlation_stress_data)
 
 @app.route('/api/risk/options', methods=['GET'])
 def get_risk_options():
-    if not cache_is_fresh(risk_options_cache, 15 * 60) and should_refresh_empty_cache(risk_options_cache, 60):
-        refresh_options_data()
-
-    data = risk_options_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("options", refresh_options_data)
 
 @app.route('/api/risk/gamma-map', methods=['GET'])
 def get_risk_gamma_map():
-    if not cache_is_fresh(risk_gamma_map_cache, 15 * 60) and should_refresh_empty_cache(risk_gamma_map_cache, 60):
-        refresh_gamma_map_data()
-
-    data = risk_gamma_map_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("gamma_map", refresh_gamma_map_data)
 
 @app.route('/api/risk/option-skew', methods=['GET'])
 def get_risk_option_skew():
-    if not cache_is_fresh(risk_option_skew_cache, 15 * 60) and should_refresh_empty_cache(risk_option_skew_cache, 60):
-        refresh_option_skew_data()
-
-    data = risk_option_skew_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("option_skew", refresh_option_skew_data)
 
 @app.route('/api/risk/volatility-term', methods=['GET'])
 def get_risk_volatility_term():
-    if not cache_is_fresh(risk_volatility_term_cache, 15 * 60) and should_refresh_empty_cache(risk_volatility_term_cache, 60):
-        refresh_volatility_term_data()
-
-    data = risk_volatility_term_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("volatility_term", refresh_volatility_term_data)
 
 @app.route('/api/risk/vol-premium', methods=['GET'])
 def get_risk_vol_premium():
-    if not cache_is_fresh(risk_vol_premium_cache, 15 * 60) and should_refresh_empty_cache(risk_vol_premium_cache, 60):
-        refresh_vol_premium_data(allow_dependency_refresh="light")
-
-    data = risk_vol_premium_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("vol_premium", refresh_vol_premium_data)
 
 @app.route('/api/risk/volatility-cone', methods=['GET'])
 def get_risk_volatility_cone():
-    if not cache_is_fresh(risk_volatility_cone_cache, 15 * 60) and should_refresh_empty_cache(risk_volatility_cone_cache, 60):
-        refresh_volatility_cone_data(allow_dependency_refresh="light")
-
-    data = risk_volatility_cone_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("volatility_cone", refresh_volatility_cone_data)
 
 @app.route('/api/risk/intraday-tape', methods=['GET'])
 def get_risk_intraday_tape():
-    if not cache_is_fresh(risk_intraday_tape_cache, 5 * 60) and should_refresh_empty_cache(risk_intraday_tape_cache, 60):
-        refresh_intraday_tape_data()
-
-    data = risk_intraday_tape_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("intraday_tape", refresh_intraday_tape_data, ttl=5 * 60)
 
 @app.route('/api/risk/volume-profile', methods=['GET'])
 def get_risk_volume_profile():
-    if not cache_is_fresh(risk_volume_profile_cache, 5 * 60) and should_refresh_empty_cache(risk_volume_profile_cache, 60):
-        refresh_volume_profile_data()
-
-    data = risk_volume_profile_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("volume_profile", refresh_volume_profile_data, ttl=5 * 60)
 
 @app.route('/api/risk/liquidity', methods=['GET'])
 def get_risk_liquidity():
-    if not cache_is_fresh(risk_liquidity_cache, 15 * 60) and should_refresh_empty_cache(risk_liquidity_cache, 60):
-        refresh_liquidity_data()
-
-    data = risk_liquidity_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("liquidity", refresh_liquidity_data)
 
 @app.route('/api/risk/valuation', methods=['GET'])
 def get_risk_valuation():
-    if not cache_is_fresh(risk_valuation_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_valuation_cache, 5 * 60):
-        refresh_valuation_data()
-
-    data = risk_valuation_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("valuation", refresh_valuation_data, ttl=6 * 60 * 60, empty_refresh_interval=5 * 60)
 
 @app.route('/api/risk/quality', methods=['GET'])
 def get_risk_quality():
-    if not cache_is_fresh(risk_quality_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_quality_cache, 5 * 60):
-        refresh_quality_data()
-
-    data = risk_quality_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("quality", refresh_quality_data, ttl=6 * 60 * 60, empty_refresh_interval=5 * 60)
 
 @app.route('/api/risk/earnings', methods=['GET'])
 def get_risk_earnings():
-    if not cache_is_fresh(risk_earnings_cache, 6 * 60 * 60) and should_refresh_empty_cache(risk_earnings_cache, 5 * 60):
-        refresh_earnings_catalyst_data()
-
-    data = risk_earnings_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("earnings", refresh_earnings_catalyst_data, ttl=6 * 60 * 60, empty_refresh_interval=5 * 60)
 
 @app.route('/api/risk/breadth', methods=['GET'])
 def get_risk_breadth():
-    if not cache_is_fresh(risk_breadth_cache, 15 * 60) and should_refresh_empty_cache(risk_breadth_cache, 60):
-        refresh_breadth_data()
-
-    data = risk_breadth_cache.get("data")
-    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+    return serve_risk_module("breadth", refresh_breadth_data)
 
 @app.route('/api/market-index', methods=['GET'])
 def get_market_index():
