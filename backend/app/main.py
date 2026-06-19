@@ -11093,6 +11093,328 @@ def get_risk_execution_ticket():
     })
 
 
+@app.route('/api/risk/risk-register', methods=['GET'])
+def get_risk_register():
+    execution = route_json_payload(get_risk_execution_ticket()) or {}
+    checklist = route_json_payload(get_risk_pre_trade_checklist()) or {}
+    trigger = route_json_payload(get_risk_trigger_monitor()) or {}
+    risk_reward = route_json_payload(get_risk_reward_framework()) or {}
+    alerts = risk_module_payload("alerts") or {}
+    option_skew = risk_module_payload("option_skew") or {}
+    gamma = risk_module_payload("gamma_map") or {}
+    earnings = risk_module_payload("earnings") or {}
+    concentration = risk_module_payload("concentration") or {}
+    liquidity = risk_module_payload("liquidity") or {}
+    valuation = risk_module_payload("valuation") or {}
+    quality = risk_module_payload("quality") or {}
+    data_quality = get_risk_data_quality().get_json(silent=True) or {}
+
+    if not execution and not alerts:
+        return jsonify({"error": "Initializing"}), 202
+
+    risks = []
+
+    def tone_rank(tone):
+        return {"red": 4, "amber": 3, "blue": 2, "green": 1}.get(tone, 2)
+
+    def add_risk(
+        key,
+        category,
+        title,
+        severity,
+        color,
+        probability,
+        impact,
+        trigger_text,
+        evidence,
+        mitigation,
+        owner,
+        status,
+        horizon,
+        priority_boost=0,
+    ):
+        probability = round(clamp(safe_float(probability, 0), 0, 100), 1)
+        impact = round(clamp(safe_float(impact, 0), 0, 100), 1)
+        score = round(probability * impact / 100, 1)
+        risks.append({
+            "key": key,
+            "category": category,
+            "title": title,
+            "severity": severity,
+            "color": color,
+            "probability": probability,
+            "impact": impact,
+            "score": score,
+            "trigger": trigger_text,
+            "evidence": evidence,
+            "mitigation": mitigation,
+            "owner": owner,
+            "status": status,
+            "horizon": horizon,
+            "priority": round(score + tone_rank(color) * 6 + priority_boost, 1),
+        })
+
+    active_alerts = alerts.get("alerts") or []
+    if active_alerts:
+        top_alert = active_alerts[0]
+        alert_color = top_alert.get("color", "amber")
+        alert_score = safe_float(top_alert.get("score"), alerts.get("alert_score", 50))
+        severity = "Critical" if alert_color == "red" or alert_score >= 75 else "High"
+        add_risk(
+            "top_alert",
+            top_alert.get("category", "预警"),
+            top_alert.get("title", "最高预警"),
+            severity,
+            alert_color,
+            alert_score,
+            82 if severity == "Critical" else 68,
+            top_alert.get("value", alerts.get("alert_level", "--")),
+            top_alert.get("evidence", alerts.get("summary", "预警模块提示需要检查仓位约束。")),
+            top_alert.get("action", "优先处理仓位上限、失效线和保护覆盖。"),
+            "风险预警",
+            "open",
+            "今日",
+            12,
+        )
+
+    nearest_down = trigger.get("nearest_down") or {}
+    lines = {item.get("key"): item for item in (trigger.get("lines") or []) if isinstance(item, dict)}
+    invalidation = lines.get("invalidation") or nearest_down
+    distance = abs(safe_float(invalidation.get("distance_pct"), 3))
+    if invalidation:
+        probability = 82 if distance <= 1 else 66 if distance <= 2 else 44
+        add_risk(
+            "trigger_invalidation",
+            "技术触发",
+            "失效线逼近",
+            "High" if distance <= 2 else "Watch",
+            "red" if distance <= 1 else "amber",
+            probability,
+            76,
+            f"{invalidation.get('label', '失效线')} {safe_float(invalidation.get('value'), 0):,.0f}",
+            f"距离 {invalidation.get('distance_label', '--')}，状态 {invalidation.get('state', '--')}。",
+            invalidation.get("action", "跌破失效线后降低新增仓位并提升保护覆盖。"),
+            "交易台",
+            "open" if distance <= 2 else "watch",
+            "1-5 日",
+            8,
+        )
+
+    expected_move = safe_float(risk_reward.get("expected_move"), 0)
+    reward_to_risk = safe_float(risk_reward.get("reward_to_risk"), 1)
+    downside_probability = safe_float(risk_reward.get("downside_probability"), 50)
+    weighted_low_pct = safe_float(risk_reward.get("weighted_low_pct"), 0)
+    if expected_move < 0 or reward_to_risk < 0.7:
+        add_risk(
+            "risk_reward_asymmetry",
+            "路径回报",
+            "风险回报不对称",
+            "High" if reward_to_risk < 0.4 else "Watch",
+            "amber" if reward_to_risk >= 0.25 else "red",
+            50 + abs(expected_move) * 8 + downside_probability / 3,
+            65 + min(20, abs(weighted_low_pct) * 4),
+            f"R/R {reward_to_risk:.2f}",
+            f"期望路径 {expected_move:+.2f}%，下行概率 {downside_probability:.1f}%。",
+            "等待修复线或确认线触发后再释放新增风险预算。",
+            "配置",
+            "watch",
+            "5-20 日",
+            6,
+        )
+
+    skew_score = safe_float(option_skew.get("skew_score"), 0)
+    if skew_score >= 70 or option_skew.get("regime_color") == "red":
+        add_risk(
+            "option_skew",
+            "期权",
+            "保护需求拥挤",
+            "High" if skew_score >= 85 else "Watch",
+            option_skew.get("regime_color", "amber"),
+            skew_score,
+            74,
+            option_skew.get("regime", "期权偏斜升温"),
+            f"Skew score {skew_score:.1f}，风险逆转 {safe_float(option_skew.get('risk_reversal'), 0):+.1f}。",
+            "新增多头只用小 tranche，保护覆盖不得低于 Playbook 下沿。",
+            "衍生品",
+            "open" if skew_score >= 85 else "watch",
+            "1-10 日",
+            9,
+        )
+
+    gamma_score = safe_float(gamma.get("gamma_score"), 0)
+    if gamma_score >= 60 or gamma.get("regime_color") == "red":
+        add_risk(
+            "gamma",
+            "期权",
+            "负 Gamma 放大波动",
+            "High" if gamma_score >= 70 else "Watch",
+            gamma.get("regime_color", "amber"),
+            gamma_score,
+            70,
+            gamma.get("regime", "Gamma 风险"),
+            f"Gamma score {gamma_score:.1f}，主要墙位 {gamma.get('nearest_wall', {}).get('label', '--')}。",
+            "靠近墙位时降低追价，优先用触发线收盘确认执行。",
+            "衍生品",
+            "watch",
+            "1-5 日",
+            7,
+        )
+
+    event_weight = safe_float(earnings.get("event_weight_45d"), 0)
+    nearest_event = earnings.get("nearest_event") or {}
+    nearest_days = safe_float(nearest_event.get("days_to_event"), 999)
+    if event_weight >= 50 or nearest_days <= 45:
+        add_risk(
+            "earnings_window",
+            "基本面",
+            "MAG7 财报窗口",
+            "Watch",
+            "amber" if event_weight >= 65 else "blue",
+            max(safe_float(earnings.get("event_score"), 50), min(85, event_weight)),
+            min(86, event_weight + 18),
+            earnings.get("event_label", "财报窗口"),
+            f"最近事件 {nearest_event.get('ticker', '--')}，{nearest_days:.0f} 天后；45 日事件权重 {event_weight:.1f}%。",
+            "事件前不把观察仓位升级为趋势确认仓位，财报后再更新情景权重。",
+            "基本面",
+            "watch",
+            "20-45 日",
+            3,
+        )
+
+    top3_weight = safe_float(concentration.get("top3_weight"), 0)
+    top1 = concentration.get("top1") or {}
+    if top3_weight >= 60:
+        add_risk(
+            "concentration",
+            "集中度",
+            "权重集中放大单点风险",
+            "Watch",
+            "amber",
+            (top3_weight - 50) * 4,
+            top3_weight,
+            concentration.get("concentration_level", "偏集中"),
+            f"Top3 权重 {top3_weight:.1f}%，最大权重 {top1.get('ticker', '--')} {safe_float(top1.get('weight'), 0):.1f}%。",
+            "新增风险预算优先等待权重股扩散确认，避免单一龙头承接全部仓位。",
+            "集中度",
+            "watch",
+            "10-30 日",
+            2,
+        )
+
+    flow_score = safe_float(liquidity.get("flow_score"), 50)
+    distribution_days = int(liquidity.get("distribution_days") or 0)
+    if flow_score < 55 or distribution_days >= 5:
+        add_risk(
+            "liquidity_confirmation",
+            "流动性",
+            "成交确认不足",
+            "Watch",
+            "amber" if distribution_days >= 5 else "blue",
+            max(45, 100 - flow_score + distribution_days * 5),
+            58,
+            liquidity.get("regime", "流动性观察"),
+            f"资金流分 {flow_score:.1f}，派发天数 {distribution_days}，成交倍率 {safe_float(liquidity.get('volume_ratio_20'), 1):.2f}。",
+            "修复线需要量价同步确认，若派发天数继续增加则降级为防守观察。",
+            "流动性",
+            "watch",
+            "1-10 日",
+            2,
+        )
+
+    valuation_score = safe_float(valuation.get("valuation_score"), 0)
+    quality_score = safe_float(quality.get("quality_score"), 50)
+    if valuation_score >= 60 and valuation_score - quality_score >= 10:
+        add_risk(
+            "valuation_quality_gap",
+            "估值质量",
+            "估值溢价缺少质量缓冲",
+            "Watch",
+            "amber",
+            valuation_score,
+            min(82, valuation_score + 10),
+            valuation.get("valuation_label", "估值压力"),
+            f"估值分 {valuation_score:.1f}，质量分 {quality_score:.1f}。",
+            "只在盈利质量或利率缓冲改善后提升核心暴露上沿。",
+            "基本面",
+            "watch",
+            "20-60 日",
+            1,
+        )
+
+    health_score = safe_float(data_quality.get("health_score"), 100)
+    if health_score < 95:
+        add_risk(
+            "data_quality",
+            "数据",
+            "数据覆盖不足",
+            "Watch",
+            "amber",
+            100 - health_score,
+            65,
+            f"健康分 {health_score:.1f}",
+            f"新鲜模块 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}。",
+            "数据恢复前不升级交易权限，只保留已有风险控制动作。",
+            "数据",
+            "watch",
+            "今日",
+            4,
+        )
+
+    risks = sorted(risks, key=lambda item: item["priority"], reverse=True)[:10]
+    open_count = sum(1 for item in risks if item["status"] == "open")
+    watch_count = sum(1 for item in risks if item["status"] == "watch")
+    critical_count = sum(1 for item in risks if item["color"] == "red" or item["severity"] == "Critical")
+    register_score = round(
+        sum(item["score"] for item in risks) / max(1, len(risks)),
+        1,
+    )
+
+    if critical_count:
+        headline = "存在关键风险"
+        headline_color = "red"
+    elif open_count >= 3 or register_score >= 55:
+        headline = "风险登记簿偏拥挤"
+        headline_color = "amber"
+    else:
+        headline = "风险登记簿可控"
+        headline_color = "blue"
+
+    def bucket_count(high_probability, high_impact):
+        return sum(
+            1 for item in risks
+            if (item["probability"] >= 65) == high_probability and (item["impact"] >= 65) == high_impact
+        )
+
+    heatmap = [
+        {"key": "high_high", "label": "高概率高影响", "color": "red", "count": bucket_count(True, True)},
+        {"key": "high_low", "label": "高概率低影响", "color": "amber", "count": bucket_count(True, False)},
+        {"key": "low_high", "label": "低概率高影响", "color": "blue", "count": bucket_count(False, True)},
+        {"key": "low_low", "label": "低概率低影响", "color": "green", "count": bucket_count(False, False)},
+    ]
+
+    controls = [
+        f"执行票据：{execution.get('ticket_type', '--')}，总暴露硬上限 {safe_float(execution.get('hard_cap'), 0):.1f}%。",
+        f"投前检查：Readiness {safe_float(checklist.get('readiness_score'), 0):.1f}，Watch {checklist.get('watch_count', 0)}，Fail {checklist.get('fail_count', 0)}。",
+        f"触发线：下行 {nearest_down.get('distance_label', '--')}，上行 {(trigger.get('nearest_up') or {}).get('distance_label', '--')}。",
+        f"数据质量：健康分 {health_score:.1f}，新鲜模块 {data_quality.get('fresh_modules', 0)}/{data_quality.get('total_modules', 0)}。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "register_score": register_score,
+        "open_count": open_count,
+        "critical_count": critical_count,
+        "watch_count": watch_count,
+        "top_risk": risks[0] if risks else None,
+        "risks": risks,
+        "heatmap": heatmap,
+        "controls": controls,
+        "methodology": "风险登记簿把执行票据、投前检查、触发线、风险回报、预警、期权、财报、集中度、流动性、估值质量和数据健康聚合成可追踪风险项；每条风险记录概率、影响、触发条件、缓释动作、责任模块和状态，用于投委会复盘和交易台风控记录，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
