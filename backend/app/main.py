@@ -75,6 +75,7 @@ risk_options_cache = {"data": None, "last_update": None}
 risk_gamma_map_cache = {"data": None, "last_update": None}
 risk_option_skew_cache = {"data": None, "last_update": None}
 risk_vol_premium_cache = {"data": None, "last_update": None}
+risk_volatility_cone_cache = {"data": None, "last_update": None}
 risk_intraday_tape_cache = {"data": None, "last_update": None}
 risk_volume_profile_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
@@ -335,6 +336,17 @@ def vol_premium_regime(underpricing_pressure, carry_cost):
     if underpricing_pressure <= 28 and carry_cost <= 42:
         return "保护便宜", "green"
     return "定价均衡", "blue"
+
+def volatility_cone_regime(score, compression_score):
+    if score >= 72:
+        return "波动扩张", "red"
+    if score >= 55:
+        return "波动重估", "amber"
+    if compression_score >= 62:
+        return "低波拥挤", "amber"
+    if score >= 35:
+        return "常态波动", "blue"
+    return "低波平静", "green"
 
 def intraday_tape_regime(daily_return, vwap_distance, volume_pace, range_expansion, range_position, opening_gap, balance_break):
     if daily_return <= -1.15 and vwap_distance <= -0.18 and volume_pace >= 1.1:
@@ -4787,6 +4799,202 @@ def refresh_vol_premium_data(allow_dependency_refresh=True):
         logger.error(traceback.format_exc())
 
 
+def refresh_volatility_cone_data(allow_dependency_refresh=True):
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_volatility_cone_cache
+
+    try:
+        dependencies = [
+            ("options", risk_options_cache, refresh_options_data, 15 * 60),
+            ("volatility_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60),
+            ("tail", risk_tail_cache, refresh_tail_risk_data, 15 * 60),
+        ]
+        dependency_status = []
+        for key, cache, refresher, ttl in dependencies:
+            try:
+                if allow_dependency_refresh is True and not cache_is_fresh(cache, ttl):
+                    refresher()
+                dependency_status.append("ok" if cache.get("data") else "missing")
+            except Exception as e:
+                logger.error(f"Volatility cone dependency refresh error for {key}: {e}")
+                dependency_status.append("missing")
+
+        history = fetch_ohlc_history("QQQ", "2y", min_rows=300, attempts=3)
+        closes = history["Close"].dropna()
+        if len(closes) < 260:
+            raise ValueError("Insufficient QQQ history for volatility cone")
+
+        returns = closes.pct_change().dropna()
+        price = safe_float(closes.iloc[-1], 0)
+        if price <= 0:
+            raise ValueError("Invalid QQQ price for volatility cone")
+
+        def rolling_vol(window):
+            return returns.rolling(window).std().dropna() * (252 ** 0.5) * 100
+
+        def percentile_rank(series, value):
+            clean = series.replace([np.inf, -np.inf], np.nan).dropna()
+            if clean.empty:
+                return 50.0
+            return safe_float((clean <= value).mean() * 100, 50)
+
+        windows = [
+            {"key": "10d", "label": "10D", "window": 10},
+            {"key": "20d", "label": "20D", "window": 20},
+            {"key": "60d", "label": "60D", "window": 60},
+            {"key": "120d", "label": "120D", "window": 120},
+        ]
+        cone = []
+        current_vols = {}
+        for item in windows:
+            series = rolling_vol(item["window"])
+            if len(series) < 80:
+                continue
+            current = safe_float(series.iloc[-1], 0)
+            current_vols[item["key"]] = current
+            p20 = safe_float(series.quantile(0.20), current)
+            p50 = safe_float(series.quantile(0.50), current)
+            p80 = safe_float(series.quantile(0.80), current)
+            percentile = percentile_rank(series, current)
+            if percentile >= 80:
+                color = "red"
+            elif percentile >= 60:
+                color = "amber"
+            elif percentile <= 25:
+                color = "green"
+            else:
+                color = "blue"
+            cone.append({
+                "key": item["key"],
+                "label": item["label"],
+                "window": item["window"],
+                "current_vol": round(current, 1),
+                "percentile": round(percentile, 1),
+                "p20": round(p20, 1),
+                "p50": round(p50, 1),
+                "p80": round(p80, 1),
+                "color": color,
+            })
+
+        if len(cone) < 3:
+            raise ValueError("Insufficient volatility cone windows")
+
+        options = risk_options_cache.get("data") or {}
+        volatility_term = risk_volatility_term_cache.get("data") or {}
+        tail = risk_tail_cache.get("data") or {}
+        dte = max(1, safe_float(options.get("days_to_expiration"), 7))
+        implied_move = safe_float(options.get("implied_move"), None)
+        annualized_iv = safe_float(options.get("annualized_iv_proxy"), None)
+        if annualized_iv is None and implied_move is not None:
+            annualized_iv = implied_move / max((dte / 365) ** 0.5, 0.01)
+        if annualized_iv is None or annualized_iv <= 0:
+            annualized_iv = current_vols.get("20d", current_vols.get("60d", 25))
+
+        rv10 = current_vols.get("10d", annualized_iv)
+        rv20 = current_vols.get("20d", annualized_iv)
+        rv60 = current_vols.get("60d", rv20)
+        rv120 = current_vols.get("120d", rv60)
+        rolling20 = rolling_vol(20)
+        iv_percentile = percentile_rank(rolling20, annualized_iv)
+        rv20_percentile = percentile_rank(rolling20, rv20)
+        vol_slope = rv10 - rv60
+        term_score = safe_float(volatility_term.get("term_score"), 35)
+        tail_score = safe_float(tail.get("tail_score"), 45)
+        front_ratio = safe_float(volatility_term.get("front_ratio"), 0.85)
+
+        compression_score = clamp(
+            max(0, 35 - rv20) * 1.2
+            + max(0, 30 - annualized_iv) * 1.1
+            + max(0, 30 - iv_percentile) * 0.8
+            + max(0, pct_change(closes.iloc[-1], closes.iloc[-21]) if len(closes) >= 21 else 0) * 1.4
+        )
+        expansion_score = clamp(
+            max(0, rv20_percentile - 55) * 0.9
+            + max(0, iv_percentile - 55) * 0.75
+            + max(0, vol_slope) * 1.2
+            + max(0, front_ratio - 0.92) * 55
+            + max(0, tail_score - 50) * 0.45
+        )
+        cone_score = round(clamp(expansion_score * 0.72 + compression_score * 0.20 + term_score * 0.08), 1)
+        regime, color = volatility_cone_regime(cone_score, compression_score)
+
+        horizon_defs = [
+            {"key": "1d", "label": "1D", "days": 1, "vol": annualized_iv * 0.70 + rv10 * 0.30},
+            {"key": "5d", "label": "5D", "days": 5, "vol": annualized_iv * 0.55 + rv20 * 0.45},
+            {"key": "10d", "label": "10D", "days": 10, "vol": annualized_iv * 0.40 + rv20 * 0.40 + rv60 * 0.20},
+            {"key": "20d", "label": "20D", "days": 20, "vol": annualized_iv * 0.25 + rv20 * 0.35 + rv60 * 0.40},
+        ]
+        ranges = []
+        for horizon in horizon_defs:
+            one_sigma_pct = horizon["vol"] * ((horizon["days"] / 252) ** 0.5)
+            two_sigma_pct = one_sigma_pct * 2
+            ranges.append({
+                "key": horizon["key"],
+                "label": horizon["label"],
+                "days": horizon["days"],
+                "blended_vol": round(horizon["vol"], 1),
+                "one_sigma_pct": round(one_sigma_pct, 2),
+                "two_sigma_pct": round(two_sigma_pct, 2),
+                "one_sigma_low": round(price * (1 - one_sigma_pct / 100), 2),
+                "one_sigma_high": round(price * (1 + one_sigma_pct / 100), 2),
+                "two_sigma_low": round(price * (1 - two_sigma_pct / 100), 2),
+                "two_sigma_high": round(price * (1 + two_sigma_pct / 100), 2),
+            })
+
+        if regime == "波动扩张":
+            summary = f"QQQ 实现/隐含波动进入扩张区，20D 实现波动分位 {rv20_percentile:.1f}%，前瞻 20D 一倍波动区间约 {ranges[-1]['one_sigma_low']:.2f}-{ranges[-1]['one_sigma_high']:.2f}。"
+        elif regime == "波动重估":
+            summary = f"QQQ 波动正在被重新定价，隐含波动分位 {iv_percentile:.1f}%，需要用风险区间约束追高和止损距离。"
+        elif regime == "低波拥挤":
+            summary = f"QQQ 处在低波上涨后的拥挤环境，20D 实现波动 {rv20:.1f}%，低波本身不是风险消失，仓位扩张需绑定失效线。"
+        elif regime == "低波平静":
+            summary = f"QQQ 波动锥处在低位，20D 实现波动 {rv20:.1f}%，短线价格带收窄但不应替代尾部保护纪律。"
+        else:
+            summary = f"QQQ 波动锥处在常态区，20D 实现波动 {rv20:.1f}%，可用 1/5/10/20 日风险区间校准执行节奏。"
+
+        controls = [
+            f"20D 一倍波动区间 {ranges[-1]['one_sigma_low']:.2f}-{ranges[-1]['one_sigma_high']:.2f}，跌破下沿时应检查 Playbook 失效线。",
+            f"10D-60D 波动斜率 {vol_slope:+.1f}pt；斜率继续上行说明短端风险正在重新定价。",
+            f"隐含波动分位 {iv_percentile:.1f}%，若低于实现波动分位并伴随尾部风险升温，保护成本可能被低估。",
+            "波动锥用于区间、止损距离和预算校准，不构成方向预测或期权交易建议。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "price_date": closes.index[-1].date().isoformat(),
+            "proxy_symbol": "QQQ",
+            "proxy_price": round(price, 2),
+            "cone_score": cone_score,
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "data_coverage": f"{dependency_status.count('ok')}/{len(dependency_status)} 模块",
+            "annualized_iv": round(annualized_iv, 1),
+            "iv_percentile": round(iv_percentile, 1),
+            "realized_vol_10d": round(rv10, 1),
+            "realized_vol_20d": round(rv20, 1),
+            "realized_vol_60d": round(rv60, 1),
+            "realized_vol_120d": round(rv120, 1),
+            "rv20_percentile": round(rv20_percentile, 1),
+            "vol_slope": round(vol_slope, 1),
+            "compression_score": round(compression_score, 1),
+            "expansion_score": round(expansion_score, 1),
+            "term_score": round(term_score, 1),
+            "tail_score": round(tail_score, 1),
+            "front_ratio": round(front_ratio, 2),
+            "cone": cone,
+            "ranges": ranges,
+            "controls": controls,
+            "methodology": "使用 QQQ 近 2 年日收益计算 10/20/60/120 日年化实现波动及历史分位，并叠加最近到期期权隐含波动生成 1/5/10/20 日一倍和两倍波动价格带。该模块用于风控区间、止损距离和预算校准，不构成方向预测。",
+        }
+        risk_volatility_cone_cache["data"] = data
+        risk_volatility_cone_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX volatility cone updated: {regime}, score {cone_score:.1f}")
+    except Exception as e:
+        logger.error(f"NDX volatility cone refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_intraday_tape_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_intraday_tape_cache
@@ -6994,6 +7202,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("gamma", risk_gamma_map_cache, refresh_gamma_map_data, 15 * 60, False),
             ("skew", risk_option_skew_cache, refresh_option_skew_data, 15 * 60, False),
             ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
+            ("vol_cone", risk_volatility_cone_cache, refresh_volatility_cone_data, 15 * 60, True),
             ("vol_term", risk_volatility_term_cache, refresh_volatility_term_data, 15 * 60, False),
             ("breadth", risk_breadth_cache, refresh_breadth_data, 15 * 60, False),
             ("liquidity", risk_liquidity_cache, refresh_liquidity_data, 15 * 60, False),
@@ -7018,6 +7227,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "gamma",
             "skew",
             "vol_premium",
+            "vol_cone",
             "vol_term",
             "breadth",
             "liquidity",
@@ -7057,6 +7267,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         gamma = risk_gamma_map_cache.get("data") or {}
         skew = risk_option_skew_cache.get("data") or {}
         vol_premium = risk_vol_premium_cache.get("data") or {}
+        vol_cone = risk_volatility_cone_cache.get("data") or {}
         vol_term = risk_volatility_term_cache.get("data") or {}
         breadth = risk_breadth_cache.get("data") or {}
         liquidity = risk_liquidity_cache.get("data") or {}
@@ -7085,6 +7296,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             gamma.get("gamma_score"),
             skew.get("skew_score"),
             vol_premium.get("premium_score"),
+            vol_cone.get("cone_score"),
             vol_term.get("term_score"),
             valuation.get("valuation_score"),
             earnings.get("event_score"),
@@ -7167,9 +7379,9 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             {
                 "key": "vol_hedge",
                 "label": "波动保护",
-                "color": hedge.get("hedge_color", risk_color(safe_float(hedge.get("hedge_score"), 50))),
-                "state": hedge.get("hedge_label", gamma.get("regime", vol_term.get("regime", "等待波动定价"))),
-                "readout": f"Gamma {gamma.get('regime', '--')} / Skew {skew.get('regime', '--')} / 隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}%",
+                "color": hedge.get("hedge_color", risk_color(avg([hedge.get("hedge_score"), vol_cone.get("cone_score"), vol_term.get("term_score")]))),
+                "state": hedge.get("hedge_label", gamma.get("regime", vol_cone.get("regime", vol_term.get("regime", "等待波动定价")))),
+                "readout": f"Gamma {gamma.get('regime', '--')} / Cone {vol_cone.get('regime', '--')} / 隐含 {safe_float(vol_premium.get('implied_move'), 0):.2f}%",
                 "action": f"保护覆盖跟随 Playbook 区间；若跌近 put wall {safe_float((gamma.get('put_wall') or {}).get('strike'), 0):.0f}，先提高保护再讨论加仓。",
             },
         ]
@@ -7211,6 +7423,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "factor_shock_score": round(safe_float(factor_shock.get("shock_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "skew_score": round(safe_float(skew.get("skew_score"), 50), 1),
+            "volatility_cone_score": round(safe_float(vol_cone.get("cone_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
             "cash_buffer": cash_label,
@@ -7220,7 +7433,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "bear_case": bear_case,
             "change_mind": change_mind,
             "levels": playbook.get("levels", []),
-            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、因子冲击、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
+            "methodology": "把 NDX 执行 Playbook、市场状态罗盘、风险预警、贡献归因、承受力闸门、历史相似情景、因子冲击、盘中 tape、成交分布、跨资产确认、估值利率敏感度、广度/流动性、MAG7 质量/财报、期权偏斜、波动锥、波动风险溢价和对冲覆盖合成为机构晨会式 Desk Brief。该模块用于阅读和风控流程，不构成买卖建议。",
         }
         risk_desk_brief_cache["data"] = data
         risk_desk_brief_cache["last_update"] = datetime.utcnow()
@@ -8305,6 +8518,7 @@ def background_worker():
     last_option_skew = 0
     last_volatility_term = 0
     last_vol_premium = 0
+    last_volatility_cone = 0
     last_intraday_tape = 0
     last_volume_profile = 0
     last_liquidity = 0
@@ -8414,6 +8628,11 @@ def background_worker():
             if time.time() - last_vol_premium > 1800:
                 refresh_vol_premium_data()
                 last_vol_premium = time.time()
+
+            # QQQ volatility cone and forward risk bands every 30 minutes
+            if time.time() - last_volatility_cone > 1800:
+                refresh_volatility_cone_data()
+                last_volatility_cone = time.time()
 
             # QQQ intraday trading-desk tape every 5 minutes
             if time.time() - last_intraday_tape > 300:
@@ -8809,6 +9028,14 @@ def get_risk_vol_premium():
         refresh_vol_premium_data(allow_dependency_refresh="light")
 
     data = risk_vol_premium_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/volatility-cone', methods=['GET'])
+def get_risk_volatility_cone():
+    if not cache_is_fresh(risk_volatility_cone_cache, 15 * 60) and should_refresh_empty_cache(risk_volatility_cone_cache, 60):
+        refresh_volatility_cone_data(allow_dependency_refresh="light")
+
+    data = risk_volatility_cone_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/intraday-tape', methods=['GET'])

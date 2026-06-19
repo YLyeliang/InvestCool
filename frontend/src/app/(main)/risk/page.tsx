@@ -30,6 +30,7 @@ import { NDXOptionsPricingPanel } from "@/components/NDXOptionsPricingPanel";
 import { NDXOptionSkewPanel } from "@/components/NDXOptionSkewPanel";
 import { NDXGammaMapPanel } from "@/components/NDXGammaMapPanel";
 import { NDXVolPremiumPanel } from "@/components/NDXVolPremiumPanel";
+import { NDXVolatilityConePanel } from "@/components/NDXVolatilityConePanel";
 import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
 import { NDXHedgeOverlayPanel } from "@/components/NDXHedgeOverlayPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
@@ -334,6 +335,13 @@ export default function RiskPage() {
           <Icon name="lucide:activity" className="text-[var(--accent-color)]" /> NDX 波动风险溢价
         </h3>
         <NDXVolPremiumPanel />
+      </section>
+
+      <section className="volatility-cone-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:chart-spline" className="text-[var(--accent-color)]" /> NDX 波动锥与风险区间
+        </h3>
+        <NDXVolatilityConePanel />
       </section>
 
       <section className="volatility-term-section">

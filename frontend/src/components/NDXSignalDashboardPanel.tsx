@@ -236,6 +236,21 @@ interface VolPremiumPayload {
   premium_ratio: number;
 }
 
+interface VolatilityConePayload {
+  cone_score: number;
+  regime: string;
+  annualized_iv: number;
+  realized_vol_20d: number;
+  iv_percentile: number;
+  rv20_percentile: number;
+  ranges: Array<{
+    key: string;
+    label: string;
+    one_sigma_low: number;
+    one_sigma_high: number;
+  }>;
+}
+
 interface IntradayTapePayload {
   tape_pressure_score: number;
   regime: string;
@@ -315,6 +330,7 @@ interface DashboardData {
   gammaMap: GammaMapPayload | null;
   optionSkew: OptionSkewPayload | null;
   volPremium: VolPremiumPayload | null;
+  volatilityCone: VolatilityConePayload | null;
   intradayTape: IntradayTapePayload | null;
   volumeProfile: VolumeProfilePayload | null;
   volatilityTerm: VolatilityTermPayload | null;
@@ -470,6 +486,7 @@ export const NDXSignalDashboardPanel = () => {
           gammaMap,
           optionSkew,
           volPremium,
+          volatilityCone,
           intradayTape,
           volumeProfile,
           volatilityTerm,
@@ -504,6 +521,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<GammaMapPayload>("/api/risk/gamma-map", 15000),
           fetchJson<OptionSkewPayload>("/api/risk/option-skew", 15000),
           fetchJson<VolPremiumPayload>("/api/risk/vol-premium"),
+          fetchJson<VolatilityConePayload>("/api/risk/volatility-cone", 15000),
           fetchJson<IntradayTapePayload>("/api/risk/intraday-tape", 15000),
           fetchJson<VolumeProfilePayload>("/api/risk/volume-profile", 15000),
           fetchJson<VolatilityTermPayload>("/api/risk/volatility-term"),
@@ -513,7 +531,7 @@ export const NDXSignalDashboardPanel = () => {
           fetchJson<ConcentrationPayload>("/api/risk/concentration"),
         ]);
 
-        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, regimeAnalog, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, factorShock, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
+        setData({ latest, diagnostics, regimeCompass, alerts, contribution, capacity, playbook, regimeAnalog, deskBrief, factors, rateSensitivity, conditionMatrix, funding, crossAsset, attribution, factorShock, breadth, themeRotation, liquidity, valuation, quality, earnings, options, gammaMap, optionSkew, volPremium, volatilityCone, intradayTape, volumeProfile, volatilityTerm, hedgeOverlay, recoveryPath, tail, concentration });
       } catch (e) {
         console.error("Failed to fetch NDX signal dashboard:", e);
         setData(null);
@@ -543,6 +561,7 @@ export const NDXSignalDashboardPanel = () => {
     const gammaScore = data.gammaMap?.gamma_score ?? 50;
     const skewScore = data.optionSkew?.skew_score ?? 50;
     const volPremiumScore = data.volPremium?.premium_score ?? 50;
+    const volatilityConeScore = data.volatilityCone?.cone_score ?? 50;
     const intradayTapeScore = data.intradayTape?.tape_pressure_score ?? 50;
     const volumeProfileScore = data.volumeProfile?.profile_score ?? 50;
     const supportiveScores = [
@@ -559,7 +578,7 @@ export const NDXSignalDashboardPanel = () => {
       data.deskBrief?.desk_score ?? 50,
     ];
     const volatilityTermScore = data.volatilityTerm?.term_score ?? 50;
-    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, factorShockScore, gammaScore, skewScore, volPremiumScore, intradayTapeScore, volumeProfileScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
+    const pressureScores = [riskScore, contributionScore, rateSensitivityScore, factorShockScore, gammaScore, skewScore, volPremiumScore, volatilityConeScore, intradayTapeScore, volumeProfileScore, macroScore, conditionScore, fundingScore, tailScore, valuationScore, earningsScore, volatilityTermScore, hedgeScore, alertScore];
     const pressureAverage = pressureScores.reduce((sum, score) => sum + score, 0) / pressureScores.length;
     const supportAverage = supportiveScores.reduce((sum, score) => sum + score, 0) / supportiveScores.length;
     const commandScore = Math.max(0, Math.min(100, 50 + supportAverage * 0.35 - pressureAverage * 0.35));
@@ -729,6 +748,13 @@ export const NDXSignalDashboardPanel = () => {
         icon: "activity",
       },
       {
+        label: "波动锥",
+        value: data.volatilityCone ? data.volatilityCone.regime : "--",
+        detail: data.volatilityCone ? `IV ${data.volatilityCone.annualized_iv.toFixed(1)}% · 20D ${data.volatilityCone.realized_vol_20d.toFixed(1)}% · Pctl ${data.volatilityCone.rv20_percentile.toFixed(1)}` : "等待波动锥",
+        color: data.volatilityCone ? scoreColor(data.volatilityCone.cone_score, true) : "blue",
+        icon: "chart-spline",
+      },
+      {
         label: "盘中脉冲",
         value: data.intradayTape ? data.intradayTape.regime : "--",
         detail: data.intradayTape ? `日内 ${formatSignedPct(data.intradayTape.daily_return)} · VWAP ${formatSignedPct(data.intradayTape.vwap_distance)} · 量 ${data.intradayTape.volume_pace.toFixed(2)}x` : "等待盘中 tape",
@@ -812,7 +838,7 @@ export const NDXSignalDashboardPanel = () => {
       <div className="rounded-lg border border-[var(--border-color)] bg-[var(--card-bg)] p-6 shadow-sm">
         <div className="h-5 w-52 rounded bg-[var(--section-bg)] animate-pulse mb-5" />
         <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-          {Array.from({ length: 32 }).map((_, index) => (
+          {Array.from({ length: 33 }).map((_, index) => (
             <div key={index} className="h-28 rounded-lg bg-[var(--section-bg)] animate-pulse" />
           ))}
         </div>
