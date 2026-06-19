@@ -10091,6 +10091,172 @@ def get_risk_portfolio_actions():
     })
 
 
+@app.route('/api/risk/trigger-monitor', methods=['GET'])
+def get_risk_trigger_monitor():
+    latest = latest_risk_payload() or {}
+    playbook = risk_module_payload("playbook") or {}
+    recovery = risk_module_payload("recovery_path") or {}
+    alerts = risk_module_payload("alerts") or {}
+    regime = risk_module_payload("regime_compass") or {}
+    contribution = risk_module_payload("contribution") or {}
+
+    levels = playbook.get("levels") or recovery.get("levels") or []
+    index_value = safe_float(
+        playbook.get("index"),
+        safe_float(recovery.get("index"), safe_float(latest.get("index_position"), 0))
+    )
+    if not levels or not index_value:
+        return jsonify({"error": "Initializing"}), 202
+
+    action_tickets = playbook.get("action_tickets") or []
+    ticket_map = {
+        item.get("key"): item
+        for item in action_tickets
+        if isinstance(item, dict) and item.get("key")
+    }
+    priority_map = {
+        "stress": 100,
+        "invalidation": 95,
+        "repair": 82,
+        "confirmation": 78,
+        "target": 60,
+    }
+
+    def line_state(key, proximity, line_color):
+        if proximity <= 0.5:
+            return {
+                "label": "临近触发",
+                "color": "red" if key in ("stress", "invalidation") else "amber",
+            }
+        if proximity <= 2:
+            return {"label": "接近观察", "color": "amber"}
+        return {"label": "距离充足", "color": line_color or "blue"}
+
+    line_items = []
+    for level in levels:
+        if not isinstance(level, dict):
+            continue
+        value = safe_float(level.get("value"), 0)
+        if not value:
+            continue
+        key = level.get("key") or level.get("label") or "level"
+        distance_pct = pct_change(value, index_value)
+        proximity = abs(distance_pct)
+        state = line_state(key, proximity, level.get("color"))
+        ticket = ticket_map.get(key, {})
+        side = "upside" if value > index_value else "downside"
+        line_items.append({
+            "key": key,
+            "label": level.get("label") or key,
+            "value": round(value, 2),
+            "side": side,
+            "color": level.get("color") or state["color"],
+            "state": state["label"],
+            "state_color": state["color"],
+            "distance_pct": round(distance_pct, 2),
+            "distance_label": f"{distance_pct:+.2f}%",
+            "points_to_trigger": round(value - index_value, 2),
+            "trigger": ticket.get("trigger") or level.get("usage") or "等待收盘价确认该触发线。",
+            "action": ticket.get("action") or "触发后按 Playbook 重新评估暴露、现金缓冲和保护覆盖。",
+            "priority": priority_map.get(key, 50) - proximity,
+        })
+
+    if not line_items:
+        return jsonify({"error": "Initializing"}), 202
+
+    downside = sorted(
+        [item for item in line_items if item["side"] == "downside"],
+        key=lambda item: abs(item["distance_pct"])
+    )
+    upside = sorted(
+        [item for item in line_items if item["side"] == "upside"],
+        key=lambda item: abs(item["distance_pct"])
+    )
+    nearest = sorted(line_items, key=lambda item: abs(item["distance_pct"]))[0]
+    nearest_down = downside[0] if downside else None
+    nearest_up = upside[0] if upside else None
+    pressure_lines = [item for item in line_items if item["key"] in ("stress", "invalidation")]
+    repair_lines = [item for item in line_items if item["key"] in ("repair", "confirmation", "target")]
+
+    if nearest["state"] == "临近触发":
+        headline = f"{nearest['label']}临近触发"
+        headline_color = nearest["state_color"]
+    elif nearest_down and abs(nearest_down["distance_pct"]) <= 2:
+        headline = "下行触发线需要重点监控"
+        headline_color = "amber"
+    elif nearest_up and abs(nearest_up["distance_pct"]) <= 2:
+        headline = "上方修复线进入观察区"
+        headline_color = "blue"
+    else:
+        headline = "触发线距离相对充足"
+        headline_color = "green"
+
+    action_stack = []
+    if nearest_down:
+        action_stack.append({
+            "label": f"下行最近：{nearest_down['label']}",
+            "color": nearest_down["state_color"],
+            "detail": f"{nearest_down['value']:,.0f}，距离 {nearest_down['distance_label']}。",
+            "action": nearest_down["action"],
+        })
+    if nearest_up:
+        action_stack.append({
+            "label": f"上行最近：{nearest_up['label']}",
+            "color": nearest_up["state_color"],
+            "detail": f"{nearest_up['value']:,.0f}，距离 {nearest_up['distance_label']}。",
+            "action": nearest_up["action"],
+        })
+    if playbook.get("headline_action"):
+        action_stack.append({
+            "label": "当前 Playbook",
+            "color": playbook.get("posture_color", "blue"),
+            "detail": playbook.get("posture", "执行框架"),
+            "action": playbook.get("headline_action"),
+        })
+    if recovery.get("summary"):
+        action_stack.append({
+            "label": "修复路径",
+            "color": recovery.get("recovery_color", "blue"),
+            "detail": f"修复分 {safe_float(recovery.get('recovery_score'), 50):.1f}",
+            "action": recovery.get("summary"),
+        })
+
+    min_line = min(item["value"] for item in line_items)
+    max_line = max(item["value"] for item in line_items)
+    value_span = max(max_line - min_line, 1)
+    ladder = []
+    for item in sorted(line_items, key=lambda row: row["value"]):
+        ladder.append({
+            **item,
+            "position_pct": round((item["value"] - min_line) / value_span * 100, 1),
+        })
+
+    index_position_pct = round(clamp((index_value - min_line) / value_span * 100, 0, 100), 1)
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "index": round(index_value, 2),
+        "posture": playbook.get("posture", latest.get("status", "--")),
+        "alert_level": alerts.get("alert_level", "--"),
+        "alert_score": round(safe_float(alerts.get("alert_score"), 50), 1),
+        "regime": regime.get("regime", "--"),
+        "net_pressure": round(safe_float(contribution.get("net_pressure"), 0), 1),
+        "nearest": nearest,
+        "nearest_down": nearest_down,
+        "nearest_up": nearest_up,
+        "pressure_count": len(pressure_lines),
+        "repair_count": len(repair_lines),
+        "index_position_pct": index_position_pct,
+        "ladder_min": round(min_line, 2),
+        "ladder_max": round(max_line, 2),
+        "lines": ladder,
+        "action_stack": action_stack[:4],
+        "methodology": "读取执行 Playbook 与回撤修复路径中的压力下沿、失效线、修复线、确认线和概率上沿，以当前 NDX 点位计算上下触发距离，并把对应触发后动作压成交易台监控清单。该模块用于阅读和风控提醒，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
