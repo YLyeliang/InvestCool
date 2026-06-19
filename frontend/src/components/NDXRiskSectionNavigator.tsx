@@ -22,6 +22,7 @@ const groups: NavGroup[] = [
       { label: "信号总览", target: "signal-dashboard-section", icon: "layout-dashboard" },
       { label: "关键看点", target: "key-takeaways-section", icon: "list-checks" },
       { label: "变化归因", target: "change-attribution-section", icon: "git-compare-arrows" },
+      { label: "温度轨迹", target: "temperature-timeline-section", icon: "chart-spline" },
       { label: "动作矩阵", target: "portfolio-actions-section", icon: "table-properties" },
       { label: "数据质量", target: "data-quality-section", icon: "database-zap" },
       { label: "模块趋势", target: "module-trends-section", icon: "activity" },

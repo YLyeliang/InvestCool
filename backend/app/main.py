@@ -10289,6 +10289,104 @@ def get_risk_change_attribution():
     })
 
 
+@app.route('/api/risk/score-history', methods=['GET'])
+def get_risk_score_history():
+    limit = request.args.get('limit', 30, type=int)
+    limit = max(5, min(limit, 80))
+    briefs = RiskBrief.query.filter(
+        RiskBrief.status.in_(RISK_BRIEF_STATUSES)
+    ).order_by(RiskBrief.created_at.desc()).limit(limit).all()
+
+    if not briefs:
+        return jsonify({"error": "Initializing"}), 202
+
+    status_rank = {
+        "机会窗口": 1,
+        "中性震荡": 2,
+        "谨慎观察": 3,
+        "防守观察": 4,
+        "风险偏高": 5,
+    }
+    chronological = list(reversed(briefs))
+    points = []
+    status_counts = {}
+
+    for brief in chronological:
+        temp = extract_risk_temperature(brief.summary)
+        status_counts[brief.status] = status_counts.get(brief.status, 0) + 1
+        points.append({
+            "id": brief.id,
+            "created_at": brief.created_at.isoformat(),
+            "status": brief.status,
+            "status_rank": status_rank.get(brief.status, 3),
+            "risk_temperature": temp,
+            "index_position": round(brief.index_position, 2) if brief.index_position else None,
+            "summary": brief.summary,
+        })
+
+    valid_temps = [point["risk_temperature"] for point in points if point["risk_temperature"] is not None]
+    latest = points[-1]
+    previous = points[-2] if len(points) > 1 else None
+    latest_temp = latest.get("risk_temperature")
+    previous_temp = previous.get("risk_temperature") if previous else None
+    temp_delta = None if latest_temp is None or previous_temp is None else round(latest_temp - previous_temp, 1)
+    index_delta_pct = None
+    if previous and latest.get("index_position") and previous.get("index_position"):
+        index_delta_pct = round(pct_change(latest["index_position"], previous["index_position"]), 2)
+
+    avg_temperature = round(sum(valid_temps) / len(valid_temps), 1) if valid_temps else None
+    min_temperature = round(min(valid_temps), 1) if valid_temps else None
+    max_temperature = round(max(valid_temps), 1) if valid_temps else None
+    duplicate_count = max(0, len(points) - len({
+        f"{point['status']}|{point.get('risk_temperature')}|{point.get('index_position')}"
+        for point in points
+    }))
+    duplicate_ratio = round(duplicate_count / len(points) * 100, 1) if points else 0
+
+    if temp_delta is not None and temp_delta >= 2:
+        headline = "风险温度上行"
+        headline_color = "amber" if temp_delta < 6 else "red"
+    elif temp_delta is not None and temp_delta <= -2:
+        headline = "风险温度回落"
+        headline_color = "green"
+    elif latest_temp is not None and latest_temp >= 70:
+        headline = "风险温度维持高位"
+        headline_color = "red"
+    elif latest_temp is not None and latest_temp >= 55:
+        headline = "风险温度维持观察区"
+        headline_color = "amber"
+    else:
+        headline = "风险温度保持稳定"
+        headline_color = "blue"
+
+    insight = (
+        f"最近 {len(points)} 条简报中，当前风险温度 {latest_temp:.1f}/100，"
+        f"区间均值 {avg_temperature:.1f}，最高 {max_temperature:.1f}，最低 {min_temperature:.1f}。"
+        if latest_temp is not None and avg_temperature is not None
+        else f"最近 {len(points)} 条简报暂未形成完整风险温度序列。"
+    )
+    if duplicate_ratio >= 50:
+        insight += f" 重复样本占 {duplicate_ratio:.1f}%，说明近期简报信号变化有限，阅读时应结合模块趋势确认。"
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "latest": latest,
+        "previous": previous,
+        "risk_temperature_delta": temp_delta,
+        "index_delta_pct": index_delta_pct,
+        "avg_temperature": avg_temperature,
+        "min_temperature": min_temperature,
+        "max_temperature": max_temperature,
+        "duplicate_ratio": duplicate_ratio,
+        "status_counts": status_counts,
+        "points": points,
+        "insight": insight,
+        "methodology": "从 NDX 风险简报历史中解析综合风险温度、状态和指数点位，形成最近多次简报的风险温度轨迹。该模块用于观察风险判断是否连续升温或降温，不构成买卖指令。",
+    })
+
+
 @app.route('/api/risk/latest', methods=['GET'])
 def get_risk_latest():
     global risk_latest_cache
