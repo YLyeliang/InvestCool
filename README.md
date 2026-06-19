@@ -85,7 +85,11 @@ frontend/
   src/components/   页面组件
   content/          Markdown 内容
 ecosystem.config.js PM2 生产进程配置
+docs/             接管、运维和审计说明
 ```
+
+NDX 风险工作台的接管与生产核对说明见
+[`docs/ndx-operations-audit.md`](docs/ndx-operations-audit.md)。
 
 ## 本地开发
 
