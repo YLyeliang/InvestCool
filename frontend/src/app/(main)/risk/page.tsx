@@ -5,6 +5,7 @@ import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXDeskBriefPanel } from "@/components/NDXDeskBriefPanel";
 import { NDXExecutionPlaybookPanel } from "@/components/NDXExecutionPlaybookPanel";
 import { NDXIntradayTapePanel } from "@/components/NDXIntradayTapePanel";
+import { NDXVolumeProfilePanel } from "@/components/NDXVolumeProfilePanel";
 import { NDXRegimeCompassPanel } from "@/components/NDXRegimeCompassPanel";
 import { NDXRiskAlertsPanel } from "@/components/NDXRiskAlertsPanel";
 import { NDXRiskBriefCard } from "@/components/NDXRiskBriefCard";
@@ -153,6 +154,13 @@ export default function RiskPage() {
           <Icon name="lucide:scan-line" className="text-[var(--accent-color)]" /> NDX 盘中交易台脉冲
         </h3>
         <NDXIntradayTapePanel />
+      </section>
+
+      <section className="volume-profile-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:bar-chart-3" className="text-[var(--accent-color)]" /> QQQ 成交量价格分布
+        </h3>
+        <NDXVolumeProfilePanel />
       </section>
 
       <section className="regime-compass-section">

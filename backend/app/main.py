@@ -74,6 +74,7 @@ risk_options_cache = {"data": None, "last_update": None}
 risk_gamma_map_cache = {"data": None, "last_update": None}
 risk_vol_premium_cache = {"data": None, "last_update": None}
 risk_intraday_tape_cache = {"data": None, "last_update": None}
+risk_volume_profile_cache = {"data": None, "last_update": None}
 risk_liquidity_cache = {"data": None, "last_update": None}
 risk_valuation_cache = {"data": None, "last_update": None}
 risk_quality_cache = {"data": None, "last_update": None}
@@ -633,6 +634,15 @@ def gamma_map_regime(net_gamma_ratio, put_wall_distance):
     if net_gamma_ratio <= -0.06:
         return "下方凸性", "amber"
     return "Gamma 均衡", "blue"
+
+def volume_profile_regime(last_price, value_area_low, value_area_high, poc, session_return):
+    if last_price > value_area_high:
+        return ("价值区上方接受", "green") if session_return >= 0 else ("上方拒绝测试", "amber")
+    if last_price < value_area_low:
+        return ("价值区下方失守", "red") if session_return <= 0 else ("下方修复测试", "amber")
+    if abs(pct_change(last_price, poc)) <= 0.35:
+        return "POC 附近均衡", "blue"
+    return "价值区内轮动", "blue"
 
 def liquidity_regime(score, distribution_days, accumulation_days, return_20d, volume_ratio, daily_return, range_expansion):
     if distribution_days >= 6 and return_20d < 0:
@@ -4004,6 +4014,206 @@ def refresh_intraday_tape_data():
         logger.error(traceback.format_exc())
 
 
+def build_volume_profile(rows, bin_count=32):
+    low = safe_float(rows["Low"].min(), None)
+    high = safe_float(rows["High"].max(), None)
+    if low is None or high is None or high <= low:
+        raise ValueError("Invalid price range for volume profile")
+
+    bins = np.linspace(low, high, bin_count + 1)
+    typical_price = (rows["High"] + rows["Low"] + rows["Close"]) / 3
+    volumes = rows["Volume"].fillna(0)
+    volume_by_bin = np.zeros(bin_count)
+
+    for price, volume in zip(typical_price, volumes):
+        idx = int(np.searchsorted(bins, price, side="right") - 1)
+        idx = max(0, min(bin_count - 1, idx))
+        volume_by_bin[idx] += safe_float(volume, 0)
+
+    total_volume = safe_float(volume_by_bin.sum(), 0)
+    if total_volume <= 0:
+        raise ValueError("No usable volume for volume profile")
+
+    centers = (bins[:-1] + bins[1:]) / 2
+    poc_index = int(np.argmax(volume_by_bin))
+    value_volume = volume_by_bin[poc_index]
+    left = right = poc_index
+    target_volume = total_volume * 0.70
+
+    while value_volume < target_volume and (left > 0 or right < bin_count - 1):
+        left_volume = volume_by_bin[left - 1] if left > 0 else -1
+        right_volume = volume_by_bin[right + 1] if right < bin_count - 1 else -1
+        if right_volume >= left_volume and right < bin_count - 1:
+            right += 1
+            value_volume += volume_by_bin[right]
+        elif left > 0:
+            left -= 1
+            value_volume += volume_by_bin[left]
+        else:
+            break
+
+    nodes = []
+    max_volume = safe_float(volume_by_bin.max(), 1)
+    for idx, volume in enumerate(volume_by_bin):
+        share = volume / total_volume * 100
+        nodes.append({
+            "price": round(float(centers[idx]), 2),
+            "low": round(float(bins[idx]), 2),
+            "high": round(float(bins[idx + 1]), 2),
+            "volume": round(float(volume)),
+            "volume_share": round(float(share), 2),
+            "relative_volume": round(float(volume / max_volume * 100), 1),
+            "in_value_area": left <= idx <= right,
+        })
+
+    return {
+        "poc": round(float(centers[poc_index]), 2),
+        "value_area_low": round(float(bins[left]), 2),
+        "value_area_high": round(float(bins[right + 1]), 2),
+        "value_area_volume_pct": round(float(value_volume / total_volume * 100), 1),
+        "total_volume": round(float(total_volume)),
+        "nodes": nodes,
+    }
+
+
+def refresh_volume_profile_data():
+    os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
+    global risk_volume_profile_cache
+
+    try:
+        proxy_symbol = "QQQ"
+        intraday = yf.Ticker(proxy_symbol).history(period="5d", interval="5m")
+        if intraday is None or intraday.empty or "Close" not in intraday.columns or "Volume" not in intraday.columns:
+            raise ValueError("No intraday QQQ data for volume profile")
+
+        intraday = intraday.dropna(subset=["Close", "High", "Low"]).copy()
+        intraday.index = pd.to_datetime(intraday.index).tz_localize(None)
+        intraday["session_date"] = intraday.index.date
+        if len(intraday) < 40:
+            raise ValueError("Insufficient intraday rows for volume profile")
+
+        latest_session_date = max(intraday["session_date"])
+        session = intraday[intraday["session_date"] == latest_session_date].copy()
+        if len(session) < 6:
+            raise ValueError("Insufficient latest session rows for volume profile")
+
+        profile = build_volume_profile(intraday.tail(390), bin_count=32)
+        session_profile = build_volume_profile(session, bin_count=20)
+
+        last_price = safe_float(session["Close"].iloc[-1], 0)
+        open_price = safe_float(session["Open"].iloc[0], last_price)
+        session_return = pct_change(last_price, open_price)
+        range_low = safe_float(session["Low"].min(), last_price)
+        range_high = safe_float(session["High"].max(), last_price)
+        volume_series = session["Volume"].fillna(0)
+        typical_price = (session["High"] + session["Low"] + session["Close"]) / 3
+        session_vwap = safe_float((typical_price * volume_series).sum() / volume_series.sum(), last_price) if volume_series.sum() > 0 else last_price
+
+        value_area_low = profile["value_area_low"]
+        value_area_high = profile["value_area_high"]
+        poc = profile["poc"]
+        regime, color = volume_profile_regime(last_price, value_area_low, value_area_high, poc, session_return)
+        distance_to_poc = pct_change(last_price, poc)
+        distance_to_val = pct_change(last_price, value_area_low)
+        distance_to_vah = pct_change(last_price, value_area_high)
+        value_area_width_pct = (value_area_high - value_area_low) / last_price * 100 if last_price else 0
+
+        if last_price > value_area_high:
+            profile_pressure = clamp(35 - min(25, max(0, session_return) * 6) + max(0, abs(distance_to_vah) - 1.2) * 9, 20, 75)
+            summary = f"QQQ 现价位于 5日价值区上方，若能维持在 {value_area_high:.2f} 上方，短线说明买盘接受更高价格。"
+        elif last_price < value_area_low:
+            profile_pressure = clamp(62 + max(0, -session_return) * 7 + max(0, abs(distance_to_val) - 1.0) * 8, 45, 92)
+            summary = f"QQQ 现价跌到 5日价值区下方，{value_area_low:.2f} 变成修复线，下方成交稀疏区容易放大波动。"
+        elif abs(distance_to_poc) <= 0.35:
+            profile_pressure = 42
+            summary = f"QQQ 围绕 5日 POC {poc:.2f} 成交，市场处于成交密集区均衡，方向信号需要等待价值区边界突破。"
+        else:
+            profile_pressure = clamp(48 + abs(distance_to_poc) * 3 - max(0, session_return) * 2, 30, 70)
+            summary = f"QQQ 仍在 5日价值区内轮动，{value_area_low:.2f}-{value_area_high:.2f} 是当前最重要的接受区间。"
+
+        high_volume_nodes = sorted(profile["nodes"], key=lambda row: row["volume"], reverse=True)[:6]
+        high_volume_nodes = sorted(high_volume_nodes, key=lambda row: row["price"])
+        nearest_node = min(profile["nodes"], key=lambda row: abs(row["price"] - last_price))
+        low_volume_gaps = sorted(
+            [row for row in profile["nodes"] if row["relative_volume"] <= 28],
+            key=lambda row: abs(row["price"] - last_price),
+        )[:5]
+        nodes_window = sorted(
+            sorted(profile["nodes"], key=lambda row: abs(row["price"] - last_price))[:14],
+            key=lambda row: row["price"],
+        )
+
+        sessions = []
+        for date_value, group in intraday.groupby("session_date"):
+            if len(group) < 6:
+                continue
+            session_p = build_volume_profile(group, bin_count=18)
+            session_open = safe_float(group["Open"].iloc[0], group["Close"].iloc[0])
+            session_close = safe_float(group["Close"].iloc[-1], session_open)
+            sessions.append({
+                "date": date_value.isoformat(),
+                "close": round(session_close, 2),
+                "return": round(pct_change(session_close, session_open), 2),
+                "poc": session_p["poc"],
+                "value_area_low": session_p["value_area_low"],
+                "value_area_high": session_p["value_area_high"],
+                "volume": session_p["total_volume"],
+            })
+
+        controls = [
+            f"价值区上沿 {value_area_high:.2f}：站稳上方说明买盘接受高价，跌回区内则视为突破失败。",
+            f"POC {poc:.2f}：回到该区域意味着市场重新进入成交密集均衡区。",
+            f"价值区下沿 {value_area_low:.2f}：跌破后应降低追涨执行强度，并检查 gamma put wall 和保护覆盖。",
+            f"最近低量区在 {low_volume_gaps[0]['price']:.2f} 附近，若价格穿越低量区，盘中速度可能放大。",
+        ] if low_volume_gaps else [
+            f"价值区上沿 {value_area_high:.2f}：站稳上方说明买盘接受高价，跌回区内则视为突破失败。",
+            f"POC {poc:.2f}：回到该区域意味着市场重新进入成交密集均衡区。",
+            f"价值区下沿 {value_area_low:.2f}：跌破后应降低追涨执行强度，并检查 gamma put wall 和保护覆盖。",
+        ]
+
+        data = {
+            "as_of": datetime.utcnow().isoformat(),
+            "proxy_symbol": proxy_symbol,
+            "session_date": latest_session_date.isoformat(),
+            "last_bar_time": session.index[-1].isoformat(),
+            "last_price": round(last_price, 2),
+            "open": round(open_price, 2),
+            "session_return": round(session_return, 2),
+            "session_low": round(range_low, 2),
+            "session_high": round(range_high, 2),
+            "session_vwap": round(session_vwap, 2),
+            "profile_score": round(profile_pressure, 1),
+            "regime": regime,
+            "regime_color": color,
+            "summary": summary,
+            "poc": poc,
+            "value_area_low": value_area_low,
+            "value_area_high": value_area_high,
+            "value_area_volume_pct": profile["value_area_volume_pct"],
+            "value_area_width_pct": round(value_area_width_pct, 2),
+            "distance_to_poc": round(distance_to_poc, 2),
+            "distance_to_value_low": round(distance_to_val, 2),
+            "distance_to_value_high": round(distance_to_vah, 2),
+            "total_volume": profile["total_volume"],
+            "session_poc": session_profile["poc"],
+            "session_value_area_low": session_profile["value_area_low"],
+            "session_value_area_high": session_profile["value_area_high"],
+            "nearest_node": nearest_node,
+            "high_volume_nodes": high_volume_nodes,
+            "low_volume_gaps": low_volume_gaps,
+            "nodes": nodes_window,
+            "sessions": sessions[-5:],
+            "controls": controls,
+            "methodology": "使用 QQQ 5 分钟线作为 NDX 可交易代理，把最近 5 个交易日成交量按典型价格分箱，计算 POC、70% 价值区、成交密集节点和低量区。该模块用于识别价格接受/拒绝、盘中执行区间和成交密集支撑/阻力，不构成日内交易建议。",
+        }
+        risk_volume_profile_cache["data"] = data
+        risk_volume_profile_cache["last_update"] = datetime.utcnow()
+        logger.info(f"NDX volume profile updated: {regime}, score {profile_pressure:.1f}")
+    except Exception as e:
+        logger.error(f"NDX volume profile refresh failed: {e}")
+        logger.error(traceback.format_exc())
+
+
 def refresh_liquidity_data():
     os.environ['HTTP_PROXY'] = ''; os.environ['HTTPS_PROXY'] = ''
     global risk_liquidity_cache
@@ -5804,6 +6014,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             ("recovery", risk_recovery_path_cache, refresh_recovery_path_data, 15 * 60, True),
             ("rate_sensitivity", risk_rate_sensitivity_cache, refresh_rate_sensitivity_data, 15 * 60, True),
             ("intraday", risk_intraday_tape_cache, refresh_intraday_tape_data, 5 * 60, False),
+            ("volume_profile", risk_volume_profile_cache, refresh_volume_profile_data, 5 * 60, False),
             ("hedge", risk_hedge_overlay_cache, refresh_hedge_overlay_data, 15 * 60, False),
             ("gamma", risk_gamma_map_cache, refresh_gamma_map_data, 15 * 60, False),
             ("vol_premium", risk_vol_premium_cache, refresh_vol_premium_data, 15 * 60, True),
@@ -5823,6 +6034,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "recovery",
             "rate_sensitivity",
             "intraday",
+            "volume_profile",
             "hedge",
             "gamma",
             "vol_premium",
@@ -5857,6 +6069,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
         recovery = risk_recovery_path_cache.get("data") or {}
         rate_sensitivity = risk_rate_sensitivity_cache.get("data") or {}
         intraday = risk_intraday_tape_cache.get("data") or {}
+        volume_profile = risk_volume_profile_cache.get("data") or {}
         hedge = risk_hedge_overlay_cache.get("data") or {}
         gamma = risk_gamma_map_cache.get("data") or {}
         vol_premium = risk_vol_premium_cache.get("data") or {}
@@ -5880,6 +6093,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             contribution.get("risk_contribution_score"),
             rate_sensitivity.get("rate_sensitivity_score"),
             intraday.get("tape_pressure_score"),
+            volume_profile.get("profile_score"),
             hedge.get("hedge_score"),
             gamma.get("gamma_score"),
             vol_premium.get("premium_score"),
@@ -5932,9 +6146,9 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
                 "key": "market_tape",
                 "label": "盘中 tape",
                 "color": risk_color(tape_pressure),
-                "state": intraday.get("regime", "等待盘中确认"),
-                "readout": f"日内 {safe_float(intraday.get('daily_return'), 0):+.2f}% / VWAP {safe_float(intraday.get('vwap_distance'), 0):+.2f}% / 量能 {safe_float(intraday.get('volume_pace'), 0):.2f}x",
-                "action": "若价格站上 VWAP 且量能确认，才允许执行靠近目标上沿；否则保持分批和等待。",
+                "state": f"{intraday.get('regime', '等待盘中确认')} / {volume_profile.get('regime', '等待价值区')}",
+                "readout": f"日内 {safe_float(intraday.get('daily_return'), 0):+.2f}% / VWAP {safe_float(intraday.get('vwap_distance'), 0):+.2f}% / POC {safe_float(volume_profile.get('poc'), 0):.2f}",
+                "action": f"若价格站上 VWAP 且维持在价值区上沿 {safe_float(volume_profile.get('value_area_high'), 0):.2f} 上方，才允许执行靠近目标上沿。",
             },
             {
                 "key": "macro_valuation",
@@ -5993,6 +6207,7 @@ def refresh_desk_brief_data(allow_dependency_refresh=True):
             "pressure_score": round(pressure_score, 1),
             "alert_score": round(alert_score, 1),
             "tape_pressure_score": round(tape_pressure, 1),
+            "profile_score": round(safe_float(volume_profile.get("profile_score"), 50), 1),
             "gamma_score": round(safe_float(gamma.get("gamma_score"), 50), 1),
             "net_pressure": round(net_pressure, 1),
             "target_exposure": target_exposure,
@@ -7082,6 +7297,7 @@ def background_worker():
     last_volatility_term = 0
     last_vol_premium = 0
     last_intraday_tape = 0
+    last_volume_profile = 0
     last_liquidity = 0
     last_valuation = 0
     last_quality = 0
@@ -7178,6 +7394,11 @@ def background_worker():
             if time.time() - last_intraday_tape > 300:
                 refresh_intraday_tape_data()
                 last_intraday_tape = time.time()
+
+            # QQQ volume-at-price profile every 5 minutes
+            if time.time() - last_volume_profile > 300:
+                refresh_volume_profile_data()
+                last_volume_profile = time.time()
 
             # QQQ liquidity and volume confirmation every 30 minutes
             if time.time() - last_liquidity > 1800:
@@ -7534,6 +7755,14 @@ def get_risk_intraday_tape():
         refresh_intraday_tape_data()
 
     data = risk_intraday_tape_cache.get("data")
+    return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
+
+@app.route('/api/risk/volume-profile', methods=['GET'])
+def get_risk_volume_profile():
+    if not cache_is_fresh(risk_volume_profile_cache, 5 * 60) and should_refresh_empty_cache(risk_volume_profile_cache, 60):
+        refresh_volume_profile_data()
+
+    data = risk_volume_profile_cache.get("data")
     return jsonify(data) if data else (jsonify({"error": "Initializing"}), 202)
 
 @app.route('/api/risk/liquidity', methods=['GET'])
