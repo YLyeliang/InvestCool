@@ -49,6 +49,7 @@ import { NDXVolPremiumPanel } from "@/components/NDXVolPremiumPanel";
 import { NDXVolatilityConePanel } from "@/components/NDXVolatilityConePanel";
 import { NDXVolatilityTermPanel } from "@/components/NDXVolatilityTermPanel";
 import { NDXHedgeOverlayPanel } from "@/components/NDXHedgeOverlayPanel";
+import { NDXHedgeBookPanel } from "@/components/NDXHedgeBookPanel";
 import { NDXLiquidityFlowPanel } from "@/components/NDXLiquidityFlowPanel";
 import { NDXConcentrationPanel } from "@/components/NDXConcentrationPanel";
 import { NDXValuationPressurePanel } from "@/components/NDXValuationPressurePanel";
@@ -473,6 +474,13 @@ export default function RiskPage() {
           <Icon name="lucide:shield-check" className="text-[var(--accent-color)]" /> NDX 对冲覆盖建议
         </h3>
         <NDXLazyRiskPanel label="NDX 对冲覆盖建议"><NDXHedgeOverlayPanel /></NDXLazyRiskPanel>
+      </section>
+
+      <section id="hedge-book-section" className="hedge-book-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:shield-plus" className="text-[var(--accent-color)]" /> NDX 对冲方案簿
+        </h3>
+        <NDXLazyRiskPanel label="NDX 对冲方案簿"><NDXHedgeBookPanel /></NDXLazyRiskPanel>
       </section>
 
       <section id="liquidity-section" className="liquidity-section">

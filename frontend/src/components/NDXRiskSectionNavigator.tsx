@@ -76,6 +76,7 @@ const groups: NavGroup[] = [
       { label: "Gamma", target: "gamma-map-section", icon: "crosshair" },
       { label: "波动溢价", target: "vol-premium-section", icon: "activity" },
       { label: "对冲覆盖", target: "hedge-overlay-section", icon: "shield-check" },
+      { label: "对冲方案", target: "hedge-book-section", icon: "shield-plus" },
     ],
   },
   {

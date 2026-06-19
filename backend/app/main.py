@@ -11676,6 +11676,271 @@ def get_risk_thesis_monitor():
     })
 
 
+@app.route('/api/risk/hedge-book', methods=['GET'])
+def get_risk_hedge_book():
+    hedge = risk_module_payload("hedge_overlay") or {}
+    options = risk_module_payload("options") or {}
+    option_skew = risk_module_payload("option_skew") or {}
+    gamma = risk_module_payload("gamma_map") or {}
+    vol_premium = risk_module_payload("vol_premium") or {}
+    vol_term = risk_module_payload("volatility_term") or {}
+    budget = risk_module_payload("budget") or {}
+    playbook = risk_module_payload("playbook") or {}
+    trigger = route_json_payload(get_risk_trigger_monitor()) or {}
+    register = route_json_payload(get_risk_register()) or {}
+
+    if not hedge and not options:
+        return jsonify({"error": "Initializing"}), 202
+
+    proxy_symbol = hedge.get("proxy_symbol") or options.get("proxy_symbol") or "QQQ"
+    proxy_price = safe_float(hedge.get("proxy_price"), options.get("proxy_price"))
+    implied_low = safe_float(hedge.get("implied_range_low"), options.get("implied_range_low"))
+    implied_high = safe_float(hedge.get("implied_range_high"), options.get("implied_range_high"))
+    implied_move = safe_float(hedge.get("implied_move"), options.get("implied_move"))
+    put_spread_long = safe_float(hedge.get("put_spread_long"), option_skew.get("put_95_strike") or implied_low)
+    put_spread_short = safe_float(hedge.get("put_spread_short"), option_skew.get("put_90_strike") or implied_low * 0.98)
+    put_spread_cost_pct = safe_float(option_skew.get("put_spread_cost_pct"), 0.2)
+    skew_score = safe_float(option_skew.get("skew_score"), 50)
+    gamma_score = safe_float(gamma.get("gamma_score"), 50)
+    premium_score = safe_float(vol_premium.get("premium_score"), 50)
+    term_score = safe_float(vol_term.get("term_score"), 50)
+    register_score = safe_float(register.get("register_score"), 50)
+    hedge_score = safe_float(hedge.get("hedge_score"), 50)
+    stress_downside = safe_float(hedge.get("stress_downside"), budget.get("stress_downside"))
+    protection_lower = safe_float(hedge.get("protection_lower"), 20)
+    protection_upper = safe_float(hedge.get("protection_upper"), 40)
+    cash_buffer_min = safe_float(playbook.get("cash_buffer_min"), 50)
+    target_exposure = playbook.get("target_exposure") or {}
+    hedge_coverage = playbook.get("hedge_coverage") or {}
+    nearest_down = trigger.get("nearest_down") or {}
+    nearest_up = trigger.get("nearest_up") or {}
+    put_wall = gamma.get("put_wall") or gamma.get("max_abs_wall") or {}
+    gamma_wall = gamma.get("gamma_wall") or gamma.get("nearest_wall") or {}
+    call_105_strike = safe_float(option_skew.get("call_105_strike"), implied_high or proxy_price * 1.05)
+    call_105_distance = safe_float(option_skew.get("call_105_distance"), 5)
+
+    if register_score >= 58 or skew_score >= 85 or gamma_score >= 65:
+        headline = "优先使用分层保护"
+        headline_color = "amber" if register_score < 65 else "red"
+        posture = "保护优先"
+    elif hedge_score <= 45 and premium_score <= 45:
+        headline = "维持基础保护"
+        headline_color = "blue"
+        posture = "成本均衡"
+    else:
+        headline = "等待保护成本回落"
+        headline_color = "blue" if premium_score < 60 else "amber"
+        posture = "择机补保护"
+
+    structure_rows = []
+
+    def add_structure(
+        key,
+        name,
+        color,
+        protection,
+        cost,
+        complexity,
+        horizon,
+        construction,
+        use_when,
+        avoid_when,
+        trigger_text,
+        effect,
+        priority_boost=0,
+    ):
+        protection = round(clamp(safe_float(protection, 0), 0, 100), 1)
+        cost = round(clamp(safe_float(cost, 0), 0, 100), 1)
+        complexity = round(clamp(safe_float(complexity, 0), 0, 100), 1)
+        score = round(clamp(protection * 0.62 - cost * 0.24 - complexity * 0.1 + priority_boost, 0, 100), 1)
+        structure_rows.append({
+            "key": key,
+            "name": name,
+            "color": color,
+            "score": score,
+            "protection": protection,
+            "cost": cost,
+            "complexity": complexity,
+            "horizon": horizon,
+            "construction": construction,
+            "use_when": use_when,
+            "avoid_when": avoid_when,
+            "trigger": trigger_text,
+            "effect": effect,
+        })
+
+    add_structure(
+        "put_spread",
+        "Put Spread 保护",
+        "amber" if skew_score >= 85 else "blue",
+        74 + min(12, stress_downside),
+        24 + put_spread_cost_pct * 45 + max(0, skew_score - 70) * 0.12,
+        42,
+        f"{option_skew.get('days_to_expiration', hedge.get('days_to_expiration', 7))}D",
+        f"买入 {proxy_symbol} {put_spread_long:.0f} put，卖出 {put_spread_short:.0f} put，成本约 {put_spread_cost_pct:.2f}% notional。",
+        f"{proxy_symbol} 跌破隐含下沿 {implied_low:.2f} 或 NDX 接近失效线 {safe_float(nearest_down.get('value'), 0):,.0f}。",
+        "若偏斜继续拥挤且现货尚未跌破隐含区间，不追高一次性补满保护。",
+        nearest_down.get("trigger", f"NDX 收盘跌破 {safe_float(nearest_down.get('value'), 0):,.0f}。"),
+        f"覆盖 {protection_lower:.0f}-{protection_upper:.0f}% 目标保护，主要缓冲 {stress_downside:.1f}% 压力情景的前半段。",
+        12 if skew_score >= 80 else 6,
+    )
+
+    add_structure(
+        "collar",
+        "Put Spread Collar",
+        "blue",
+        66,
+        16 + put_spread_cost_pct * 25,
+        58,
+        f"{option_skew.get('days_to_expiration', 7)}D",
+        f"Put spread 下沿 {put_spread_long:.0f}/{put_spread_short:.0f}，用 {call_105_strike:.0f} 附近 call 部分抵成本。",
+        "组合暴露已接近 Playbook 上沿，愿意用部分上行换取保护成本下降。",
+        f"若上行确认线 {safe_float(nearest_up.get('value'), 0):,.0f} 被站稳且上行需要保留，不使用过窄 collar。",
+        nearest_up.get("trigger", "上行修复线触发前保持成本纪律。"),
+        f"上行约 {call_105_distance:.1f}% 附近开始让渡部分收益，换取较低净保护成本。",
+        5 if skew_score >= 80 else 2,
+    )
+
+    add_structure(
+        "cash_buffer",
+        "现金缓冲 / 暴露削减",
+        "green" if register_score >= 60 else "blue",
+        58 + max(0, register_score - 50) * 0.45,
+        6,
+        14,
+        "今日",
+        f"把 NDX 暴露维持在 {target_exposure.get('label', '--')}，现金缓冲至少 {cash_buffer_min:.0f}%+。",
+        "期权保护需求拥挤或 Gamma 风险高，但尚未触发失效线。",
+        "若确认线触发且风险登记降温，过高现金会拖累修复行情。",
+        playbook.get("headline_action", "降低追高和集中暴露。"),
+        f"不增加期权成本，直接降低 {stress_downside:.1f}% 压力回撤对组合的穿透。",
+        10 if register_score >= 58 else 4,
+    )
+
+    add_structure(
+        "protective_put",
+        "Outright Put",
+        "red" if skew_score >= 85 else "amber",
+        88,
+        58 + max(0, skew_score - 70) * 0.25,
+        30,
+        f"{option_skew.get('days_to_expiration', 7)}D",
+        f"直接买入 {proxy_symbol} {put_spread_long:.0f} 附近保护性 put。",
+        "失效线已经被触发、Gamma 负反馈加速，且组合必须保留现货 beta。",
+        "当前风险逆转较高时，单腿 put 容易在保护需求最拥挤处付出高成本。",
+        nearest_down.get("trigger", "只在失效或急跌确认后作为应急保护。"),
+        "保护最直接，但成本和时间价值损耗最高，适合事故响应而不是常态持有。",
+        -4 if skew_score >= 85 else 2,
+    )
+
+    add_structure(
+        "trigger_reduce",
+        "触发线降档",
+        "amber",
+        64,
+        4,
+        18,
+        "1-5D",
+        f"若 NDX 跌破 {safe_float(nearest_down.get('value'), 0):,.0f}，按执行票据降档并提高保护覆盖。",
+        "不希望在偏斜高位支付期权成本，但可以接受用价格确认换取执行纪律。",
+        "盘中击穿但收盘修复时，避免机械减仓造成来回损耗。",
+        nearest_down.get("trigger", f"NDX 收盘跌破 {safe_float(nearest_down.get('value'), 0):,.0f}。"),
+        "用规则降低尾部暴露，不依赖期权链流动性。",
+        3,
+    )
+
+    structure_rows = sorted(structure_rows, key=lambda item: item["score"], reverse=True)
+    recommended = structure_rows[0] if structure_rows else None
+
+    market_context = [
+        {
+            "label": "保护覆盖",
+            "color": hedge.get("hedge_color", "blue"),
+            "value": hedge_coverage.get("label", f"{protection_lower:.0f}% - {protection_upper:.0f}%"),
+            "detail": hedge.get("summary", "对冲覆盖用于约束组合下行风险。"),
+        },
+        {
+            "label": "隐含区间",
+            "color": options.get("regime_color", "amber"),
+            "value": f"{implied_low:.2f} - {implied_high:.2f}",
+            "detail": options.get("summary", "期权隐含区间用于识别现货是否超出市场定价。"),
+        },
+        {
+            "label": "偏斜成本",
+            "color": option_skew.get("regime_color", "amber"),
+            "value": f"RR {safe_float(option_skew.get('risk_reversal'), 0):+.1f}",
+            "detail": option_skew.get("summary", "偏斜越拥挤，越应该避免一次性买满单腿保护。"),
+        },
+        {
+            "label": "Gamma 位置",
+            "color": gamma.get("regime_color", "amber"),
+            "value": gamma.get("regime", "--"),
+            "detail": gamma.get("summary", "负 Gamma 区域需要更严格的触发线和执行纪律。"),
+        },
+    ]
+
+    trigger_map = [
+        {
+            "label": "隐含下沿",
+            "color": "red" if options.get("regime_color") == "red" else "amber",
+            "value": f"{implied_low:.2f}",
+            "action": "跌破后说明现货波动超过短期期权定价，优先收缩短线风险预算。",
+        },
+        {
+            "label": "Put Wall",
+            "color": put_wall.get("color", "red"),
+            "value": f"{safe_float(put_wall.get('strike'), 0):.0f}",
+            "action": "接近下方 put wall 时，负 Gamma 可能放大波动，put spread 或降档规则优先。",
+        },
+        {
+            "label": "Gamma Wall",
+            "color": gamma_wall.get("color", "green"),
+            "value": f"{safe_float(gamma_wall.get('strike'), 0):.0f}",
+            "action": "站上并稳定后，保护可从应急结构切回基础覆盖。",
+        },
+        {
+            "label": "NDX 失效线",
+            "color": nearest_down.get("color", "amber"),
+            "value": f"{safe_float(nearest_down.get('value'), 0):,.0f}",
+            "action": nearest_down.get("action", "触发后降低暴露并提高保护覆盖。"),
+        },
+    ]
+
+    guardrails = [
+        f"保护覆盖目标 {protection_lower:.0f}-{protection_upper:.0f}%，不得用对冲替代失效线纪律。",
+        f"风险逆转 {safe_float(option_skew.get('risk_reversal'), 0):+.1f} vol pts：偏斜拥挤时优先 put spread/collar，而非一次性买满单腿 put。",
+        f"Gamma score {gamma_score:.1f}，下方 put wall {safe_float(put_wall.get('strike'), 0):.0f}；接近墙位时降低追价。",
+        f"Playbook 现金缓冲至少 {cash_buffer_min:.0f}%+，目标暴露 {target_exposure.get('label', '--')}。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "posture": posture,
+        "proxy_symbol": proxy_symbol,
+        "proxy_price": round(proxy_price, 2),
+        "expiration": option_skew.get("expiration") or hedge.get("expiration") or options.get("expiration"),
+        "days_to_expiration": option_skew.get("days_to_expiration") or hedge.get("days_to_expiration") or options.get("days_to_expiration"),
+        "hedge_score": round(hedge_score, 1),
+        "register_score": round(register_score, 1),
+        "skew_score": round(skew_score, 1),
+        "gamma_score": round(gamma_score, 1),
+        "premium_score": round(premium_score, 1),
+        "term_score": round(term_score, 1),
+        "implied_move": round(implied_move, 2),
+        "stress_downside": round(stress_downside, 1),
+        "protection_lower": round(protection_lower, 1),
+        "protection_upper": round(protection_upper, 1),
+        "recommended": recommended,
+        "structures": structure_rows,
+        "market_context": market_context,
+        "trigger_map": trigger_map,
+        "guardrails": guardrails,
+        "methodology": "对冲方案簿把对冲覆盖、QQQ 期权隐含区间、偏斜、Gamma、波动风险溢价、风险预算、Playbook、触发线和风险登记簿聚合成可比较的保护结构菜单。它用于说明保护覆盖、成本、复杂度和触发条件，不构成期权交易建议或个性化投资建议。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None
