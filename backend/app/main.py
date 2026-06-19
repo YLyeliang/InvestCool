@@ -11941,6 +11941,296 @@ def get_risk_hedge_book():
     })
 
 
+@app.route('/api/risk/catalyst-calendar', methods=['GET'])
+def get_risk_catalyst_calendar():
+    earnings = risk_module_payload("earnings") or {}
+    options = risk_module_payload("options") or {}
+    option_skew = risk_module_payload("option_skew") or {}
+    gamma = risk_module_payload("gamma_map") or {}
+    vol_term = risk_module_payload("volatility_term") or {}
+    funding = risk_module_payload("funding_conditions") or {}
+    rate = risk_module_payload("rate_sensitivity") or {}
+    playbook = risk_module_payload("playbook") or {}
+    trigger = route_json_payload(get_risk_trigger_monitor()) or {}
+    register = route_json_payload(get_risk_register()) or {}
+    thesis = route_json_payload(get_risk_thesis_monitor()) or {}
+
+    if not earnings and not options and not trigger:
+        return jsonify({"error": "Initializing"}), 202
+
+    today = datetime.utcnow().date()
+    events = []
+
+    def parse_date(value):
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00")).date()
+        except Exception:
+            try:
+                return datetime.strptime(str(value)[:10], "%Y-%m-%d").date()
+            except Exception:
+                return None
+
+    def date_label(event_date, days):
+        if event_date:
+            return event_date.isoformat()
+        if days is None:
+            return "条件触发"
+        if days <= 0:
+            return "今日"
+        return f"+{int(days)}D"
+
+    def add_event(
+        key,
+        title,
+        category,
+        color,
+        event_date,
+        days_to_event,
+        probability,
+        impact,
+        trigger_text,
+        action,
+        source,
+        evidence,
+        priority_boost=0,
+        event_type="dated",
+    ):
+        if days_to_event is None and event_date:
+            days_to_event = (event_date - today).days
+        probability = round(clamp(safe_float(probability, 0), 0, 100), 1)
+        impact = round(clamp(safe_float(impact, 0), 0, 100), 1)
+        urgency = 28 if days_to_event is not None and days_to_event <= 3 else 20 if days_to_event is not None and days_to_event <= 14 else 10 if days_to_event is not None and days_to_event <= 45 else 4
+        priority = round(probability * 0.36 + impact * 0.38 + urgency + priority_boost, 1)
+        events.append({
+            "key": key,
+            "title": title,
+            "category": category,
+            "color": color,
+            "event_type": event_type,
+            "date": event_date.isoformat() if event_date else None,
+            "date_label": date_label(event_date, days_to_event),
+            "days_to_event": days_to_event,
+            "probability": probability,
+            "impact": impact,
+            "priority": priority,
+            "trigger": trigger_text,
+            "action": action,
+            "source": source,
+            "evidence": evidence,
+        })
+
+    for item in (earnings.get("securities") or [])[:7]:
+        event_date = parse_date(item.get("earnings_date"))
+        days = item.get("days_to_event")
+        if event_date or days is not None:
+            score = safe_float(item.get("event_score"), earnings.get("event_score", 50))
+            weight = safe_float(item.get("weight"), 0)
+            add_event(
+                f"earnings_{item.get('symbol', 'unknown')}",
+                f"{item.get('symbol', '--')} 财报",
+                "财报",
+                "amber" if score >= 60 or weight >= 10 else "blue",
+                event_date,
+                int(days) if days is not None else None,
+                score,
+                min(90, 45 + weight * 2 + safe_float(item.get("eps_dispersion"), 0) * 0.25),
+                f"财报日期 {event_date.isoformat() if event_date else '--'}，权重 {weight:.1f}%。",
+                "财报前避免把新增风险集中在单一权重股方向；财报后更新盈利质量和情景概率。",
+                "MAG7 财报",
+                f"EPS 分歧 {safe_float(item.get('eps_dispersion'), 0):.1f}%，Revenue 分歧 {safe_float(item.get('revenue_dispersion'), 0):.1f}%。",
+                6 if weight >= 10 else 2,
+            )
+
+    option_expiry = parse_date(options.get("expiration"))
+    add_event(
+        "options_expiry",
+        f"{options.get('proxy_symbol', 'QQQ')} 近月期权到期",
+        "期权",
+        options.get("regime_color", "amber"),
+        option_expiry,
+        options.get("days_to_expiration"),
+        80 if safe_float(options.get("put_call_oi_ratio"), 0) >= 2.5 else 58,
+        70 if options.get("regime_color") == "red" else 55,
+        f"隐含区间 {safe_float(options.get('implied_range_low'), 0):.2f} - {safe_float(options.get('implied_range_high'), 0):.2f}。",
+        "到期前后关注现货是否跌破隐含下沿或冲过隐含上沿，超出区间时收缩短线预算。",
+        "QQQ 期权定价",
+        options.get("summary", "最近到期期权用于衡量短线波动定价。"),
+        10,
+    )
+
+    skew_expiry = parse_date(option_skew.get("expiration"))
+    add_event(
+        "skew_window",
+        "尾部保护偏斜窗口",
+        "期权偏斜",
+        option_skew.get("regime_color", "amber"),
+        skew_expiry,
+        option_skew.get("days_to_expiration"),
+        safe_float(option_skew.get("skew_score"), 50),
+        min(90, 55 + safe_float(option_skew.get("risk_reversal"), 0) * 3),
+        f"Risk reversal {safe_float(option_skew.get('risk_reversal'), 0):+.1f} vol pts。",
+        "偏斜拥挤时优先 put spread/collar，不在保护需求最高处一次性买满单腿 put。",
+        "QQQ 期权偏斜",
+        option_skew.get("summary", "下行保护需求用于判断保护成本和拥挤度。"),
+        8,
+    )
+
+    gamma_expiry = parse_date(gamma.get("expiration"))
+    put_wall = gamma.get("put_wall") or gamma.get("max_abs_wall") or {}
+    gamma_wall = gamma.get("gamma_wall") or gamma.get("nearest_wall") or {}
+    add_event(
+        "gamma_expiry",
+        "Gamma 到期与墙位重定价",
+        "Gamma",
+        gamma.get("regime_color", "amber"),
+        gamma_expiry,
+        gamma.get("days_to_expiration"),
+        safe_float(gamma.get("gamma_score"), 50),
+        72 if gamma.get("regime_color") == "red" else 56,
+        f"Put wall {safe_float(put_wall.get('strike'), 0):.0f}，Gamma wall {safe_float(gamma_wall.get('strike'), 0):.0f}。",
+        "接近 put wall 时降低追价；站上 gamma wall 后再考虑把保护降回基础覆盖。",
+        "QQQ Gamma",
+        gamma.get("summary", "Gamma 结构用于识别短线波动放大或钉住风险。"),
+        9,
+    )
+
+    nearest_down = trigger.get("nearest_down") or {}
+    nearest_up = trigger.get("nearest_up") or {}
+    add_event(
+        "invalidation_trigger",
+        "NDX 失效线",
+        "触发线",
+        nearest_down.get("color", "amber"),
+        None,
+        0,
+        75 if abs(safe_float(nearest_down.get("distance_pct"), 5)) <= 2 else 48,
+        82,
+        nearest_down.get("trigger", f"NDX 收盘跌破 {safe_float(nearest_down.get('value'), 0):,.0f}。"),
+        nearest_down.get("action", "触发后降低暴露并提高保护覆盖。"),
+        "触发线监控",
+        f"距离 {nearest_down.get('distance_label', '--')}，状态 {nearest_down.get('state', '--')}。",
+        11,
+        "conditional",
+    )
+
+    add_event(
+        "repair_trigger",
+        "NDX 修复线",
+        "触发线",
+        nearest_up.get("color", "blue"),
+        None,
+        0,
+        62 if abs(safe_float(nearest_up.get("distance_pct"), 5)) <= 2 else 42,
+        60,
+        nearest_up.get("trigger", f"NDX 收盘站上 {safe_float(nearest_up.get('value'), 0):,.0f}。"),
+        nearest_up.get("action", "触发后允许从防守区间恢复到核心账户目标区间。"),
+        "触发线监控",
+        f"距离 {nearest_up.get('distance_label', '--')}，状态 {nearest_up.get('state', '--')}。",
+        4,
+        "conditional",
+    )
+
+    add_event(
+        "funding_watch",
+        "融资条件阈值",
+        "宏观",
+        funding.get("regime_color", "blue"),
+        None,
+        0,
+        safe_float(funding.get("funding_score"), 50),
+        62,
+        "HYG/LQD 继续走弱并伴随 VIX 上行。",
+        "若信用和波动同时恶化，把 NDX 上涨视为脆弱反弹，降低新增风险预算。",
+        "融资条件",
+        funding.get("summary", "融资条件用于监控信用、久期、美元和 VIX 对成长股估值承载的影响。"),
+        2,
+        "conditional",
+    )
+
+    add_event(
+        "rate_watch",
+        "利率敏感度阈值",
+        "宏观",
+        rate.get("rate_sensitivity_color", "blue"),
+        None,
+        0,
+        safe_float(rate.get("rate_shock_pressure"), 35),
+        58,
+        "10Y 利率再上行 50bps 或美元压力继续升温。",
+        "重新评估估值倍数压缩和 NDX 久期风险，必要时降低高估值 beta。",
+        "估值-利率",
+        rate.get("summary", "估值-利率敏感度用于判断折现率扰动承受力。"),
+        1,
+        "conditional",
+    )
+
+    top_risk = register.get("top_risk") or {}
+    add_event(
+        "risk_register_review",
+        "风险登记簿复核",
+        "风控",
+        register.get("headline_color", "amber"),
+        None,
+        0,
+        safe_float(register.get("register_score"), 50),
+        safe_float(top_risk.get("impact"), 65),
+        top_risk.get("trigger", register.get("headline", "风险登记需要复核。")),
+        top_risk.get("mitigation", "优先处理最高风险项，再讨论提高风险预算。"),
+        "风险登记簿",
+        top_risk.get("evidence", register.get("methodology", "风险登记簿用于追踪关键风险项。")),
+        7,
+        "conditional",
+    )
+
+    events = sorted(events, key=lambda item: (-item["priority"], item["days_to_event"] if item["days_to_event"] is not None else 999))[:14]
+    dated_count = sum(1 for item in events if item["event_type"] == "dated")
+    conditional_count = len(events) - dated_count
+    critical_count = sum(1 for item in events if item["color"] == "red" or item["priority"] >= 72)
+    near_count = sum(1 for item in events if item["days_to_event"] is not None and item["days_to_event"] <= 7)
+    calendar_score = round(sum(item["priority"] for item in events) / max(1, len(events)), 1)
+
+    if critical_count >= 3 or calendar_score >= 70:
+        headline = "近期催化密集"
+        headline_color = "red"
+    elif near_count >= 2 or calendar_score >= 58:
+        headline = "催化窗口需要跟踪"
+        headline_color = "amber"
+    else:
+        headline = "催化节奏可控"
+        headline_color = "blue"
+
+    buckets = [
+        {"key": "now", "label": "0-7D", "color": "red" if near_count else "amber", "count": near_count},
+        {"key": "month", "label": "8-30D", "color": "amber", "count": sum(1 for item in events if item["days_to_event"] is not None and 8 <= item["days_to_event"] <= 30)},
+        {"key": "quarter", "label": "31-60D", "color": "blue", "count": sum(1 for item in events if item["days_to_event"] is not None and 31 <= item["days_to_event"] <= 60)},
+        {"key": "conditional", "label": "条件型", "color": "blue", "count": conditional_count},
+    ]
+
+    agenda = [
+        f"本周优先：期权/Gamma 到期与隐含区间 {safe_float(options.get('implied_range_low'), 0):.2f}-{safe_float(options.get('implied_range_high'), 0):.2f}。",
+        f"触发线：下行 {nearest_down.get('distance_label', '--')}，上行 {nearest_up.get('distance_label', '--')}。",
+        f"财报窗口：最近 {earnings.get('nearest_symbol', '--')}，{earnings.get('nearest_days', '--')} 天后，45 日权重 {safe_float(earnings.get('event_weight_45d'), 0):.1f}%。",
+        f"投委会论点：{thesis.get('primary_thesis', '--')}，Playbook {playbook.get('posture', '--')}。",
+    ]
+
+    return jsonify({
+        "as_of": datetime.utcnow().isoformat(),
+        "headline": headline,
+        "headline_color": headline_color,
+        "calendar_score": calendar_score,
+        "dated_count": dated_count,
+        "conditional_count": conditional_count,
+        "critical_count": critical_count,
+        "near_count": near_count,
+        "events": events,
+        "buckets": buckets,
+        "agenda": agenda,
+        "methodology": "催化日历把 MAG7 财报、QQQ 期权到期、偏斜窗口、Gamma 墙位、NDX 触发线、融资条件、利率敏感度、风险登记簿和投资论点压成日期型与条件型事件队列。该模块用于研究排程和交易台复盘，不构成个性化投资建议或买卖指令。",
+    })
+
+
 def extract_risk_temperature(summary):
     if not summary:
         return None

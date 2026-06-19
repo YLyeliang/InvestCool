@@ -14,6 +14,7 @@ InvestCool 是一个面向纳斯达克 100 的金融研究与风险分析平台�
 - NDX 风险模块历史表，将变化后的模块快照追加保存 14 天；`/api/risk/module-trends` 首次读取会建立当前基线，之后对比上一条不同快照，识别哪些模块风险升温、缓和或稳定
 - NDX 关键看点面板，通过 `/api/risk/key-takeaways` 把风险预警、支撑项、衍生品压力、财报窗口和触发线压成晨会式阅读优先级
 - NDX 投资论点监控，通过 `/api/risk/thesis-monitor` 把罗盘、贡献拆解、风险回报、估值质量、财报、流动性、期权压力、触发线、Playbook 和风险登记簿压成 Bull/Base/Bear 三套可验证论点
+- NDX 催化日历，通过 `/api/risk/catalyst-calendar` 把 MAG7 财报、QQQ 期权到期、Gamma 墙位、触发线、融资条件、利率阈值和风险登记簿压成日期型与条件型事件队列
 - NDX 变化归因面板，通过 `/api/risk/change-attribution` 对比最近两条风险简报的状态、点位和风险温度，并结合当前预警、贡献拆解、罗盘和 Playbook 解释判断为何变化
 - NDX 风险温度轨迹，通过 `/api/risk/score-history` 把最近多条风险简报解析成温度时间序列、状态分布和重复样本比例，帮助读者判断风险判断是否真正连续变化
 - NDX 触发线监控，通过 `/api/risk/trigger-monitor` 把 Playbook 与修复路径中的压力下沿、失效线、修复线、确认线转成上下触发距离和触发后动作

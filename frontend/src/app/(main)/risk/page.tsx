@@ -6,6 +6,7 @@ import { NDXRiskSectionNavigator } from "@/components/NDXRiskSectionNavigator";
 import { NDXSignalDashboardPanel } from "@/components/NDXSignalDashboardPanel";
 import { NDXKeyTakeawaysPanel } from "@/components/NDXKeyTakeawaysPanel";
 import { NDXThesisMonitorPanel } from "@/components/NDXThesisMonitorPanel";
+import { NDXCatalystCalendarPanel } from "@/components/NDXCatalystCalendarPanel";
 import { NDXChangeAttributionPanel } from "@/components/NDXChangeAttributionPanel";
 import { NDXRiskTemperatureTimelinePanel } from "@/components/NDXRiskTemperatureTimelinePanel";
 import { NDXTriggerMonitorPanel } from "@/components/NDXTriggerMonitorPanel";
@@ -172,6 +173,13 @@ export default function RiskPage() {
           <Icon name="lucide:book-open-check" className="text-[var(--accent-color)]" /> NDX 投资论点监控
         </h3>
         <NDXThesisMonitorPanel />
+      </section>
+
+      <section id="catalyst-calendar-section" className="catalyst-calendar-section">
+        <h3 className="section-title flex items-center gap-2 text-xl font-bold mb-6">
+          <Icon name="lucide:calendar-clock" className="text-[var(--accent-color)]" /> NDX 催化日历
+        </h3>
+        <NDXCatalystCalendarPanel />
       </section>
 
       <section id="change-attribution-section" className="change-attribution-section">
