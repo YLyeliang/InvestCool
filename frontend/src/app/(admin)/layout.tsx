@@ -6,7 +6,7 @@ export default function AdminRootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <div className="admin-root-wrapper bg-white dark:bg-[#09090b] min-h-screen">
+    <div className="admin-root-wrapper bg-[var(--bg-color)] text-[var(--text-primary)] min-h-screen">
       {children}
     </div>
   );
