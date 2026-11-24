@@ -30,12 +30,18 @@ const randomNormal = (random: () => number) => {
 };
 
 export default function ToolsPage() {
+  const [portfolio, setPortfolio] = useState(100000);
+  const [allocation, setAllocation] = useState(20);
+  const [holdings, setHoldings] = useState(0);
+  const [tradeValue, setTradeValue] = useState(10000);
+  const [feeRate, setFeeRate] = useState(0.1);
+  const [minimumFee, setMinimumFee] = useState(5);
   const [activeTab, setActiveTab] = useState("financial-freedom");
   const tabs = [
     { id: "financial-freedom", label: "财富自由", icon: "palmtree" },
-    { id: "invest-backtest", label: "定投回测", icon: "trending-up" },
+    { id: "invest-backtest", label: "定投模拟", icon: "trending-up" },
     { id: "position-size", label: "仓位控制", icon: "pie-chart" },
-    { id: "tax-calc", label: "税务估算", icon: "calculator" },
+    { id: "tax-calc", label: "费用试算", icon: "calculator" },
   ];
 
   // --- TOOL 1: Financial Freedom ---
@@ -185,7 +191,7 @@ export default function ToolsPage() {
     <div className="tools-page space-y-10 pb-20">
       <header className="tools-header">
         <h2 className="text-4xl font-black text-[var(--text-primary)] mb-2">策略中心.</h2>
-        <p className="text-[var(--text-secondary)] font-semibold">数据驱动决策，模型预演未来。</p>
+        <p className="text-[var(--text-secondary)] font-semibold">调整假设，比较资金规划。模拟结果不代表实际收益。</p>
       </header>
 
       <nav className="tool-tabs flex gap-2 overflow-x-auto pb-2 no-scrollbar">
@@ -324,16 +330,16 @@ export default function ToolsPage() {
                   <input
                     type="number"
                     value={investAmount}
-                    onChange={(e) => setInvestAmount(Number(e.target.value))}
+                    onChange={(e) => setInvestAmount(Math.max(0, Number(e.target.value)))}
                     className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none"
                   />
                 </div>
                 <div className="input-group">
-                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">回测年限 (年)</label>
+                  <label className="block text-xs font-bold text-[var(--text-secondary)] uppercase mb-2">模拟年限 (年)</label>
                   <input
                     type="number"
                     value={backtestYears}
-                    onChange={(e) => setBacktestYears(Number(e.target.value))}
+                    onChange={(e) => setBacktestYears(Math.min(100, Math.max(1, Math.floor(Number(e.target.value)))))}
                     className="w-full p-3 bg-[var(--section-bg)] border border-[var(--border-color)] rounded-lg font-black outline-none"
                   />
                 </div>
@@ -369,12 +375,28 @@ export default function ToolsPage() {
           </div>
         )}
 
-        {["position-size", "tax-calc"].includes(activeTab) && (
-          <div className="py-20 text-center border-2 border-dashed border-[var(--border-color)] rounded-lg animate-in fade-in duration-500">
-            <Icon name="construction" size={48} className="mx-auto mb-4 opacity-20" />
-            <p className="text-[var(--text-tertiary)] italic">该工具正在开发中，敬请期待...</p>
+        {activeTab === "position-size" && <section className="card p-8 space-y-5">
+          <h3 className="text-xl font-bold">目标仓位计算</h3>
+          <p className="text-sm text-[var(--text-secondary)]">按自定目标占比计算调整金额，所有金额使用同一币种。</p>
+          <div className="grid md:grid-cols-3 gap-4">
+            <label>组合总资产<input aria-label="组合总资产" type="number" min="0" value={portfolio} onChange={e => setPortfolio(Math.max(0, Number(e.target.value)))} /></label>
+            <label>目标占比 (%)<input aria-label="目标占比" type="number" min="0" max="100" value={allocation} onChange={e => setAllocation(Math.min(100, Math.max(0, Number(e.target.value))))} /></label>
+            <label>当前持仓市值<input aria-label="当前持仓市值" type="number" min="0" value={holdings} onChange={e => setHoldings(Math.max(0, Number(e.target.value)))} /></label>
           </div>
-        )}
+          <p className="text-xl font-bold">目标市值：{(portfolio * allocation / 100).toLocaleString()}</p>
+          <p>调整金额：{(portfolio * allocation / 100 - holdings).toLocaleString()}（正数增加，负数减少）</p>
+        </section>}
+        {activeTab === "tax-calc" && <section className="card p-8 space-y-5">
+          <h3 className="text-xl font-bold">单笔交易费用</h3>
+          <p className="text-sm text-[var(--text-secondary)]">输入券商实际费率与最低收费；不含汇兑、税项和其他费用。</p>
+          <div className="grid md:grid-cols-3 gap-4">
+            <label>成交金额<input aria-label="成交金额" type="number" min="0" value={tradeValue} onChange={e => setTradeValue(Math.max(0, Number(e.target.value)))} /></label>
+            <label>费率 (%)<input aria-label="费率" type="number" min="0" step="0.01" value={feeRate} onChange={e => setFeeRate(Math.max(0, Number(e.target.value)))} /></label>
+            <label>最低收费<input aria-label="最低收费" type="number" min="0" value={minimumFee} onChange={e => setMinimumFee(Math.max(0, Number(e.target.value)))} /></label>
+          </div>
+          <p className="text-xl font-bold">单笔费用：{(tradeValue > 0 ? Math.max(minimumFee, tradeValue * feeRate / 100) : 0).toFixed(2)}</p>
+        </section>}
+
       </div>
     </div>
   );

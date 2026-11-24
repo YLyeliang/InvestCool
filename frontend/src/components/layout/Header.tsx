@@ -30,6 +30,7 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
       <div className="h-full px-4 md:px-6 flex items-center justify-between max-w-[1680px] mx-auto">
         <div className="flex items-center gap-4">
           <button 
+            aria-label="打开导航菜单"
             onClick={onMenuToggle}
             className="p-2 hover:bg-[var(--hover-bg)] rounded-lg md:hidden transition-colors"
           >
@@ -54,7 +55,7 @@ export const Header = ({ onMenuToggle }: HeaderProps) => {
         <div className="flex items-center gap-3">
           <div className="hidden md:flex items-center gap-1.5 mr-3 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] px-3 py-1.5">
             <div className="size-2 rounded-full bg-[var(--success-color)]"></div>
-            <span className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase">Market Live</span>
+            <span className="text-[11px] font-semibold text-[var(--text-secondary)] uppercase">市场研究</span>
           </div>
           
           <ThemeToggle />

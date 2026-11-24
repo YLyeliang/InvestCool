@@ -131,6 +131,7 @@ export const GlobalMarketBar = () => {
           ))
         )}
       </div>
+      <p className="text-xs text-[var(--text-tertiary)] mt-3">{nasdaq ? `指数更新时间：${nasdaq.last_update} · 行情可能延迟` : "行情暂未更新，正在等待数据源。"}</p>
       <style jsx>{`
         .highlight {
           background: var(--section-bg);

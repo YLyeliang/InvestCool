@@ -6,6 +6,8 @@ import { cn } from "@/lib/utils";
 import { motion } from "framer-motion";
 
 export const SentimentDuel = () => {
+  const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
   const [pending, setPending] = useState(true);
   const [hasVoted, setHasVoted] = useState(false);
   const [bullPct, setBullPct] = useState(50);
@@ -15,7 +17,9 @@ export const SentimentDuel = () => {
   const fetchStatus = useCallback(async () => {
     try {
       const res = await fetch("/api/poll/status");
+      if (!res.ok) throw new Error("加载失败");
       if (res.status === 200) {
+        setError("");
         const data = await res.json();
         setBullPct(data.bull_pct);
         setBearPct(data.bear_pct);
@@ -28,12 +32,16 @@ export const SentimentDuel = () => {
       }
     } catch (e) {
       console.error("Poll fetch error:", e);
+      setError("投票暂时无法加载，请稍后重试。");
     } finally {
       setPending(false);
     }
   }, []);
 
   const vote = async (type: "bull" | "bear") => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError("");
     try {
       const res = await fetch("/api/poll/vote", {
         method: "POST",
@@ -47,9 +55,14 @@ export const SentimentDuel = () => {
         setHasVoted(true);
       } else if (res.status === 403) {
         setHasVoted(true);
+      } else {
+        throw new Error("投票失败");
       }
     } catch (e) {
       console.error("Vote error:", e);
+      setError("投票未提交成功，请重试。");
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -64,9 +77,11 @@ export const SentimentDuel = () => {
         <span className="text-xs text-[var(--text-tertiary)] font-semibold">过去 24 小时民意</span>
       </div>
 
+      {error && <div role="alert" className="text-sm text-[var(--danger-color)] mb-4">{error} <button onClick={fetchStatus} className="underline">重新加载</button></div>}
       {!hasVoted && !pending ? (
         <div className="grid grid-cols-2 gap-4">
           <button 
+            disabled={submitting || !!error}
             onClick={() => vote("bull")}
             className="flex flex-col items-center gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] hover:bg-emerald-500/10 hover:border-emerald-500 transition-all group"
           >
@@ -74,6 +89,7 @@ export const SentimentDuel = () => {
             <span className="text-[0.85rem] font-bold">我看涨</span>
           </button>
           <button 
+            disabled={submitting || !!error}
             onClick={() => vote("bear")}
             className="flex flex-col items-center gap-2 p-4 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] hover:bg-rose-500/10 hover:border-rose-500 transition-all group"
           >

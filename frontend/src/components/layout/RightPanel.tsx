@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import Link from "next/link";
 import { MarketQuoteCard } from "../MarketQuoteCard";
 import { Icon } from "../ui/Icon";
 
@@ -19,26 +20,9 @@ export const RightPanel = () => {
         <MarketQuoteCard />
       </div>
 
-      {/* 实时快讯挂件 */}
       <div className="card p-5 space-y-4">
-        <div className="flex items-center justify-between border-b border-[var(--border-color)] pb-3">
-          <span className="text-xs font-semibold text-[var(--text-primary)] uppercase">Live News</span>
-          <div className="size-1.5 rounded-full bg-[var(--danger-color)]"></div>
-        </div>
-        <div className="space-y-4">
-          {[
-            "NDX 指数突破关键阻力位，多头情绪升温。",
-            "英伟达算力需求激增，AI 板块再度领涨。",
-            "美联储会议纪要发布，市场波动率减小。"
-          ].map((news, i) => (
-            <div key={i} className="flex gap-3 items-start group cursor-pointer">
-              <div className="mt-2 size-1.5 rounded-full bg-[var(--border-color)] group-hover:bg-[var(--accent-color)] transition-colors"></div>
-              <p className="text-xs leading-6 text-[var(--text-secondary)] group-hover:text-[var(--text-primary)] font-medium">
-                {news}
-              </p>
-            </div>
-          ))}
-        </div>
+        <h3 className="text-sm font-bold">研究快捷入口</h3>
+        {[['/daily', '每日信息', '浏览已发布的市场日志'], ['/tutorials', '学习笔记', '了解研究方法与网站架构'], ['/tools', '投资工具', '试算资金规划与定投情景']].map(([href, title, detail]) => <Link key={href} href={href} className="block rounded-lg p-3 hover:bg-[var(--hover-bg)]"><div className="text-sm font-semibold">{title} ↗</div><p className="text-xs text-[var(--text-tertiary)] mt-1">{detail}</p></Link>)}
       </div>
 
       {/* 简洁的小挂件 */}

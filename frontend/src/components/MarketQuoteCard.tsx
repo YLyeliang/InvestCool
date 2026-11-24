@@ -104,7 +104,7 @@ export const MarketQuoteCard = () => {
 
       <div className="flex justify-end">
         <span className="text-xs font-bold text-[var(--text-tertiary)] uppercase">
-          Risk Note
+          Research Note
         </span>
       </div>
     </div>

@@ -69,7 +69,7 @@ export const getCollection = unstable_cache(
         return metadata;
       }));
 
-      return items.sort((a, b) => {
+      return items.filter(item => item.is_deleted !== true && item.is_deleted !== "true" && !item.slug.includes("[DELETED]")).sort((a, b) => {
         const dateA = a.date || a.created_at || "0";
         const dateB = b.date || b.created_at || "0";
         return new Date(dateB).getTime() - new Date(dateA).getTime();
@@ -96,6 +96,7 @@ export async function getDocBySlug(collection: string, slug: string) {
         await fs.access(filePath);
         const fileContent = await fs.readFile(filePath, 'utf-8');
         const parsed = matter(fileContent);
+        if (parsed.data.is_deleted === true || parsed.data.is_deleted === "true" || decodedSlug.includes("[DELETED]")) return null;
         const rendered = await marked.parse(parsed.content);
         const htmlContent = sanitizeMarkdownHtml(rendered);
 

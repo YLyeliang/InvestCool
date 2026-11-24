@@ -13,7 +13,7 @@ export const MobileTabBar = () => {
     { label: "首页", path: "/", icon: "lucide:home" },
     { label: "分析", path: "/analysis", icon: "lucide:trending-up" },
     { label: "工具", path: "/tools", icon: "lucide:wrench" },
-    { label: "管理", path: "/admin", icon: "lucide:user" },
+    { label: "日志", path: "/daily", icon: "lucide:calendar-days" },
   ];
 
   return (

@@ -40,7 +40,7 @@ export const TickerWatchlist = () => {
         <h3 className="text-sm font-black text-[var(--text-primary)] uppercase">
           核心科技观察 (MAG7)
         </h3>
-        <span className="text-xs text-[var(--text-tertiary)] font-semibold uppercase">实时更新</span>
+        <span className="text-xs text-[var(--text-tertiary)] font-semibold uppercase">行情快照</span>
       </div>
 
       <div className="flex flex-col gap-3">
@@ -56,7 +56,7 @@ export const TickerWatchlist = () => {
           ))
         ) : (
           tickers.map((ticker) => (
-            <div key={ticker.symbol} className="flex justify-between items-center group cursor-pointer hover:bg-[var(--hover-bg)] -mx-2 px-2 py-2 rounded-lg transition-colors">
+            <div key={ticker.symbol} className="flex justify-between items-center group hover:bg-[var(--hover-bg)] -mx-2 px-2 py-2 rounded-lg transition-colors">
               <div className="flex flex-col">
                 <span className="text-base font-black text-[var(--text-primary)] group-hover:text-[var(--accent-strong)] transition-colors">
                   {ticker.symbol}
