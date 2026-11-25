@@ -147,6 +147,7 @@ cover: '__COVER_URL__'
 现在请开始搜索并直接输出最终的 Markdown 文档。
 EOF
 )
+shopt -u patsub_replacement 2>/dev/null || true
 PROMPT="${PROMPT_TEMPLATE//__TARGET_DATE__/$TARGET_DATE}"
 PROMPT="${PROMPT//__COVER_URL__/$COVER_URL}"
 
