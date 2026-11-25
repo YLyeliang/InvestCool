@@ -187,6 +187,12 @@ deploy_backend() {
       "$REMOTE_HOST:$REMOTE_DIR/scripts/"
   fi
 
+  if [[ -f "$ROOT_DIR/scripts/daily-nasdaq-brief.sh" ]]; then
+    rsync "${RSYNC_COMMON[@]}" \
+      "$ROOT_DIR/scripts/daily-nasdaq-brief.sh" \
+      "$REMOTE_HOST:$REMOTE_DIR/scripts/"
+  fi
+
   if [[ "$DRY_RUN" == true ]]; then
     echo "[deploy] (dry-run) Would restart PM2 apps: backend-real, investcool-worker"
     return
