@@ -30,7 +30,7 @@ export default async function DailyPage() {
             <div key={log.slug} className="group card !p-0 flex flex-col overflow-hidden transition-all hover:-translate-y-1">
               <div className="log-cover relative h-40 overflow-hidden">
                 <img 
-                  src={getReliableCover(log.cover)} 
+                  src={getReliableCover(log.cover, { category: log.category || "每日信息", title: log.title, slug: log.slug })} 
                   alt={log.title} 
                   className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
                 />

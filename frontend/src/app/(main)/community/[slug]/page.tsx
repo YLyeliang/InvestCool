@@ -55,7 +55,7 @@ export default async function CommunityDetailPage({ params }: CommunityPageProps
 
           {page.cover && (
             <div className="mb-10 rounded-lg overflow-hidden shadow-sm border border-[var(--border-color)]">
-              <img src={getReliableCover(page.cover)} alt={page.title} className="w-full h-[240px] object-cover" />
+              <img src={getReliableCover(page.cover, { category: page.category, title: page.title, slug: page.slug })} alt={page.title} className="w-full h-[240px] object-cover" />
             </div>
           )}
 

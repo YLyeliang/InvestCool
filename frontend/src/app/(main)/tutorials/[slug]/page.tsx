@@ -61,7 +61,7 @@ export default async function TutorialDetailPage({ params }: TutorialPageProps) 
 
         {tutorial.cover && (
           <div className="mb-12 rounded-lg overflow-hidden border border-[var(--border-color)] shadow-sm">
-            <img src={getReliableCover(tutorial.cover)} alt={tutorial.title} className="w-full h-auto" />
+            <img src={getReliableCover(tutorial.cover, { category: tutorial.category || "技术教程", title: tutorial.title, slug: tutorial.slug, contentType: "tutorial" })} alt={tutorial.title} className="w-full h-auto" />
           </div>
         )}
 

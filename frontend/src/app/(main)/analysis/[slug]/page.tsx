@@ -63,7 +63,7 @@ export default async function ArticlePage({ params }: ArticlePageProps) {
         {article.cover && (
           <div className="mb-14 rounded-lg overflow-hidden border border-[var(--border-color)] shadow-sm relative aspect-[21/9]">
             <Image 
-              src={getReliableCover(article.cover)} 
+              src={getReliableCover(article.cover, { category: article.category, title: article.title, slug: article.slug })} 
               alt={article.title} 
               fill 
               priority

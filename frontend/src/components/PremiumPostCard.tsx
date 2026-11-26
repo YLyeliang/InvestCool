@@ -22,7 +22,11 @@ interface PostCardProps {
 
 export const PremiumPostCard = ({ article }: PostCardProps) => {
   const dateStr = article.date || article.created_at || new Date().toISOString();
-  const coverUrl = getReliableCover(article.cover);
+  const coverUrl = getReliableCover(article.cover, {
+    category: article.category,
+    title: article.title,
+    slug: article.path,
+  });
   
   return (
     <Link href={article.path} className="group no-underline block h-full">

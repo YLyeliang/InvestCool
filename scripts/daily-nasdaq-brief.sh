@@ -84,12 +84,12 @@ if command -v flock >/dev/null 2>&1; then
   fi
 fi
 
-# Curated high-reliability Unsplash financial cover pool (rotates by day of year)
+# Local editorial preset cover pool (served directly from /covers/, rotates by day of year)
 COVERS=(
-  "https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?q=80&w=1000"
-  "https://images.unsplash.com/photo-1642790106117-e829e14a795f?q=80&w=1000"
-  "https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?q=80&w=1000"
-  "https://images.unsplash.com/photo-1518186285589-2f7649de83e0?q=80&w=1000"
+  "/covers/daily-market.jpg"
+  "/covers/daily-macro.jpg"
+  "/covers/analysis-ai.jpg"
+  "/covers/analysis-macro.jpg"
 )
 DAY_NUM=$(date +%j | sed 's/^0*//')
 COVER_URL="${COVERS[$(( ${DAY_NUM:-1} % ${#COVERS[@]} ))]}"

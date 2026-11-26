@@ -5,6 +5,7 @@ import { Icon } from "@/components/ui/Icon";
 import { ThemeToggle } from "@/components/ui/ThemeToggle";
 import { marked } from "marked";
 import { sanitizeMarkdownHtml } from "@/lib/sanitize";
+import { PRESET_COVERS, getReliableCover } from "@/lib/images";
 import { cn } from "@/lib/utils";
 import { MediaLibrary } from "./MediaLibrary";
 import {
@@ -75,6 +76,7 @@ export const AdminEditor = ({
   const [recoverableDraft, setRecoverableDraft] = useState<StudioArticlePayload | null>(null);
   const [uploadingImage, setUploadingImage] = useState(false);
   const [mediaPickerTarget, setMediaPickerTarget] = useState<"content" | "cover" | null>(null);
+  const [showPresetCovers, setShowPresetCovers] = useState(false);
 
   const coverInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -748,14 +750,23 @@ export const AdminEditor = ({
 
                       {/* Cover Image */}
                       <div className="space-y-1.5">
-                        <label className="text-[11px] font-semibold text-[var(--text-tertiary)]">
-                          封面图
-                        </label>
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold text-[var(--text-tertiary)]">
+                            封面图（留空则按分类自动匹配预设封面）
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => setShowPresetCovers((v) => !v)}
+                            className="text-[11px] font-semibold text-[var(--accent-color)] hover:underline"
+                          >
+                            {showPresetCovers ? "收起预设封面" : "选择预设封面 (8)"}
+                          </button>
+                        </div>
                         <div className="flex items-center gap-2">
                           <input
                             value={form.cover}
                             onChange={(e) => updateForm((prev) => ({ ...prev, cover: e.target.value }))}
-                            placeholder="粘贴图片 URL 或右侧上传/选取..."
+                            placeholder="留空自动匹配，或粘贴路径 / 上传 / 选取预设..."
                             className="flex-1 px-2.5 py-1.5 rounded-lg text-xs font-mono bg-[var(--card-bg)] border border-[var(--border-color)] text-[var(--text-primary)] outline-none"
                           />
                           <button
@@ -779,7 +790,7 @@ export const AdminEditor = ({
                               type="button"
                               onClick={() => updateForm((prev) => ({ ...prev, cover: "" }))}
                               className="p-1.5 rounded-lg text-[var(--danger-color)] hover:bg-red-500/10"
-                              title="清除封面"
+                              title="清除封面（恢复按分类自动匹配）"
                             >
                               <Icon name="x" size={14} />
                             </button>
@@ -792,11 +803,59 @@ export const AdminEditor = ({
                             onChange={handleCoverUpload}
                           />
                         </div>
-                        {form.cover && (
-                          <div className="mt-2 h-24 rounded-lg overflow-hidden border border-[var(--border-color)] bg-[var(--card-bg)]">
-                            <img src={form.cover} alt="封面预览" className="w-full h-full object-cover" />
+
+                        {showPresetCovers && (
+                          <div className="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-2 p-2.5 rounded-xl bg-[var(--card-bg)] border border-[var(--border-color)]">
+                            {PRESET_COVERS.map((preset) => {
+                              const selected = form.cover === preset.path;
+                              return (
+                                <button
+                                  key={preset.id}
+                                  type="button"
+                                  onClick={() => {
+                                    updateForm((prev) => ({ ...prev, cover: preset.path }));
+                                    onNotify("success", `已应用预设封面：${preset.label}`);
+                                  }}
+                                  title={preset.description}
+                                  className={cn(
+                                    "group relative rounded-lg overflow-hidden border text-left transition-all",
+                                    selected
+                                      ? "border-[var(--accent-color)] ring-2 ring-[var(--accent-color)]/30"
+                                      : "border-[var(--border-color)] hover:border-[var(--border-strong)]"
+                                  )}
+                                >
+                                  <div className="aspect-[16/9] w-full overflow-hidden bg-[var(--section-bg)]">
+                                    <img
+                                      src={preset.path}
+                                      alt={preset.label}
+                                      className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                                    />
+                                  </div>
+                                  <div className="px-1.5 py-1 text-[10px] font-semibold text-[var(--text-secondary)] truncate bg-[var(--card-bg)]">
+                                    {preset.label}
+                                  </div>
+                                </button>
+                              );
+                            })}
                           </div>
                         )}
+
+                        <div className="mt-2 h-24 rounded-lg overflow-hidden border border-[var(--border-color)] bg-[var(--card-bg)] relative">
+                          <img
+                            src={getReliableCover(form.cover, {
+                              category: form.category,
+                              title: form.title,
+                              contentType: form.content_type,
+                            })}
+                            alt="封面预览"
+                            className="w-full h-full object-cover"
+                          />
+                          {!form.cover && (
+                            <span className="absolute bottom-1.5 right-1.5 px-2 py-0.5 rounded bg-black/65 text-white text-[10px] font-semibold">
+                              自动匹配：{form.category}
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -871,11 +930,17 @@ export const AdminEditor = ({
                 </span>
               </div>
 
-              {form.cover && (
-                <div className="rounded-xl overflow-hidden border border-[var(--border-color)] max-h-72">
-                  <img src={form.cover} alt={form.title} className="w-full h-full object-cover" />
-                </div>
-              )}
+              <div className="rounded-xl overflow-hidden border border-[var(--border-color)] max-h-72">
+                <img
+                  src={getReliableCover(form.cover, {
+                    category: form.category,
+                    title: form.title,
+                    contentType: form.content_type,
+                  })}
+                  alt={form.title || "封面预览"}
+                  className="w-full h-full object-cover"
+                />
+              </div>
 
               <div className="space-y-3">
                 <h1 className="text-2xl sm:text-3xl font-bold text-[var(--text-primary)] leading-tight">

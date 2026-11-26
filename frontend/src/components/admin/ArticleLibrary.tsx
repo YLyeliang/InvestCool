@@ -2,6 +2,7 @@
 
 import React, { useState, useMemo, useRef } from "react";
 import { Icon } from "@/components/ui/Icon";
+import { getReliableCover } from "@/lib/images";
 import { cn } from "@/lib/utils";
 import {
   type StudioArticle,
@@ -529,17 +530,16 @@ export const ArticleLibrary = ({
                     </td>
                     <td className="py-3.5 px-3">
                       <div className="flex items-start gap-3">
-                        {item.cover ? (
-                          <img
-                            src={item.cover}
-                            alt=""
-                            className="size-12 rounded-lg object-cover border border-[var(--border-color)] shrink-0 bg-[var(--section-bg)]"
-                          />
-                        ) : (
-                          <div className="size-12 rounded-lg border border-[var(--border-color)] bg-[var(--section-bg)] flex items-center justify-center text-[var(--text-tertiary)] shrink-0">
-                            <Icon name="file-text" size={18} />
-                          </div>
-                        )}
+                        <img
+                          src={getReliableCover(item.cover, {
+                            category: item.category,
+                            title: item.title,
+                            slug: item.slug,
+                            contentType: item.content_type,
+                          })}
+                          alt=""
+                          className="size-12 rounded-lg object-cover border border-[var(--border-color)] shrink-0 bg-[var(--section-bg)]"
+                        />
                         <div className="min-w-0 space-y-1">
                           <div className="flex items-center gap-1.5">
                             {item.is_pinned && (
@@ -719,13 +719,16 @@ export const ArticleLibrary = ({
             >
               <div>
                 <div className="relative h-36 bg-[var(--section-bg)] border-b border-[var(--border-color)] overflow-hidden">
-                  {item.cover ? (
-                    <img src={item.cover} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-[var(--text-tertiary)]/40">
-                      <Icon name="file-text" size={32} />
-                    </div>
-                  )}
+                  <img
+                    src={getReliableCover(item.cover, {
+                      category: item.category,
+                      title: item.title,
+                      slug: item.slug,
+                      contentType: item.content_type,
+                    })}
+                    alt=""
+                    className="w-full h-full object-cover"
+                  />
                   <div className="absolute top-2.5 left-2.5 flex items-center gap-1.5">
                     <input
                       type="checkbox"
